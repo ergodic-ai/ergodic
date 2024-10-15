@@ -1,0 +1,13 @@
+pandas
+numpy
+joblib
+networkx
+pydantic
+scikit-learn
+matplotlib
+plotly
+fastparquet
+pyarrow
+tqdm
+python-dotenv
+openpyxl
