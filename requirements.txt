@@ -11,3 +11,5 @@ pyarrow
 tqdm
 python-dotenv
 openpyxl
+requests
+pytest==7.3.1

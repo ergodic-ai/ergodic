@@ -14,21 +14,15 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = [
-    "pandas",
-    "numpy",
-    "joblib",
-    "networkx",
-    "pydantic",
-    "scikit-learn",
-    "matplotlib",
-    "plotly",
-    "fastparquet",
-    "pyarrow",
-    "tqdm",
-    "python-dotenv",
-    "openpyxl",
-]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [project.urls]
 Homepage = "https://github.com/ergodic-ai/magpy"
+
+[tool.pytest.ini_options]
+pythonpath = [
+  ".", "src"
+]
