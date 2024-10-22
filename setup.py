@@ -5,7 +5,7 @@ with open("requirements.txt") as f:
 
 setup(
     name="ergodic",
-    version="0.1.1",
+    version="0.1.2",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=required,
