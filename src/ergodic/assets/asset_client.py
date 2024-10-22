@@ -2,6 +2,7 @@ from ergodic.assets.utils import (
     list_assets,
     get_asset,
     get_asset_data,
+    upload_csv,
     upload_pdf,
     upload_pdfs_from_folder,
 )
@@ -25,6 +26,11 @@ class AssetClient:
         return upload_pdfs_from_folder(
             self.api_url, self.api_token, folder_path, context
         )
+
+    def upload_csv(
+        self, csv_path: str, name: Optional[str] = None, context: Optional[str] = None
+    ):
+        return upload_csv(self.api_url, self.api_token, csv_path, name, context)
 
     def get(self, asset_id: str):
         return get_asset(self.api_url, self.api_token, asset_id)

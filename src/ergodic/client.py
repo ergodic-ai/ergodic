@@ -15,7 +15,7 @@ class ErgodicClient:
         self.token = self.login(api_url, username, password)
         self.api_url = api_url
         self.username = username
-        self.token = self.login(api_url, username, password)
+        # self.token = self.login(api_url, username, password)
 
         self.assets = AssetClient(api_url, self.token)
         self.collections = CollectionsClient(api_url, self.token)

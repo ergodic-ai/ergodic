@@ -86,3 +86,26 @@ def get_asset_data(api_url: str, api_token: str, asset_id: str, n_max: int = 100
     except requests.RequestException as e:
         logger.error(f"Error getting asset {asset_id}: {str(e)}")
         raise e
+
+
+def upload_csv(
+    api_url: str,
+    api_token: str,
+    csv_path: str,
+    name: Optional[str] = None,
+    context: Optional[str] = None,
+):
+    logger.info(f"Uploading CSV: {csv_path}")
+    try:
+        headers = get_header(api_token)
+        with open(csv_path, "rb") as file:
+            files = {"file": (csv_path, file, "text/csv")}
+            data = {"name": name, "context": context}
+            response = requests.post(
+                f"{api_url}/upload_any", headers=headers, files=files, data=data
+            )
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, IOError) as e:
+        logger.error(f"Error uploading CSV {csv_path}: {str(e)}")
+        raise e
