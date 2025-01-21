@@ -1,6 +1,7 @@
 from ergodic.assets.asset_client import AssetClient
 from ergodic.collections.collections_client import CollectionsClient
 from ergodic.auth import get_health_check, login_to_api
+from ergodic.extraction.collections_client import ExtractionClient
 import logging
 import os
 
@@ -19,6 +20,7 @@ class ErgodicClient:
 
         self.assets = AssetClient(api_url, self.token)
         self.collections = CollectionsClient(api_url, self.token)
+        self.extraction = ExtractionClient(api_url, self.token)
 
     def login(self, api_url: str, username: str, password: str) -> str:
         try:
