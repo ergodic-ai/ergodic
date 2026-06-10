@@ -96,6 +96,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns adjacency and orientation frequencies with a thresholded
   `summary()` graph, the first soft output. `Dataset.take(rows)` resamples
   rows, and `discover` dispatches on each algorithm's declared ingredient.
+- Identification on equivalence classes: `identify_effect`, `adjustment_set`,
+  `minimal_adjustment_set`, and `is_valid_adjustment_set` accept a CPDAG,
+  MAG, or PAG and answer through the generalized adjustment criterion
+  (Perkovic et al., 2018), so a success holds in every graph the class
+  represents and `estimate_effect` runs straight off a discovery result.
+  Held executably to the all-members definition: exhaustive over candidate
+  sets against the enumerated members of small random classes. The graph
+  layer grew the toolkit underneath: `possible_descendants` and
+  `possible_ancestors` (possibly directed reachability), `visible_edges`
+  (Zhang's no-hidden-confounding certificate), and the member enumerators
+  `dags_of_cpdag` and `mags_of_pag` (deterministic, capped without silent
+  truncation). The front-door and instruments raise on a class and point at
+  the enumerators (the per-member IDA pattern); mixed graphs raise.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
@@ -127,3 +140,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `effect()` lost its unused `level` parameter; pick the interval level on the
   result (`estimate.interval(0.99)`).
 - IV estimands now state the linear (parametric) modeling assumption.
+- `m_separated` on a CPDAG-kind graph now answers for the equivalence class:
+  undirected edges read as circle marks and paths need definite status,
+  matching the PAG reading (a literal tail-tail walk could claim connection
+  where every member of the class is separated). Spell marks with `mixed(...)`
+  to walk them literally. `identify_effect` on a CPDAG or MAG used to run
+  silently with single-graph semantics; it now dispatches on the face, and
+  mixed graphs raise instead of being misread.

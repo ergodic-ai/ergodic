@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from itertools import combinations
+from itertools import combinations, product
 
 import numpy as np
 import pytest
@@ -15,13 +15,19 @@ from ergodic.graph import (
     Mark,
     MixedGraph,
     admg,
+    cpdag_of_dag,
     dag,
+    dags_of_cpdag,
     fci_closure,
     mag_of_dag,
     mag_of_pag,
+    mags_of_pag,
     mixed,
     pag,
     pag_of_mag,
+    possible_ancestors,
+    possible_descendants,
+    visible_edges,
 )
 from ergodic.graph._separation import _definitely_connected, _plainly_connected
 
@@ -362,3 +368,159 @@ def test_is_pag_rejects_a_graph_not_closed_under_the_rules() -> None:
 def test_the_closure_is_deterministic() -> None:
     mag = mag_of_dag(dag(["Z -> X", "X -> Y", "L -> X", "L -> Y"], latent=["L"]))
     assert pag_of_mag(mag).edges == pag_of_mag(mag).edges
+
+
+# -- possible ancestry ----------------------------------------------------------
+
+
+def _random_dag(rng: np.random.Generator, p: int) -> MixedGraph:
+    names = [f"V{i}" for i in range(p)]
+    edges = [(names[i], names[j]) for i, j in combinations(range(p), 2) if rng.uniform() < 0.45]
+    return dag(edges, nodes=names)
+
+
+def test_possible_descendants_on_a_dag_are_plain_descendants() -> None:
+    g = dag(["A -> B", "B -> C", "D -> C"])
+    assert possible_descendants(g, "A") == g.descendants("A")
+    assert possible_ancestors(g, "C") == g.ancestors("C")
+    assert possible_descendants(g, ["A", "D"]) == frozenset({"B", "C"})
+
+
+def test_possible_reachability_matches_the_members_of_a_cpdag() -> None:
+    rng = np.random.default_rng(7)
+    for _ in range(15):
+        cp = cpdag_of_dag(_random_dag(rng, int(rng.choice([3, 4, 5]))))
+        members = dags_of_cpdag(cp)
+        for v in sorted(cp.nodes):
+            assert possible_descendants(cp, v) == frozenset().union(
+                *[m.descendants(v) for m in members]
+            )
+            assert possible_ancestors(cp, v) == frozenset().union(
+                *[m.ancestors(v) for m in members]
+            )
+
+
+def test_possible_reachability_matches_the_member_mags_of_a_pag() -> None:
+    rng = np.random.default_rng(11)
+    for _ in range(8):
+        p = pag_of_mag(mag_of_dag(_random_dag_with_latents(rng, 4, 1)))
+        members = mags_of_pag(p)
+        for v in sorted(p.nodes):
+            assert possible_descendants(p, v) == frozenset().union(
+                *[m.descendants(v) for m in members]
+            )
+
+
+def test_possible_reachability_validates_names() -> None:
+    g = dag(["A -> B"])
+    with pytest.raises(ValueError, match="unknown node names"):
+        possible_descendants(g, "Q")
+
+
+# -- visibility -----------------------------------------------------------------
+
+
+def test_visible_edges_by_the_direct_clause() -> None:
+    # C *-> A with C not adjacent to B certifies A -> B.
+    m = mag_of_dag(dag(["C -> A", "A -> B"]))
+    assert visible_edges(m) == frozenset({("A", "B")})
+
+
+def test_visible_edges_by_the_collider_path_clause() -> None:
+    # c *-> q <-> a with q a parent of b and c not adjacent to b certifies a -> b.
+    m = mixed(["c -> q", "q <-> a", "q -> b", "a -> b"]).as_kind(GraphKind.MAG)
+    assert ("a", "b") in visible_edges(m)
+    assert ("q", "b") in visible_edges(m)  # the direct clause, via c *-> q
+    assert ("c", "q") not in visible_edges(m)  # nothing points into c
+
+
+def test_a_two_node_directed_edge_is_invisible() -> None:
+    assert visible_edges(mag_of_dag(dag(["A -> B"]))) == frozenset()
+
+
+def test_a_visible_edge_is_never_confounded_in_the_generating_truth() -> None:
+    # Soundness against ground truth: if a -> b is visible in the projected
+    # MAG, no latent in the generating DAG is a common cause of a and b
+    # (reaching b off a). The truth is one member of the class, so a visible
+    # edge that hid a confounder there would falsify the certificate.
+    rng = np.random.default_rng(13)
+    for _ in range(60):
+        truth = _random_dag_with_latents(rng, 5, 2)
+        m = mag_of_dag(truth)
+        for a, b in visible_edges(m):
+            for u in truth.latent:
+                confounds = a in truth.descendants(u) and b in truth.induced_subgraph(
+                    truth.nodes - {a}
+                ).descendants(u)
+                assert not confounds, (sorted(e.glyph() for e in truth.edges), (a, b), u)
+
+
+# -- member enumeration ---------------------------------------------------------
+
+
+def _brute_members(cp: MixedGraph) -> set[frozenset[Edge]]:
+    undirected = sorted((e.u, e.v) for e in cp.edges if e.is_undirected)
+    rest = [e.glyph() for e in cp.edges if not e.is_undirected]
+    out: set[frozenset[Edge]] = set()
+    for orient in product((0, 1), repeat=len(undirected)):
+        specs = rest + [
+            f"{u} -> {v}" if o == 0 else f"{v} -> {u}"
+            for (u, v), o in zip(undirected, orient, strict=True)
+        ]
+        try:
+            cand = dag(specs, nodes=sorted(cp.nodes))
+        except InvalidGraphError:
+            continue
+        if cpdag_of_dag(cand).edges == cp.edges:
+            out.add(cand.edges)
+    return out
+
+
+def test_dags_of_cpdag_enumerates_exactly_the_consistent_extensions() -> None:
+    rng = np.random.default_rng(17)
+    for _ in range(20):
+        truth = _random_dag(rng, int(rng.choice([3, 4, 5])))
+        cp = cpdag_of_dag(truth)
+        members = dags_of_cpdag(cp)
+        assert {m.edges for m in members} == _brute_members(cp)
+        assert len({m.edges for m in members}) == len(members)
+        assert truth.edges in {m.edges for m in members}
+        assert all(m.kind is GraphKind.DAG for m in members)
+
+
+def test_dags_of_cpdag_respects_the_member_cap() -> None:
+    chain = cpdag_of_dag(dag(["A -> B", "B -> C"]))  # three members
+    assert len(dags_of_cpdag(chain, max_members=3)) == 3
+    with pytest.raises(ValueError, match="more than 2 members"):
+        dags_of_cpdag(chain, max_members=2)
+
+
+def test_mags_of_pag_lists_the_two_node_class() -> None:
+    members = mags_of_pag(pag(["X o-o Y"]))
+    glyphs = sorted(next(iter(m.edges)).glyph() for m in members)
+    assert glyphs == ["X --> Y", "X <-- Y", "X <-> Y"]
+    with pytest.raises(ValueError, match="more than 2 members"):
+        mags_of_pag(pag(["X o-o Y"]), max_members=2)
+
+
+def test_mags_of_pag_members_round_trip_and_include_the_extracted_one() -> None:
+    rng = np.random.default_rng(19)
+    for _ in range(8):
+        truth = _random_dag_with_latents(rng, 4, 1)
+        mag = mag_of_dag(truth)
+        p = pag_of_mag(mag)
+        members = mags_of_pag(p)
+        assert mag.edges in {m.edges for m in members}
+        assert mag_of_pag(p).edges in {m.edges for m in members}
+        for m in members:
+            assert m.is_mag()
+            assert pag_of_mag(m).edges == p.edges
+
+
+def test_the_enumerators_validate_their_input() -> None:
+    # A single directed edge is not a CPDAG: its class leaves the edge
+    # undirected. The collider A -> B <- C, by contrast, is its own CPDAG.
+    with pytest.raises(ValueError, match="needs a CPDAG"):
+        dags_of_cpdag(dag(["A -> B"]))
+    with pytest.raises(ValueError, match="needs a complete PAG"):
+        mags_of_pag(mixed(["X o-> Y", "Y o-o Z"]))

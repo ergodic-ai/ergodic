@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from ergodic import admg, dag, identify_effect, pag
+from ergodic import admg, dag, identify_effect
 from ergodic.identification import (
     adjustment_set,
     frontdoor_set,
@@ -130,9 +130,14 @@ def test_identify_effect_reports_when_not_identifiable() -> None:
     assert result.strategy == "none"
 
 
-def test_identification_rejects_pags() -> None:
-    with pytest.raises(NotImplementedError):
-        identify_effect(pag(["X o-o Y"]), "X", "Y")
+def test_identification_rejects_mixed_graphs() -> None:
+    # Class faces (CPDAG, MAG, PAG) now identify through the generalized
+    # criterion (test_identification_classes.py); a mixed graph certifies
+    # neither a single world nor a class, so it raises.
+    from ergodic.graph import mixed
+
+    with pytest.raises(ValueError, match="verified graph face"):
+        identify_effect(mixed(["X o-> Y"]), "X", "Y")
 
 
 # -- latent nodes ------------------------------------------------------------

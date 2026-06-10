@@ -102,6 +102,8 @@ p.m_separated("X", "Z")        # True: the collider is invariant across the clas
 p.m_separated("X", "Z", "Y")   # False
 ```
 
+A CPDAG gets the same class reading. Its undirected edge says "some member orients it each way", which is exactly what a circle pair says in a PAG, so separation recodes undirected edges as circles and walks definite-status paths. The difference is not cosmetic: on `V0 --> V2 --- V4 <-- V1`, a literal tail-tail reading finds an open path from `V0` to `V1`, yet whichever way a member orients the middle edge, one end of it becomes a collider and blocks, and every member agrees they are separated. The CPDAG face answers for the class; spell the marks with `mixed(...)` when you want them walked literally.
+
 ## Intervening and slicing
 
 `do` is graph surgery for an intervention: it cuts every arrowhead into the target, which removes incoming causes and hidden confounding while keeping the target's effects.
@@ -141,6 +143,19 @@ member = mag_of_pag(canonical)                                     # one MAG bac
 
 `mag_of_dag` is the latent projection: the MAG over the observed margin of a DAG or ADMG, preserving every m-separation among the observed. `pag_of_mag` computes the invariant marks of the Markov equivalence class (the canonical PAG, through the FCI rule closure), and `mag_of_pag` extracts one member. `meek_closure` and `fci_closure` (the orientation rule engines) are public too.
 
+When one member is not enough, enumerate the class. `dags_of_cpdag` lists every consistent extension of a CPDAG and `mags_of_pag` every MAG of a PAG, deterministically, with a `max_members` cap that raises rather than truncating. These power the all-members tests behind class identification and the per-member (IDA-style) workflow when a class query comes back undecided.
+
+Three reachability-and-certificate helpers ride along. `possible_descendants` and `possible_ancestors` follow possibly directed paths (no arrowhead back toward the start), so they answer "could X cause Y in some member?" on any face; on a DAG they are plain ancestry. `visible_edges` returns the directed MAG or PAG edges that Zhang's criterion certifies free of hidden confounding in every represented world, the certificate that class-level adjustment leans on:
+
+```python
+from ergodic.graph import dags_of_cpdag, mags_of_pag, possible_descendants, visible_edges
+
+dags_of_cpdag(cpdag_of_dag(g))     # every DAG in the class
+mags_of_pag(canonical)             # every MAG in the class
+possible_descendants(canonical, "X")
+visible_edges(canonical)           # {(tail, head), ...}
+```
+
 ## Not built yet
 
-Adjustment sets and identification queries are built now; see [Identification](identification.md), and discovery returns these faces; see [Discovery](discovery.md). Still missing: selection bias end to end (selection nodes in the projection, undirected PAG edges, rules R5 to R7), possible m-separation (the existential cousin of the definite reading), and identification on PAGs and CPDAGs. The implementation journal in `plans/` has the order.
+Adjustment sets and identification queries are built now, including on CPDAGs, MAGs, and PAGs; see [Identification](identification.md). Discovery returns these faces; see [Discovery](discovery.md). Still missing: selection bias end to end (selection nodes in the projection, undirected PAG edges, rules R5 to R7) and possible m-separation (the existential cousin of the definite reading). The implementation journal in `plans/` has the order.

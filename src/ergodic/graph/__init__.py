@@ -5,9 +5,10 @@ Build graphs with the :func:`dag`, :func:`admg`, :func:`cpdag`, :func:`pag`, or
 :func:`mixed` helpers. Edges read as glyph strings, so ``dag(["X -> Y", "Y -> Z"])``
 and ``pag(["X o-> Y", "Z o-> Y"])`` do what they look like. Separation
 (:func:`m_separated`), the orientation machinery (:func:`meek_closure`,
-:func:`fci_closure`), and the projections between the faces
-(:func:`cpdag_of_dag`, :func:`mag_of_dag`, :func:`pag_of_mag`,
-:func:`mag_of_pag`) live here too.
+:func:`fci_closure`), the projections between the faces (:func:`cpdag_of_dag`,
+:func:`mag_of_dag`, :func:`pag_of_mag`, :func:`mag_of_pag`), and the class
+toolkit (:func:`possible_descendants`, :func:`visible_edges`,
+:func:`dags_of_cpdag`, :func:`mags_of_pag`) live here too.
 """
 
 from __future__ import annotations
@@ -25,8 +26,17 @@ from ._graph import (
     pag,
 )
 from ._marks import Mark
-from ._meek import consistent_extension, cpdag_of_dag, extendable, meek_closure
-from ._pag import fci_closure, mag_of_dag, mag_of_pag, pag_of_mag
+from ._meek import consistent_extension, cpdag_of_dag, dags_of_cpdag, extendable, meek_closure
+from ._pag import (
+    fci_closure,
+    mag_of_dag,
+    mag_of_pag,
+    mags_of_pag,
+    pag_of_mag,
+    possible_ancestors,
+    possible_descendants,
+    visible_edges,
+)
 from ._separation import d_separated, m_connected, m_separated
 
 __all__ = [
@@ -42,14 +52,19 @@ __all__ = [
     "cpdag_of_dag",
     "d_separated",
     "dag",
+    "dags_of_cpdag",
     "extendable",
     "fci_closure",
     "m_connected",
     "m_separated",
     "mag_of_dag",
     "mag_of_pag",
+    "mags_of_pag",
     "meek_closure",
     "mixed",
     "pag",
     "pag_of_mag",
+    "possible_ancestors",
+    "possible_descendants",
+    "visible_edges",
 ]

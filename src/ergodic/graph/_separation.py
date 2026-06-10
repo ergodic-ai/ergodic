@@ -18,11 +18,18 @@ every member MAG agrees. On a partially oriented graph that is not closed under
 the orientation rules it is the conservative reading (vertices without definite
 status block), and on circle-free graphs it reduces exactly to plain
 m-separation.
+
+A graph whose kind is CPDAG gets the same class reading: its undirected edges
+mean "some member orients it each way", which is exactly what a circle pair
+means in a PAG, so they are recoded as circles and walked for definite status.
+A mixed-kind graph with undirected edges keeps the literal tail reading; the
+face is what claims the class semantics.
 """
 
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ._marks import Mark
@@ -168,9 +175,11 @@ def m_connected(
 ) -> bool:
     """Return ``True`` if some active path joins ``x`` and ``y`` given ``given``.
 
-    Circle-free graphs (DAG, ADMG, MAG) use plain m-connection; a graph with
+    Circle-free graphs (DAG, ADMG, MAG) use plain m-connection. A graph with
     circle marks (a PAG) uses definite m-connection, which on a valid complete
-    PAG is the class-invariant answer.
+    PAG is the class-invariant answer. A CPDAG-kind graph gets the same class
+    reading with its undirected edges recoded as circles; an undirected edge
+    on any other kind is walked literally, as a tail at both ends.
     """
     sources = _as_set(x)
     targets = _as_set(y)
@@ -183,6 +192,18 @@ def m_connected(
     if overlap:
         raise ValueError(f"x, y, and given must be disjoint; shared nodes: {sorted(overlap)}")
 
+    from ._graph import Edge, GraphKind
+
+    if graph.kind is GraphKind.CPDAG:
+        recoded = replace(
+            graph,
+            edges=frozenset(
+                Edge.make(e.u, Mark.CIRCLE, e.v, Mark.CIRCLE) if e.is_undirected else e
+                for e in graph.edges
+            ),
+            kind=GraphKind.MIXED,
+        )
+        return _definitely_connected(recoded, sources, targets, conditioned)
     if any(e.has_circle for e in graph.edges):
         return _definitely_connected(graph, sources, targets, conditioned)
     return _plainly_connected(graph, sources, targets, conditioned)

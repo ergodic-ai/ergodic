@@ -136,6 +136,43 @@ def cpdag_of_dag(dag: MixedGraph) -> MixedGraph:
     return replace(meek_closure(out), kind=GraphKind.CPDAG)
 
 
+def dags_of_cpdag(cpdag: MixedGraph, *, max_members: int | None = None) -> tuple[MixedGraph, ...]:
+    """Every DAG in the CPDAG's Markov equivalence class, in a deterministic order.
+
+    Branch on the first undirected edge, orient it each way, close under
+    Meek's rules, and recurse. Distinct branches fix that edge differently,
+    so no member appears twice and none is missed (the rules are sound, so
+    every member agrees with the closure of its own branch). Each leaf is
+    verified against the class definition, ``cpdag_of_dag(leaf)`` equal to
+    the input, so a branch that closes into a non-member dies quietly and
+    the answer is exact. ``max_members`` raises once the count would pass
+    it; there is no silent truncation.
+    """
+    if not cpdag.is_cpdag():
+        raise ValueError("dags_of_cpdag needs a CPDAG; build one with cpdag() or cpdag_of_dag()")
+    found: list[MixedGraph] = []
+
+    def expand(graph: MixedGraph) -> None:
+        undirected = sorted((e.u, e.v) for e in graph.edges if e.is_undirected)
+        if not undirected:
+            candidate = replace(graph, kind=GraphKind.DAG)
+            if not candidate.is_dag() or cpdag_of_dag(candidate).edges != cpdag.edges:
+                return
+            if max_members is not None and len(found) >= max_members:
+                raise ValueError(
+                    f"the class has more than {max_members} members; raise max_members "
+                    "or work on the CPDAG itself"
+                )
+            found.append(candidate)
+            return
+        u, v = undirected[0]
+        for a, b in ((u, v), (v, u)):
+            expand(meek_closure(graph.orient(a, b)))
+
+    expand(replace(cpdag, kind=GraphKind.MIXED))
+    return tuple(found)
+
+
 def consistent_extension(pdag: MixedGraph) -> MixedGraph | None:
     """A DAG with exactly the PDAG's skeleton and v-structures, or ``None``.
 

@@ -230,16 +230,16 @@ class MyScore(Score):
 
 ## Putting the pieces together
 
-The pillars compose end to end: discover the structure, take a DAG member of the class, then identify and estimate on it.
+The pillars compose end to end, and you do not have to pick a member of the class to do it. Identification accepts the CPDAG or PAG directly and answers with the generalized adjustment criterion, so a success holds in every graph the class represents, and `estimate_effect` rides on that:
 
 ```python
 from ergodic import estimate_effect
-from ergodic.graph import consistent_extension
 
 result = discover(data, method="pc", knowledge=dk)
-member = consistent_extension(result.graph)        # one DAG from the equivalence class
-est = estimate_effect(member, data, "X", "Y", strategy="dml")
+est = estimate_effect(result.graph, data, "X", "Y", strategy="dml")
 ```
+
+The same line works on an FCI result: the PAG may keep circles where confounding cannot be ruled out, and the effect still estimates whenever the treatment's outgoing edge is visible (certified clean of hidden confounding in every member). When the class genuinely disagrees about the effect, identification says so and names why, and the per-member route is still there: enumerate with `dags_of_cpdag` or `mags_of_pag` (or take one member with `consistent_extension` / `mag_of_pag`) and identify each, the IDA pattern. The [identification guide](identification.md) walks through both outcomes.
 
 And the ingredients compose sideways: a warmed oracle across algorithms, a skeleton from one method restricting the next, a d-separation oracle standing in for data, your test inside unchanged PC.
 

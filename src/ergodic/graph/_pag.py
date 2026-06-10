@@ -23,7 +23,7 @@ and circle-tail edges are rejected as selection artifacts, and rules R5 to R7
 from __future__ import annotations
 
 from dataclasses import replace
-from itertools import combinations
+from itertools import combinations, product
 from typing import TYPE_CHECKING
 
 from ._graph import Edge, GraphKind, InvalidGraphError, MixedGraph
@@ -32,7 +32,7 @@ from ._meek import consistent_extension
 from ._separation import m_separated
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 # mark_at[a][b] is the mark at a on the edge joining a and b; adjacency never
 # changes during closure, only mark values do.
@@ -72,6 +72,118 @@ def mag_of_dag(graph: MixedGraph) -> MixedGraph:
     out = MixedGraph(nodes=frozenset(observed), edges=frozenset(edges), kind=GraphKind.MAG)
     out.validate()
     return out
+
+
+# -- possible ancestry and visibility --------------------------------------------
+
+
+def _seed_names(graph: MixedGraph, nodes: str | Iterable[str]) -> frozenset[str]:
+    seeds = frozenset({nodes}) if isinstance(nodes, str) else frozenset(nodes)
+    unknown = seeds - graph.nodes
+    if unknown:
+        raise ValueError(f"unknown node names: {', '.join(sorted(unknown))}")
+    return seeds
+
+
+def possible_descendants(graph: MixedGraph, nodes: str | Iterable[str]) -> frozenset[str]:
+    """Nodes reachable from ``nodes`` along a possibly directed path.
+
+    A path is possibly directed when no edge on it carries an arrowhead at
+    the endpoint nearer the start, so some member of the graph's class can
+    point every edge away from the start. On a DAG or ADMG this is plain
+    ``descendants``. Each seed is excluded from its own walk, mirroring
+    :meth:`MixedGraph.descendants`.
+    """
+    seeds = _seed_names(graph, nodes)
+    marks = _mark_maps(graph)
+    out: set[str] = set()
+    for seed in sorted(seeds):
+        seen = {seed}
+        stack = [seed]
+        while stack:
+            cur = stack.pop()
+            for nxt, mark in marks[cur].items():
+                if nxt not in seen and mark is not Mark.ARROW:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        out |= seen - {seed}
+    return frozenset(out)
+
+
+def possible_ancestors(graph: MixedGraph, nodes: str | Iterable[str]) -> frozenset[str]:
+    """Nodes with a possibly directed path into ``nodes``.
+
+    The mirror of :func:`possible_descendants`: ``w`` counts when some
+    member of the class can orient a path from ``w`` all the way into a
+    seed. Each seed is excluded from its own walk.
+    """
+    seeds = _seed_names(graph, nodes)
+    marks = _mark_maps(graph)
+    out: set[str] = set()
+    for seed in sorted(seeds):
+        seen = {seed}
+        stack = [seed]
+        while stack:
+            cur = stack.pop()
+            for nxt in marks[cur]:
+                if nxt not in seen and marks[nxt][cur] is not Mark.ARROW:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        out |= seen - {seed}
+    return frozenset(out)
+
+
+def visible_edges(graph: MixedGraph) -> frozenset[tuple[str, str]]:
+    """The visible directed edges, as ``(tail, head)`` pairs (Zhang 2008).
+
+    ``A -> B`` is visible when some ``C`` not adjacent to ``B`` has an edge
+    into ``A``, or reaches ``A`` through a collider path into ``A`` whose
+    every interior node is a parent of ``B``. Visibility certifies the edge
+    carries no hidden confounding in any represented world, which is what
+    adjustment amenability on MAGs and PAGs consumes. The marks are read as
+    given (arrowheads must be definite); on a DAG or CPDAG every directed
+    edge is visible by causal sufficiency, and callers there should not need
+    this function.
+    """
+    marks = _mark_maps(graph)
+    adj = {n: sorted(marks[n]) for n in marks}
+    out: set[tuple[str, str]] = set()
+    for a in sorted(marks):
+        for b in adj[a]:
+            if _is_directed(marks, a, b) and _is_visible(marks, adj, a, b):
+                out.add((a, b))
+    return frozenset(out)
+
+
+def _is_visible(marks: _Marks, adj: dict[str, list[str]], a: str, b: str) -> bool:
+    """Zhang's visibility for the directed edge ``a -> b``.
+
+    The collider-path clause walks backward from ``a``: every interior node
+    must be a parent of ``b`` with arrowheads at it on both path edges, so
+    the condition is locally checkable and loop erasure is safe (the same
+    argument as R4's discriminating walk).
+    """
+    parents_of_b = {p for p in adj[b] if _is_directed(marks, p, b)}
+    for c in adj[a]:
+        if c != b and b not in marks[c] and marks[a][c] is Mark.ARROW:
+            return True
+    queue = [
+        q
+        for q in adj[a]
+        if q in parents_of_b and marks[a][q] is Mark.ARROW and marks[q][a] is Mark.ARROW
+    ]
+    seen = set(queue)
+    while queue:
+        q = queue.pop(0)
+        for r in adj[q]:
+            if r in (a, b) or marks[q][r] is not Mark.ARROW:
+                continue
+            if b not in marks[r]:
+                return True
+            if r in parents_of_b and r not in seen and marks[r][q] is Mark.ARROW:
+                seen.add(r)
+                queue.append(r)
+    return False
 
 
 # -- the FCI orientation rules -------------------------------------------------
@@ -444,3 +556,42 @@ def pag_of_mag(m: MixedGraph) -> MixedGraph:
     # replace, not as_kind: validating PAG kind would re-enter this function
     # through the is_pag round trip.
     return replace(closed, kind=GraphKind.PAG)
+
+
+def mags_of_pag(p: MixedGraph, *, max_members: int | None = None) -> tuple[MixedGraph, ...]:
+    """Every MAG in the PAG's equivalence class, in a deterministic order.
+
+    Each circle mark takes a tail or an arrowhead; an assignment survives
+    when it yields a valid MAG whose canonical PAG (:func:`pag_of_mag`) is
+    exactly ``p``. Exponential in the number of circle marks by design,
+    which is fine at the scale the library targets; ``max_members`` raises
+    once the count would pass it (no silent truncation). ``mag_of_pag(p)``
+    is always among the members.
+    """
+    if not p.is_pag():
+        raise ValueError("mags_of_pag needs a complete PAG; check is_pag or build with pag()")
+    slots: list[tuple[str, str]] = []
+    for e in sorted(p.edges, key=lambda e: (e.u, e.v)):
+        if e.u_mark is Mark.CIRCLE:
+            slots.append((e.u, e.v))
+        if e.v_mark is Mark.CIRCLE:
+            slots.append((e.v, e.u))
+    found: list[MixedGraph] = []
+    for assignment in product((Mark.TAIL, Mark.ARROW), repeat=len(slots)):
+        marks = _mark_maps(p)
+        for (node, other), mark in zip(slots, assignment, strict=True):
+            marks[node][other] = mark
+        candidate = replace(
+            p,
+            edges=frozenset(Edge.make(e.u, marks[e.u][e.v], e.v, marks[e.v][e.u]) for e in p.edges),
+            kind=GraphKind.MAG,
+        )
+        if not candidate.is_mag() or pag_of_mag(candidate).edges != p.edges:
+            continue
+        if max_members is not None and len(found) >= max_members:
+            raise ValueError(
+                f"the class has more than {max_members} members; raise max_members "
+                "or work on the PAG itself"
+            )
+        found.append(candidate)
+    return tuple(found)
