@@ -46,6 +46,7 @@ These re-export from the top level: `from ergodic import dag, admg, DomainKnowle
 - `make check` runs ruff (lint and format check), mypy strict, and pytest. `make docs-serve` previews the docs; `make docs` builds strict.
 - mypy is strict and ruff is the linter and formatter. Keep both green.
 - `make docs` executes the learn notebooks, so it is also their test: a cell that raises fails the build. Re-verify it after touching `docs/learn/` or anything they call. Numbers quoted in their prose must match the seeded outputs; rerun and recalibrate the prose when a simulation changes.
+- `make docs-deploy` ships the docs to Cloud Run (service `ergodic-docs`, GCP project `ergodic`, us-central1) via `deploy/docs/deploy.sh`: local amd64 docker build, Artifact Registry push, deploy by image. Needs a fresh `gcloud auth login` for andre@ergodic.ai; the script header records the one-time setup and why the source-deploy path is avoided.
 - Prose in `plans/` and `docs/` follows `plans/guides/writing_guide.md` (no em-dashes, plain words, contractions; user-facing docs in the Witten register the guide describes).
 
 ## What's next

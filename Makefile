@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help sync lint format format-check typecheck test check docs docs-serve build clean
+.PHONY: help sync lint format format-check typecheck test check docs docs-serve docs-deploy build clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -31,6 +31,9 @@ docs: ## Build the documentation site
 
 docs-serve: ## Serve docs locally with live reload
 	uv run --group docs mkdocs serve
+
+docs-deploy: ## Build and deploy the docs to Cloud Run
+	deploy/docs/deploy.sh
 
 build: ## Build sdist + wheel
 	uv build

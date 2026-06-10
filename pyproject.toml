@@ -85,6 +85,7 @@ exclude = [
     ".python-version",
     "CLAUDE.md",
     "Makefile",
+    "deploy",
     "mkdocs.yml",
     "plans",
     "uv.lock",
