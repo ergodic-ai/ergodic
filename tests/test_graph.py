@@ -114,9 +114,10 @@ def test_admg_allows_bidirected_but_not_circle() -> None:
 
 
 def test_cpdag_allows_undirected_but_not_bidirected() -> None:
-    cpdag(["X -- Y", "Y -> Z"])
+    # the diamond pattern: reversible edges undirected, the collider directed
+    cpdag(["A -- B", "A -- C", "B -> D", "C -> D"])
     with pytest.raises(InvalidGraphError):
-        cpdag(["X <-> Y"])
+        cpdag(["A -- B", "B <-> C"])
 
 
 def test_pag_allows_circles() -> None:

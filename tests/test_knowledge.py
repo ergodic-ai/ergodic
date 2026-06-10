@@ -179,6 +179,135 @@ def test_edge_mask_shape_and_values() -> None:
     assert not mask.diagonal().any()
 
 
+# -- skeleton restriction ------------------------------------------------------
+
+
+def test_restrict_to_from_graph_and_from_pairs_agree() -> None:
+    skeleton = mixed(["A -> B", "B <-> C", "C -- D"])  # any mark kind is an adjacency
+    from_graph = DomainKnowledge().restrict_to(skeleton)
+    from_pairs = DomainKnowledge().restrict_to([("B", "A"), ("B", "C"), ("D", "C")])
+    expected = frozenset({frozenset({"A", "B"}), frozenset({"B", "C"}), frozenset({"C", "D"})})
+    assert from_graph.allowed_adjacencies == expected
+    assert from_pairs.allowed_adjacencies == expected
+    assert {"A", "B", "C", "D"} <= from_graph.variables
+    assert {"A", "B", "C", "D"} <= from_pairs.variables
+
+
+def test_restrict_to_returns_a_new_object() -> None:
+    base = DomainKnowledge().require("A", "B")
+    restricted = base.restrict_to([("A", "B")])
+    assert base.allowed_adjacencies is None
+    assert restricted.allowed_adjacencies == frozenset({frozenset({"A", "B"})})
+    assert restricted.required == base.required
+
+
+def test_restrict_to_rejects_self_pairs() -> None:
+    with pytest.raises(ValueError, match="distinct"):
+        DomainKnowledge().restrict_to([("A", "A")])
+
+
+def test_restrict_to_gates_permits_edge_in_both_directions() -> None:
+    knowledge = DomainKnowledge().restrict_to([("A", "B")])
+    assert knowledge.permits_edge("A", "B")
+    assert knowledge.permits_edge("B", "A")
+    assert not knowledge.permits_edge("A", "C")
+    assert not knowledge.permits_edge("C", "A")
+
+
+def test_restrict_to_bans_every_edge_form_outside_the_list() -> None:
+    knowledge = DomainKnowledge().restrict_to([("A", "B")])
+    assert knowledge.is_consistent(dag(["A -> B"]))
+    assert not knowledge.is_consistent(dag(["A -> C"], nodes=["A", "B", "C"]))
+    assert not knowledge.is_consistent(admg(["A <-> C"]))
+    assert not knowledge.is_consistent(mixed(["A -- C"]))
+    messages = knowledge.violations(dag(["A -> B", "B -> C"]))
+    assert any("outside the skeleton restriction" in m for m in messages)
+
+
+def test_restrict_to_apply_to_drops_outside_edges() -> None:
+    knowledge = DomainKnowledge().restrict_to([("A", "B")])
+    graph = mixed(["A -> B", "B <-> C", "C -- D"])
+    pruned = knowledge.apply_to(graph)
+    assert pruned.get_edge("A", "B") is not None
+    assert pruned.get_edge("B", "C") is None
+    assert pruned.get_edge("C", "D") is None
+
+
+def test_restrict_to_shows_in_edge_mask() -> None:
+    knowledge = DomainKnowledge().with_variables("A", "B", "C").restrict_to([("A", "B")])
+    mask, labels = knowledge.edge_mask()
+    assert labels == ["A", "B", "C"]
+    assert mask[0, 1] and mask[1, 0]  # the allowed pair, both directions
+    assert not mask[0, 2] and not mask[2, 0]
+    assert not mask[1, 2] and not mask[2, 1]
+
+
+def test_required_edge_outside_skeleton_is_a_conflict() -> None:
+    knowledge = DomainKnowledge().require("X", "Y").restrict_to([("A", "B")])
+    assert any("required edge X->Y" in m for m in knowledge.conflicts())
+    with pytest.raises(InconsistentKnowledgeError):
+        knowledge.validate()
+    inside = DomainKnowledge().require("A", "B").restrict_to([("A", "B")])
+    assert inside.conflicts() == []
+
+
+def test_confounded_pair_outside_skeleton_is_a_conflict() -> None:
+    knowledge = DomainKnowledge().confound("X", "Y").restrict_to([("A", "B")])
+    assert any("confounded pair X,Y" in m for m in knowledge.conflicts())
+    inside = DomainKnowledge().confound("A", "B").restrict_to([("A", "B")])
+    assert inside.conflicts() == []
+
+
+def test_restriction_composes_by_intersection() -> None:
+    left = DomainKnowledge().restrict_to([("A", "B"), ("B", "C")])
+    right = DomainKnowledge().restrict_to([("B", "C"), ("C", "D")])
+    both = left & right
+    assert both.allowed_adjacencies == frozenset({frozenset({"B", "C"})})
+
+    open_side = DomainKnowledge().forbid("A", "B")
+    assert (open_side & left).allowed_adjacencies == left.allowed_adjacencies
+    assert (left & open_side).allowed_adjacencies == left.allowed_adjacencies
+    assert (open_side & open_side).allowed_adjacencies is None
+
+
+def test_composed_restriction_still_validates() -> None:
+    left = DomainKnowledge().require("A", "B").restrict_to([("A", "B"), ("B", "C")])
+    right = DomainKnowledge().restrict_to([("B", "C")])
+    assert left.conflicts() == []
+    composed = left & right
+    assert any("required edge A->B" in m for m in composed.conflicts())
+
+
+def test_restricting_twice_intersects() -> None:
+    knowledge = DomainKnowledge().restrict_to([("A", "B"), ("B", "C")])
+    narrowed = knowledge.restrict_to([("B", "C"), ("C", "D")])
+    assert narrowed.allowed_adjacencies == frozenset({frozenset({"B", "C"})})
+    assert knowledge.allowed_adjacencies == frozenset(
+        {frozenset({"A", "B"}), frozenset({"B", "C"})}
+    )
+
+
+def test_empty_restriction_allows_nothing() -> None:
+    knowledge = DomainKnowledge().restrict_to([])
+    assert knowledge.allowed_adjacencies == frozenset()
+    assert not knowledge.permits_edge("A", "B")
+    assert knowledge.is_consistent(dag([], nodes=["A", "B"]))
+    assert not knowledge.is_consistent(dag(["A -> B"]))
+
+
+def test_tiers_and_restriction_work_together() -> None:
+    knowledge = (
+        DomainKnowledge().with_tiers([["A"], ["B"], ["C"]]).restrict_to([("A", "B"), ("B", "C")])
+    )
+    assert knowledge.permits_edge("A", "B")
+    assert not knowledge.permits_edge("B", "A")  # blocked by the tiers
+    assert not knowledge.permits_edge("A", "C")  # blocked by the skeleton
+    oriented = knowledge.apply_to(mixed(["A -- B", "B -- C", "A -- C"]))
+    assert oriented.get_edge("A", "C") is None
+    assert oriented.get_edge("A", "B").directed_pair() == ("A", "B")  # type: ignore[union-attr]
+    assert oriented.get_edge("B", "C").directed_pair() == ("B", "C")  # type: ignore[union-attr]
+
+
 def test_soft_hooks_not_implemented_yet() -> None:
     knowledge = DomainKnowledge()
     graph = dag(["X -> Y"])

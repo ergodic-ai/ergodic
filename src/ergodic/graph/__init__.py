@@ -21,6 +21,7 @@ from ._graph import (
     pag,
 )
 from ._marks import Mark
+from ._meek import consistent_extension, cpdag_of_dag, extendable, meek_closure
 from ._separation import d_separated, m_connected, m_separated
 
 __all__ = [
@@ -31,11 +32,15 @@ __all__ = [
     "Mark",
     "MixedGraph",
     "admg",
+    "consistent_extension",
     "cpdag",
+    "cpdag_of_dag",
     "d_separated",
     "dag",
+    "extendable",
     "m_connected",
     "m_separated",
+    "meek_closure",
     "mixed",
     "pag",
 ]

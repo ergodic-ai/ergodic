@@ -52,6 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `as_kind` accepts the kind name as a string (`g.as_kind("admg")`).
 - Stratified cross-fitting folds for binary treatments, bootstrap shortfall
   diagnostics, and a clear error when a treatment arm is empty.
+- Causal discovery (`ergodic.discovery`), the first build: a conditional
+  independence test is a class constructed with data (the stateful oracle:
+  encoding once, sufficient statistics, cached alpha-independent queries),
+  with `Linear` (partial correlation), `Discrete` (G squared, natively
+  categorical), `Mixed` (degenerate Gaussian for mixed columns), and a
+  `DSeparationOracle` ground truth; a decomposable `Score` answers
+  `local(node, parents)` with `BIC` (Gaussian); PC-stable orients through
+  v-structures and the Meek rules and returns a CPDAG with separating sets;
+  `AStar` is exact search over the order lattice; `discover(data, method=...)`
+  is the facade and `discover` re-exports at the top level. Background
+  knowledge enters in four modes (prune, protect, orient, validate), and
+  `DomainKnowledge.restrict_to(skeleton)` confines any search to an adjacency
+  support. The Meek rules, `cpdag_of_dag`, and the Dor-Tarsi extension check
+  live in `ergodic.graph`, which makes `is_cpdag` a real validator.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

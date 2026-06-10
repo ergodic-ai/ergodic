@@ -13,7 +13,7 @@ from ergodic import dag, admg, cpdag, pag
 
 g = dag(["Smoking -> Tar", "Tar -> Cancer", "Smoking -> Cancer"])
 confounded = admg(["X -> Y", "Y <-> Z"])      # <-> is a hidden common cause
-partial = cpdag(["A -- B", "B -> C"])          # -- is undirected
+partial = cpdag(["A -- B", "A -- C", "B -> D", "C -> D"])   # -- is undirected
 discovered = pag(["X o-> Y", "Y o-o Z"])       # o is an unknown mark
 ```
 

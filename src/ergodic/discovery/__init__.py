@@ -1,9 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Causal discovery: learn causal structure (DAGs) from data.
+"""Causal discovery: learn causal structure from data.
 
-Placeholder package; algorithms will be added here. See https://ergodic.ai
+Two ingredients drive the searches. A conditional-independence test
+(:class:`CITest`) is a class constructed with data, which makes it the
+stateful oracle the constraint algorithms query: :class:`Linear` (partial
+correlation), :class:`Discrete` (G squared, natively categorical),
+:class:`Mixed` (degenerate Gaussian for mixed columns), and
+:class:`DSeparationOracle` as ground truth. A decomposable :class:`Score`
+answers ``local(node, parents)`` for the score-based searches (:class:`BIC`).
+Algorithms are thin consumers: :class:`PC` wraps a test and returns a CPDAG,
+:class:`AStar` wraps a score and returns the exact optimum. ``discover`` is
+the one-line facade. Background knowledge (including a skeleton restriction
+through ``restrict_to``) enters through :class:`ergodic.DomainKnowledge`.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from ._ci import CIResult, CITest, DSeparationOracle
+from ._discover import discover
+from ._result import DiscoveryResult
+from ._score import Score
+from .algorithms import PC, AStar
+from .ci import Discrete, Linear, Mixed
+from .scores import BIC
+
+__all__ = [
+    "BIC",
+    "PC",
+    "AStar",
+    "CIResult",
+    "CITest",
+    "DSeparationOracle",
+    "DiscoveryResult",
+    "Discrete",
+    "Linear",
+    "Mixed",
+    "Score",
+    "discover",
+]

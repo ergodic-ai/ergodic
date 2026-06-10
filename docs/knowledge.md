@@ -26,6 +26,7 @@ The constraints you can state:
 - `root(*names)` and `sink(*names)` for variables with no causes or no effects.
 - `confound(a, b)` for a known hidden common cause.
 - `forbid_between(group_a, group_b)` to ban every edge from one set into another.
+- `restrict_to(skeleton)` to allow adjacencies only on a known support.
 
 A pair forbidden in both directions is an adjacency ban: no directed, bidirected, or undirected edge may join the two. A single `forbid(cause, effect)` constrains that directed edge only, so `A <-> B` or `A -- B` still passes. And order is transitive: with A before B and B before C, an edge from C into A is out even though no single constraint names that pair.
 
@@ -97,6 +98,28 @@ mask, labels = dk.edge_mask()    # boolean matrix of allowed directed edges
 ```
 
 `permits_edge` is the orientation rule a constraint-based search reads. `apply_to` drops forbidden edges, adds required ones, and orients an undirected edge when only one direction stays allowed. `edge_mask` is the boolean adjacency a score-based or continuous-optimization search wants.
+
+## Restrict to a skeleton
+
+Sometimes you know the adjacency support before any orientation work: an undirected screen or an earlier discovery run already told you which pairs can touch. `restrict_to` stores that support as an allow-list. A pair outside it is banned in every form: directed either way, bidirected, or undirected.
+
+```python
+from ergodic import DomainKnowledge, mixed
+
+screen = mixed(["age -- smoking", "smoking -- lung_capacity"])
+
+dk = (
+    DomainKnowledge()
+    .with_tiers([["age"], ["smoking"], ["lung_capacity"]])
+    .restrict_to(screen)
+)
+
+dk.permits_edge("age", "lung_capacity")   # False: the pair is not in the support
+dk.permits_edge("age", "smoking")         # True: in the support, order allows it
+dk.permits_edge("smoking", "age")         # False: in the support, blocked by the tiers
+```
+
+The argument can be a graph, where any mark counts as an adjacency, or plain pairs: `restrict_to([("age", "smoking")])`. Discovery then searches only over the allowed pairs. `apply_to` drops every edge outside the list, `edge_mask` zeroes both directions, and `violations` reports any graph that strays. A required edge or a confounded pair outside the support shows up in `conflicts()`, since no graph could satisfy both. Restrictions compose by intersection: restricting twice, or combining two restricted objects with `&`, keeps only the pairs both sides allow. An empty list is legal and allows nothing.
 
 ## Soft knowledge is not built yet
 

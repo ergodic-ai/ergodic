@@ -30,6 +30,7 @@ from .data import (
     tabular,
     timeseries,
 )
+from .discovery import discover
 from .graph import (
     Edge,
     GraphKind,
@@ -88,6 +89,7 @@ __all__ = [
     "cpdag",
     "d_separated",
     "dag",
+    "discover",
     "estimate",
     "estimate_effect",
     "event_log",

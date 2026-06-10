@@ -18,7 +18,9 @@ By [ergodic.ai](https://ergodic.ai).
 
 The shared objects are written and tested: `ergodic.graph` (a mixed-graph family covering DAG, ADMG, MAG, CPDAG, and PAG), `ergodic.knowledge` (`DomainKnowledge` for prior constraints), `ergodic.identification` (graph to estimand: adjustment, front-door, instruments), and `ergodic.data` (typed datasets: tabular, time series, panel, hierarchical, event log).
 
-Causal inference is built through effect estimation: `estimate_effect` turns a graph and a dataset into an effect with its uncertainty, over a library of estimators (doubly robust, double machine learning, the meta-learners, instruments) with sklearn-style learners in every nuisance slot, heterogeneous effects through `cate`, and an optional Bayesian posterior path through PyMC (`pip install ergodic[bayes]`). Causal discovery and process intelligence are placeholders today. See the [docs](https://ergodic.ai) for guides.
+Causal inference is built through effect estimation: `estimate_effect` turns a graph and a dataset into an effect with its uncertainty, over a library of estimators (doubly robust, double machine learning, the meta-learners, instruments) with sklearn-style learners in every nuisance slot, heterogeneous effects through `cate`, and an optional Bayesian posterior path through PyMC (`pip install ergodic[bayes]`).
+
+Causal discovery is built on two pluggable ingredients: a conditional independence test is a class constructed with data (the stateful, caching oracle behind PC), and a decomposable score drives exact search (A*). `discover(data)` returns a CPDAG with its separating sets and diagnostics, domain knowledge enters every search (including a skeleton restriction), and a d-separation oracle makes the recovery guarantees executable. Process intelligence is the remaining placeholder. See the [docs](https://ergodic.ai) for guides.
 
 ## Installation
 

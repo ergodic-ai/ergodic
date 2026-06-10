@@ -3,9 +3,10 @@
 
 ``DomainKnowledge`` records what a user knows before looking at the data, the
 edges that must or must not exist, the temporal order of variables, which
-variables are roots or sinks, and which pairs share a hidden confounder. It is an
-immutable value object built up with small methods, and two knowledge objects
-combine with ``&`` (more knowledge means fewer admissible graphs).
+variables are roots or sinks, and which pairs share a hidden confounder. A
+skeleton restriction (``restrict_to``) caps which pairs may be adjacent at all.
+It is an immutable value object built up with small methods, and two knowledge
+objects combine with ``&`` (more knowledge means fewer admissible graphs).
 
 Hard constraints are the focus for now. The ``energy`` and ``log_prior`` hooks
 are where soft, probabilistic knowledge will attach once the Bayesian work
@@ -45,6 +46,7 @@ class DomainKnowledge:
     roots: frozenset[str] = field(default_factory=frozenset)
     sinks: frozenset[str] = field(default_factory=frozenset)
     confounded: frozenset[frozenset[str]] = field(default_factory=frozenset)
+    allowed_adjacencies: frozenset[frozenset[str]] | None = None
 
     # -- builders ------------------------------------------------------------
 
@@ -127,8 +129,52 @@ class DomainKnowledge:
             self, forbidden=self.forbidden | bans, variables=self.variables | set(a) | set(b)
         )
 
+    def restrict_to(self, skeleton: MixedGraph | Iterable[tuple[str, str]]) -> DomainKnowledge:
+        """Allow adjacencies only on the pairs of ``skeleton``.
+
+        ``skeleton`` is a :class:`~ergodic.graph.MixedGraph` (its edges name
+        the pairs, whatever the marks) or an iterable of ``(u, v)`` pairs. A
+        pair outside the allow-list is banned in every form: directed either
+        way, bidirected, or undirected. Restricting an already restricted
+        object keeps the intersection, so a second call only narrows the
+        support. An empty iterable allows no adjacencies at all.
+        """
+        from .graph import MixedGraph
+
+        if isinstance(skeleton, MixedGraph):
+            raw: Iterable[tuple[str, str]] = ((e.u, e.v) for e in skeleton.edges)
+        else:
+            raw = skeleton
+        pairs: set[frozenset[str]] = set()
+        names: set[str] = set()
+        for u, v in raw:
+            if u == v:
+                raise ValueError(
+                    f"a skeleton adjacency needs two distinct variables, got {u!r} twice"
+                )
+            pairs.add(frozenset({u, v}))
+            names.update((u, v))
+        allowed = frozenset(pairs)
+        if self.allowed_adjacencies is not None:
+            allowed &= self.allowed_adjacencies
+        return replace(
+            self,
+            allowed_adjacencies=allowed,
+            variables=self.variables | names,
+        )
+
     def __and__(self, other: DomainKnowledge) -> DomainKnowledge:
-        """Combine two knowledge objects by taking the union of their constraints."""
+        """Combine two knowledge objects by taking the union of their constraints.
+
+        Skeleton allow-lists intersect: an adjacency survives only when both
+        sides allow it, and ``None`` (unrestricted) defers to the other side.
+        """
+        if self.allowed_adjacencies is None:
+            allowed = other.allowed_adjacencies
+        elif other.allowed_adjacencies is None:
+            allowed = self.allowed_adjacencies
+        else:
+            allowed = self.allowed_adjacencies & other.allowed_adjacencies
         return DomainKnowledge(
             variables=self.variables | other.variables,
             required=self.required | other.required,
@@ -137,6 +183,7 @@ class DomainKnowledge:
             roots=self.roots | other.roots,
             sinks=self.sinks | other.sinks,
             confounded=self.confounded | other.confounded,
+            allowed_adjacencies=allowed,
         )
 
     combine = __and__
@@ -155,6 +202,14 @@ class DomainKnowledge:
                 out.append(f"required edge {u}->{v} contradicts root {v}")
             if u in self.sinks:
                 out.append(f"required edge {u}->{v} contradicts sink {u}")
+        if self.allowed_adjacencies is not None:
+            for u, v in sorted(self.required):
+                if frozenset({u, v}) not in self.allowed_adjacencies:
+                    out.append(f"required edge {u}->{v} lies outside the skeleton restriction")
+            for pair in sorted(self.confounded, key=lambda p: sorted(p)):
+                if pair not in self.allowed_adjacencies:
+                    a, b = sorted(pair)
+                    out.append(f"confounded pair {a},{b} lies outside the skeleton restriction")
         required_cycles = self._cycle_conflicts(self.required, "required edges")
         precedence_cycles = self._cycle_conflicts(self.precedes, "precedence")
         out.extend(required_cycles)
@@ -217,6 +272,11 @@ class DomainKnowledge:
         return frozenset(closed)
 
     def _permits(self, cause: str, effect: str, precedes: frozenset[tuple[str, str]]) -> bool:
+        if (
+            self.allowed_adjacencies is not None
+            and frozenset({cause, effect}) not in self.allowed_adjacencies
+        ):
+            return False
         if (cause, effect) in self.forbidden:
             return False
         if (effect, cause) in precedes:
@@ -227,7 +287,8 @@ class DomainKnowledge:
         """Return ``True`` if a directed edge ``cause -> effect`` is allowed.
 
         Precedence is read transitively: with ``A`` before ``B`` and ``B``
-        before ``C``, an edge ``C -> A`` is not permitted.
+        before ``C``, an edge ``C -> A`` is not permitted. Under a skeleton
+        restriction, a pair outside the allow-list fails in both directions.
         """
         return self._permits(cause, effect, self._precedence_closure())
 
@@ -255,6 +316,13 @@ class DomainKnowledge:
                     out.append(f"present edge between {u} and {v}, forbidden in both directions")
             elif edge.directed_pair() == (u, v):
                 out.append(f"present forbidden edge {u}->{v}")
+        if self.allowed_adjacencies is not None:
+            for edge in graph.edge_list():
+                if frozenset({edge.u, edge.v}) not in self.allowed_adjacencies:
+                    a, b = sorted((edge.u, edge.v))
+                    out.append(
+                        f"present edge between {a} and {b}, outside the skeleton restriction"
+                    )
         for before, after in sorted(self._precedence_closure()):
             if (
                 before in graph.nodes
@@ -283,11 +351,17 @@ class DomainKnowledge:
         """Enforce the hard constraints on ``graph``: drop forbidden, add required edges.
 
         A pair forbidden in both directions loses its edge whatever the marks; a
-        single-direction ban only drops the matching directed edge. Edges left
-        undirected or with a circle are oriented when only one direction stays
-        permitted. The result is returned as a new graph.
+        single-direction ban only drops the matching directed edge. Under a
+        skeleton restriction, every edge on a pair outside the allow-list is
+        dropped too. Edges left undirected or with a circle are oriented when
+        only one direction stays permitted. The result is returned as a new
+        graph.
         """
         out = graph
+        if self.allowed_adjacencies is not None:
+            for present in list(out.edges):
+                if frozenset({present.u, present.v}) not in self.allowed_adjacencies:
+                    out = out.remove_edge(present.u, present.v)
         for u, v in self.forbidden:
             edge = out.get_edge(u, v)
             if edge is None:
@@ -314,8 +388,9 @@ class DomainKnowledge:
         """Return a boolean matrix of permitted directed edges and its variable order.
 
         ``mask[i, j]`` is ``True`` when an edge from variable ``i`` to variable
-        ``j`` is allowed. The diagonal is ``False``. Useful as a search mask for
-        score-based and continuous-optimization discovery.
+        ``j`` is allowed. The diagonal is ``False``, and a skeleton restriction
+        zeroes both directions of every pair outside its allow-list. Useful as
+        a search mask for score-based and continuous-optimization discovery.
         """
         import numpy as np
 
@@ -346,10 +421,15 @@ class DomainKnowledge:
         )
 
     def __repr__(self) -> str:
+        restricted = (
+            ""
+            if self.allowed_adjacencies is None
+            else f", allowed_adjacencies={len(self.allowed_adjacencies)}"
+        )
         return (
             "DomainKnowledge("
             f"vars={len(self.variables)}, required={len(self.required)}, "
             f"forbidden={len(self.forbidden)}, precedes={len(self.precedes)}, "
             f"roots={len(self.roots)}, sinks={len(self.sinks)}, "
-            f"confounded={len(self.confounded)})"
+            f"confounded={len(self.confounded)}{restricted})"
         )

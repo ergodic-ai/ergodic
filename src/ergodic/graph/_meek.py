@@ -1,0 +1,172 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Meek's orientation rules and the Dor-Tarsi consistent extension.
+
+Pure graph algebra over PDAGs, graphs whose edges are all directed or
+undirected. :func:`meek_closure` applies Meek's rules R1 to R4 (Meek 1995)
+until no more undirected edges can be oriented, optionally blocking
+orientations through a ``forbidden`` callback. :func:`cpdag_of_dag` builds the
+CPDAG of a DAG by the standard construction: undirected skeleton, restored
+v-structures, then the closure. :func:`consistent_extension` and
+:func:`extendable` implement Dor and Tarsi's (1992) algorithm: a PDAG is
+extendable when some DAG has exactly its skeleton and v-structures.
+
+Knowledge never enters here; an algorithm that wants to respect constraints
+passes them in as the ``forbidden`` callable.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from itertools import combinations
+from typing import TYPE_CHECKING
+
+from ._graph import Edge, GraphKind, MixedGraph
+from ._marks import Mark
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_Maps = tuple[dict[str, set[str]], dict[str, set[str]], dict[str, set[str]]]
+
+
+def _pdag_maps(graph: MixedGraph, caller: str) -> _Maps:
+    """Split a PDAG into ``(parents, children, undirected)`` neighbour maps."""
+    parents: dict[str, set[str]] = {n: set() for n in graph.nodes}
+    children: dict[str, set[str]] = {n: set() for n in graph.nodes}
+    undirected: dict[str, set[str]] = {n: set() for n in graph.nodes}
+    for edge in graph.edges:
+        pair = edge.directed_pair()
+        if pair is not None:
+            children[pair[0]].add(pair[1])
+            parents[pair[1]].add(pair[0])
+        elif edge.is_undirected:
+            undirected[edge.u].add(edge.v)
+            undirected[edge.v].add(edge.u)
+        else:
+            raise ValueError(
+                f"{caller} needs a PDAG (directed and undirected edges only); "
+                f"edge {edge.glyph()!r} is neither"
+            )
+    return parents, children, undirected
+
+
+def _adjacent(x: str, y: str, maps: _Maps) -> bool:
+    parents, children, undirected = maps
+    return y in parents[x] or y in children[x] or y in undirected[x]
+
+
+def _compelled(a: str, b: str, maps: _Maps) -> bool:
+    """Return ``True`` when some Meek rule orients the undirected edge ``a -- b`` as ``a -> b``."""
+    parents, children, undirected = maps
+    # R1: c -> a, a -- b, c and b nonadjacent  =>  a -> b.
+    for c in parents[a]:
+        if not _adjacent(c, b, maps):
+            return True
+    # R2: a -> c -> b with a -- b  =>  a -> b (else a cycle).
+    if children[a] & parents[b]:
+        return True
+    # R3: a -- c, a -- d, c -> b, d -> b, c and d nonadjacent  =>  a -> b.
+    for c, d in combinations(sorted(undirected[a] & parents[b]), 2):
+        if not _adjacent(c, d, maps):
+            return True
+    # R4: a -- b, c -> b, a and c adjacent, e -- a, e -> c, e and b nonadjacent
+    #     =>  a -> b (b -> a would force either a cycle or a new v-structure at a).
+    for c in parents[b]:
+        if c == a or not _adjacent(a, c, maps):
+            continue
+        for e in parents[c] & undirected[a]:
+            if e != b and not _adjacent(e, b, maps):
+                return True
+    return False
+
+
+def meek_closure(
+    pdag: MixedGraph, *, forbidden: Callable[[str, str], bool] | None = None
+) -> MixedGraph:
+    """Apply Meek's rules R1 to R4 to a PDAG until fixpoint.
+
+    Each rule turns an undirected edge into a directed one whenever the
+    reverse orientation would create a cycle or a new v-structure in every
+    consistent extension. ``forbidden(u, v)`` returning ``True`` blocks the
+    orientation ``u -> v``: the rule simply does not fire that way and the
+    edge stays undirected unless another rule orients it.
+
+    The result is returned with kind ``mixed``; re-face it with
+    :meth:`MixedGraph.as_kind` when more is known.
+    """
+    maps = _pdag_maps(pdag, "meek_closure")
+    parents, children, undirected = maps
+    blocked: Callable[[str, str], bool] = forbidden if forbidden is not None else lambda u, v: False
+    graph = pdag
+    changed = True
+    while changed:
+        changed = False
+        pairs = sorted({tuple(sorted((x, y))) for x in undirected for y in undirected[x]})
+        for u, v in pairs:
+            if v not in undirected[u]:
+                continue  # oriented earlier in this pass
+            for a, b in ((u, v), (v, u)):
+                if blocked(a, b) or not _compelled(a, b, maps):
+                    continue
+                graph = graph.orient(a, b)
+                undirected[a].discard(b)
+                undirected[b].discard(a)
+                children[a].add(b)
+                parents[b].add(a)
+                changed = True
+                break
+    return replace(graph, kind=GraphKind.MIXED)
+
+
+def cpdag_of_dag(dag: MixedGraph) -> MixedGraph:
+    """The CPDAG of a DAG: undirected skeleton, restored v-structures, Meek closure.
+
+    Every DAG in the Markov equivalence class of ``dag`` maps to the same
+    CPDAG, which keeps an edge directed exactly when every member orients it
+    the same way.
+    """
+    if not dag.is_dag():
+        raise ValueError("cpdag_of_dag needs a DAG: every edge directed and no cycle")
+    skeleton = frozenset(Edge.make(e.u, Mark.TAIL, e.v, Mark.TAIL) for e in dag.edges)
+    out = MixedGraph(nodes=dag.nodes, edges=skeleton, kind=GraphKind.MIXED)
+    for z in sorted(dag.nodes):
+        for x, y in combinations(sorted(dag.parents(z)), 2):
+            if not dag.has_edge(x, y):
+                out = out.orient(x, z).orient(y, z)
+    return replace(meek_closure(out), kind=GraphKind.CPDAG)
+
+
+def consistent_extension(pdag: MixedGraph) -> MixedGraph | None:
+    """A DAG with exactly the PDAG's skeleton and v-structures, or ``None``.
+
+    Dor and Tarsi (1992): repeatedly find a node ``x`` with no outgoing
+    directed edges whose undirected neighbours are adjacent to every other
+    neighbour of ``x``, orient all undirected edges at ``x`` into ``x``, and
+    retire ``x``. When every node retires the oriented graph is the
+    extension; when no candidate exists none does.
+    """
+    maps = _pdag_maps(pdag, "consistent_extension")
+    parents, children, undirected = maps
+    remaining = set(pdag.nodes)
+    graph = pdag
+    while remaining:
+        target = None
+        for x in sorted(remaining):
+            if children[x] & remaining:
+                continue
+            local_und = undirected[x] & remaining
+            local_all = (parents[x] | undirected[x]) & remaining
+            if all(_adjacent(u, w, maps) for u in local_und for w in local_all if w != u):
+                target = x
+                break
+        if target is None:
+            return None
+        for u in sorted(undirected[target] & remaining):
+            graph = graph.orient(u, target)
+        remaining.discard(target)
+    return graph.as_kind(GraphKind.DAG)
+
+
+def extendable(pdag: MixedGraph) -> bool:
+    """Return ``True`` when the PDAG admits a consistent extension."""
+    return consistent_extension(pdag) is not None

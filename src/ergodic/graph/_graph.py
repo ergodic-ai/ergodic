@@ -374,14 +374,24 @@ class MixedGraph:
         return marks_ok and self.is_acyclic()
 
     def is_cpdag(self) -> bool:
-        """Directed or undirected edges only, with an acyclic directed part.
+        """Return ``True`` when the graph really is a CPDAG. This check is complete.
 
-        A true CPDAG must also be closed under the Meek rules and represent a
-        Markov equivalence class. Neither is checked yet (both come with the
-        discovery phase), so this accepts some graphs that are not CPDAGs.
+        Three things must hold: every edge is directed or undirected, some DAG
+        has exactly this skeleton and these v-structures (the Dor-Tarsi
+        consistent extension exists), and the graph equals the CPDAG of that
+        extension, so every compelled edge is directed and every reversible
+        edge is left undirected.
         """
-        marks_ok = all(e.is_directed or e.is_undirected for e in self.edges)
-        return marks_ok and self.is_acyclic()
+        if not all(e.is_directed or e.is_undirected for e in self.edges):
+            return False
+        if not self.is_acyclic():
+            return False
+        from ._meek import consistent_extension, cpdag_of_dag
+
+        extension = consistent_extension(self)
+        if extension is None:
+            return False
+        return cpdag_of_dag(extension).edges == self.edges
 
     def is_mag(self) -> bool:
         """ADMG rules plus no almost-directed cycle (a bidirected edge between ancestors).
