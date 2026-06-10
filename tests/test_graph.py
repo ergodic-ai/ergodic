@@ -121,7 +121,7 @@ def test_cpdag_allows_undirected_but_not_bidirected() -> None:
 
 
 def test_pag_allows_circles() -> None:
-    graph = pag(["X o-> Y", "Y o-o Z"])
+    graph = pag(["X o-> Y", "Z o-> Y"])
     assert graph.kind is GraphKind.PAG
 
 
@@ -237,9 +237,27 @@ def test_m_separation_with_bidirected_collider() -> None:
     assert not graph.m_separated("X", "Z", "Y")
 
 
-def test_m_separation_rejects_circles() -> None:
-    with pytest.raises(NotImplementedError):
-        pag(["X o-> Y", "Y o-> Z"]).m_separated("X", "Z")
+def test_set_mark_changes_one_endpoint_and_keeps_the_other() -> None:
+    graph = mixed(["X o-o Y"])
+    oriented = graph.set_mark("X", "Y", at="Y", mark=Mark.ARROW)
+    edge = oriented.get_edge("X", "Y")
+    assert edge is not None
+    assert edge.mark_at("Y") is Mark.ARROW
+    assert edge.mark_at("X") is Mark.CIRCLE
+    assert graph.get_edge("X", "Y") is not None  # the original is untouched
+
+
+def test_set_mark_is_a_no_op_when_the_mark_already_holds() -> None:
+    graph = mixed(["X o-> Y"])
+    assert graph.set_mark("X", "Y", at="Y", mark=Mark.ARROW) is graph
+
+
+def test_set_mark_rejects_missing_edges_and_foreign_endpoints() -> None:
+    graph = mixed(["X o-> Y", "Z o-> Y"])
+    with pytest.raises(KeyError, match="no edge"):
+        graph.set_mark("X", "Z", at="X", mark=Mark.TAIL)
+    with pytest.raises(KeyError, match="not an endpoint"):
+        graph.set_mark("X", "Y", at="Z", mark=Mark.TAIL)
 
 
 def test_separation_requires_disjoint_sets() -> None:

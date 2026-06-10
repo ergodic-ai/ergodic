@@ -25,7 +25,7 @@ from __future__ import annotations
 import heapq
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
@@ -71,6 +71,8 @@ class AStar:
         node_limit: Refuse problems with more variables than this; exact
             search is exponential in the node count.
     """
+
+    ingredient: ClassVar[str] = "score"
 
     def __init__(
         self,

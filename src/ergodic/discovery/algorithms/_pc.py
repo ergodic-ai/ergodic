@@ -26,97 +26,18 @@ result then keeps the ``mixed`` face and ``diagnostics["cpdag_valid"]`` is
 from __future__ import annotations
 
 from itertools import combinations
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import Edge, GraphKind, InvalidGraphError, Mark, MixedGraph
 from ...graph._meek import meek_closure
-from .._ci import CITest
+from .._registry import resolve_test
 from .._result import DiscoveryResult
+from ._skeleton import _complement, _permits_all, stable_skeleton
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ...data import TabularData
     from ...knowledge import DomainKnowledge
-
-_TEST_ALIASES: dict[str, tuple[str, str]] = {
-    "linear": ("ergodic.discovery.ci._linear", "Linear"),
-    "fisher_z": ("ergodic.discovery.ci._linear", "Linear"),
-    "discrete": ("ergodic.discovery.ci._discrete", "Discrete"),
-    "g_sq": ("ergodic.discovery.ci._discrete", "Discrete"),
-    "gsq": ("ergodic.discovery.ci._discrete", "Discrete"),
-    "mixed": ("ergodic.discovery.ci._mixed", "Mixed"),
-    "dg": ("ergodic.discovery.ci._mixed", "Mixed"),
-    "gcm": ("ergodic.discovery.ci._gcm", "GCM"),
-}
-
-
-def _auto_key(data: TabularData) -> str:
-    """Pick a test family from the column schema."""
-    kinds = [data.schema[name] for name in data.variables]
-    if all(c.is_continuous for c in kinds):
-        return "linear"
-    if all(c.is_discrete for c in kinds):
-        return "discrete"
-    return "mixed"
-
-
-def _test_class(key: str) -> type[CITest]:
-    """Resolve a test name to its class, importing the module only when asked."""
-    from importlib import import_module
-
-    try:
-        module_name, attr = _TEST_ALIASES[key]
-    except KeyError:
-        names = ", ".join(sorted(_TEST_ALIASES))
-        raise ValueError(
-            f"unknown test {key!r}; use 'auto', one of: {names}, or pass a CITest instance"
-        ) from None
-    return cast("type[CITest]", getattr(import_module(module_name), attr))
-
-
-def _resolve_test(spec: CITest | str, data: TabularData | None) -> CITest:
-    """Resolve the test spec and the data into one bound oracle.
-
-    Data comes from exactly one place: an unbound spec needs ``data`` at fit,
-    a bound test carries its own and must not be handed a different dataset.
-    """
-    if isinstance(spec, CITest):
-        if spec.is_bound:
-            if data is not None and data is not spec.data:
-                raise ValueError(
-                    f"{type(spec).__name__} is already bound to its own data; "
-                    "omit data at fit, or pass an unbound test to bind here"
-                )
-            return spec
-        if data is None:
-            raise ValueError(
-                f"{type(spec).__name__} is unbound and fit got no data; "
-                "construct the test with data or pass data to fit"
-            )
-        return spec.bind(data)
-    if isinstance(spec, str):
-        if data is None:
-            raise ValueError(f"test {spec!r} needs data to bind at fit; none was given")
-        key = spec.lower()
-        if key == "auto":
-            key = _auto_key(data)
-        return _test_class(key)(data)
-    raise TypeError(f"test must be a CITest or a string, got {type(spec).__name__}")
-
-
-def _permits_all(cause: str, effect: str) -> bool:
-    """The open default when no knowledge is given."""
-    return True
-
-
-def _complement(permits: Callable[[str, str], bool]) -> Callable[[str, str], bool]:
-    """Turn a permits-edge projection into the forbidden callback Meek expects."""
-
-    def forbids(u: str, v: str) -> bool:
-        return not permits(u, v)
-
-    return forbids
+    from .._ci import CITest
 
 
 class PC:
@@ -134,6 +55,8 @@ class PC:
     carries the CPDAG face when the oriented PDAG is a valid CPDAG and the
     ``mixed`` face otherwise.
     """
+
+    ingredient: ClassVar[str] = "test"
 
     def __init__(
         self,
@@ -156,9 +79,11 @@ class PC:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run PC-stable and return the discovered graph with its provenance."""
-        oracle = _resolve_test(self.test, data)
+        oracle = resolve_test(self.test, data)
         nodes = sorted(oracle.variables)
-        adj, sepsets = self._skeleton(oracle, nodes, knowledge)
+        adj, sepsets = stable_skeleton(
+            oracle, nodes, knowledge, alpha=self.alpha, max_cond_size=self.max_cond_size
+        )
         graph, n_v_structures = _orient(nodes, adj, sepsets, knowledge)
         try:
             final = graph.as_kind(GraphKind.CPDAG)
@@ -186,44 +111,6 @@ class PC:
             diagnostics=diagnostics,
             sepsets=sepsets,
         )
-
-    def _skeleton(
-        self, oracle: CITest, nodes: list[str], knowledge: DomainKnowledge | None
-    ) -> tuple[dict[str, set[str]], dict[frozenset[str], frozenset[str]]]:
-        """PC-stable adjacency search: the surviving adjacencies and the sepsets."""
-        protected: frozenset[frozenset[str]] = frozenset()
-        permits = _permits_all if knowledge is None else knowledge.permits_edge
-        if knowledge is not None:
-            protected = frozenset(frozenset(pair) for pair in knowledge.required)
-        adj: dict[str, set[str]] = {n: set() for n in nodes}
-        for x, y in combinations(nodes, 2):
-            if not permits(x, y) and not permits(y, x):
-                continue  # prune: forbidden in both directions, never tested
-            adj[x].add(y)
-            adj[y].add(x)
-        sepsets: dict[frozenset[str], frozenset[str]] = {}
-        level = 0
-        while self.max_cond_size is None or level <= self.max_cond_size:
-            snapshot = {n: frozenset(adj[n]) for n in nodes}
-            if all(len(snapshot[n]) <= level for n in nodes):
-                break
-            for x in nodes:
-                for y in sorted(snapshot[x]):
-                    if y not in adj[x]:
-                        continue  # removed earlier at this level
-                    if frozenset((x, y)) in protected:
-                        continue  # protect: a required edge is never tested
-                    candidates = sorted(snapshot[x] - {y})
-                    if len(candidates) < level:
-                        continue
-                    for subset in combinations(candidates, level):
-                        if oracle.independent(x, y, subset, alpha=self.alpha):
-                            adj[x].discard(y)
-                            adj[y].discard(x)
-                            sepsets[frozenset((x, y))] = frozenset(subset)
-                            break
-            level += 1
-        return adj, sepsets
 
 
 def _orient(

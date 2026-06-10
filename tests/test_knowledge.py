@@ -56,6 +56,12 @@ def test_precedence_is_transitive() -> None:
     assert mask[0, 2]
 
 
+def test_precedence_projection_exposes_the_closure() -> None:
+    knowledge = DomainKnowledge().order("A", "B").order("B", "C")
+    assert knowledge.precedence() == frozenset({("A", "B"), ("B", "C"), ("A", "C")})
+    assert DomainKnowledge().precedence() == frozenset()
+
+
 # -- conflict detection ------------------------------------------------------
 
 

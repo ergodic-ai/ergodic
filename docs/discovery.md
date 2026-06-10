@@ -1,6 +1,6 @@
 # Causal discovery
 
-Discovery learns causal structure from data. Two ingredients drive every search: a conditional independence test for the constraint algorithms, and a decomposable score for the score-based ones. Algorithms are thin consumers; the ingredients are objects you instantiate, configure, share, and replace.
+Discovery learns causal structure from data. Two ingredients drive every search: a conditional independence test for the constraint algorithms (PC, FCI, MMPC), and a decomposable score for the score-based ones (GES, hill climbing, exact A*). Algorithms are thin consumers; the ingredients are objects you instantiate, configure, share, and replace.
 
 ## One call
 
@@ -110,6 +110,60 @@ PC(test=DSeparationOracle(truth)).fit().graph    # exactly the CPDAG of the trut
 
 This is the recovery guarantee made executable: under a perfect oracle, PC returns the equivalence class, no sampling noise involved.
 
+## Latent confounders: FCI and the PAG
+
+PC assumes every common cause is measured. Drop that assumption and the honest output changes type: FCI returns a partial ancestral graph (PAG), whose marks survive hidden confounding. An arrowhead at `V` says `V` does not cause the other endpoint in any graph compatible with the data; a tail says it does in all of them; a circle says the data cannot tell. A pair that looks adjacent may share only a hidden common cause, and the PAG says exactly that with `o-o` or `<->` instead of pretending to know.
+
+```python
+import numpy as np
+import pandas as pd
+from ergodic import tabular, discover
+
+rng = np.random.default_rng(0)
+n = 4000
+l1, l2 = rng.normal(size=n), rng.normal(size=n)   # two hidden confounders
+a = l1 + 0.5 * rng.normal(size=n)
+b = l2 + 0.5 * rng.normal(size=n)
+c = l1 + l2 + 0.5 * rng.normal(size=n)
+data = tabular(pd.DataFrame({"A": a, "B": b, "C": c}))
+
+result = discover(data, method="fci", alpha=0.01)
+result.graph        # the PAG: A o-> C <-o B
+```
+
+Read that result the only way it can be read: C does not cause A and does not cause B (the arrowheads at C), and whether A and B cause C or merely share hidden causes with it stays open (the circles). No CPDAG can say this.
+
+The run is PC's stable skeleton, then the possible-d-sep phase (with latents, a separating set can live outside both neighbourhoods, so candidate sets widen), then re-orientation and Zhang's complete rule closure, assuming no selection bias. With a perfect oracle the output is exactly the canonical PAG of the truth, `pag_of_mag(mag_of_dag(truth))`, and the test suite holds it to that identity across random graphs. `max_cond_size` caps both testing phases, and the same warmed oracle that served PC serves FCI from cache.
+
+Knowledge translates through ancestry, not edge direction. `require(u, v)` orients `u -> v`; `confound(a, b)` orients `a <-> b` (a confounded pair is read as a pure hidden common cause); a tier pins only an arrowhead at the later end, because a later variable cannot cause an earlier one while confounding stays possible. Directional forbids, roots, and sinks fix no single mark in a latent world, so they only validate. Knowledge-seeded marks are not class invariants: the result then keeps the `mixed` face and `diagnostics["pag_valid"]` is `0.0`.
+
+## The skeleton screen
+
+MMPC (max-min parents and children) is a constraint search that stops at the skeleton: for each target it keeps the variables no subset of the candidate set can separate from it, then keeps an adjacency only when it holds from both sides. It is the cheap screen you run before an expensive search, and its output is built to feed `restrict_to`:
+
+```python
+screen = discover(data, method="mmpc")
+support = DomainKnowledge().restrict_to(screen.graph)
+discover(data, method="astar", knowledge=support)   # exact search inside the screen
+```
+
+That composition is the classic MMHC hybrid, recovered here as two objects instead of one algorithm. A score search inside the screen loses nothing (scores need no separating sets); PC inside the screen keeps the skeleton but can orient less, because a pruned pair is never tested and so never witnesses a v-structure.
+
+## How stable is that edge?
+
+One run returns one graph and no sense of how fragile it is. The bootstrap wrapper reruns any method on row resamples and counts what survives:
+
+```python
+from ergodic.discovery import bootstrap
+
+stability = bootstrap(data, method="pc", n_bootstrap=100, seed=0)
+stability.frequency("A", "C")      # adjacency frequency in [0, 1]
+stability.marks                    # frequency per oriented glyph
+stability.summary(threshold=0.8)   # the graph of edges that survive 80% of resamples
+```
+
+It wraps constraint and score methods alike (`bootstrap(data, method="ges")` works unchanged), and the frequencies are resampling stability, not posterior probabilities; graph posteriors are a later, Bayesian phase.
+
 ## Knowledge
 
 Discovery consumes `DomainKnowledge` in four modes: prune (forbidden adjacencies are never tested), protect (required edges are never removed), orient (tiers and required edges fix arrowheads before Meek propagation), and validate (the returned graph passes `is_consistent`).
@@ -191,6 +245,6 @@ And the ingredients compose sideways: a warmed oracle across algorithms, a skele
 
 ## Not built yet
 
-FCI and the PAG output (the PC skeleton machinery is most of it), the skeleton searches (graphical lasso, Markov blankets), the bootstrap stability wrapper, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, and the time-series shapes.
+Selection bias end to end (FCI's rules R5 to R7 and undirected PAG edges), RFCI and the conservative and majority variants, the graphical lasso screen, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, and the time-series shapes.
 
 ::: ergodic.discovery

@@ -78,6 +78,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   independence test that catches nonlinear dependence the partial correlation
   misses. `DSeparationOracle` now answers about the observed margin (latent
   nodes are not query-able variables).
+- Causal discovery with latent confounders: `FCI` returns a PAG (stable
+  skeleton, the possible-d-sep phase, Zhang's complete rule closure, no
+  selection bias), held in the tests to the canonical PAG of the truth under
+  a perfect oracle. The graph layer grew the toolkit underneath:
+  m-separation now reads circle marks through definite-status paths (the
+  class-invariant answer on a complete PAG), `mag_of_dag` is the latent
+  projection, `pag_of_mag`/`mag_of_pag` convert between a MAG and its
+  equivalence class, `fci_closure` joins `meek_closure`, `set_mark` edits one
+  endpoint, and `is_pag` became a real complete-PAG validator by round trip,
+  exactly as `is_cpdag` did. Domain knowledge translates to PAGs through
+  ancestry: tiers pin an arrowhead at the later end, `confound(a, b)` orients
+  a bidirected edge, directional forbids and roots/sinks validate only.
+- Skeleton screening and stability: `MMPC` (max-min parents-children, AND
+  rule) returns an undirected support for `restrict_to`, recovering the MMHC
+  hybrid as a composition; `bootstrap` reruns any method on row resamples and
+  returns adjacency and orientation frequencies with a thresholded
+  `summary()` graph, the first soft output. `Dataset.take(rows)` resamples
+  rows, and `discover` dispatches on each algorithm's declared ingredient.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

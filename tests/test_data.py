@@ -190,6 +190,27 @@ def test_matrix_nat_is_nan() -> None:
 # -- immutable edits ---------------------------------------------------------
 
 
+def test_take_resamples_rows_with_repeats_and_order() -> None:
+    ds = tabular(pd.DataFrame({"a": [1.0, 2.0, 3.0], "c": ["x", "y", "x"]}))
+    boot = ds.take([2, 0, 2, -1])
+    assert boot.n_rows == 4
+    assert boot.column("a").tolist() == [3.0, 1.0, 3.0, 3.0]
+    assert boot.codes("c").tolist() == [0, 0, 0, 0]
+    assert boot.schema == ds.schema
+    assert ds.n_rows == 3  # the original is untouched
+
+
+def test_take_validates_positions() -> None:
+    ds = tabular(pd.DataFrame({"a": [1.0, 2.0, 3.0]}))
+    with pytest.raises(IndexError, match="out of range"):
+        ds.take([3])
+    with pytest.raises(IndexError, match="out of range"):
+        ds.take([-4])
+    with pytest.raises(ValueError, match="one-dimensional"):
+        ds.take([[0, 1]])  # type: ignore[list-item]
+    assert ds.take([]).n_rows == 0
+
+
 def test_select_subset_and_leaves_original() -> None:
     ds = tabular(pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [3.0, 4.0, 5.0], "c": ["x", "y", "x"]}))
     sub = ds.select(["c", "a"])

@@ -324,6 +324,25 @@ class MixedGraph:
         """Return a graph with the edge between the two nodes set to ``parent -> child``."""
         return self.remove_edge(parent, child).add_edge((parent, Mark.TAIL, child, Mark.ARROW))
 
+    def set_mark(self, a: str, b: str, *, at: str, mark: Mark) -> MixedGraph:
+        """Return a graph with the ``{a, b}`` edge's mark at endpoint ``at`` set to ``mark``.
+
+        The finer-grained sibling of :meth:`orient`: one endpoint changes, the
+        other keeps its mark (how the FCI rules orient one mark at a time).
+        Raises ``KeyError`` when the pair carries no edge or ``at`` is not one
+        of its endpoints.
+        """
+        edge = self.get_edge(a, b)
+        if edge is None:
+            raise KeyError(f"no edge between {a!r} and {b!r}")
+        if at not in (edge.u, edge.v):
+            raise KeyError(f"{at!r} is not an endpoint of the edge between {a!r} and {b!r}")
+        other = edge.other(at)
+        new = Edge.make(at, mark, other, edge.mark_at(other))
+        if new == edge:
+            return self
+        return replace(self, edges=(self.edges - {edge}) | {new})
+
     def as_kind(self, kind: GraphKind | str) -> MixedGraph:
         """Re-tag the graph as ``kind`` (an enum or its name) after checking it fits."""
         if isinstance(kind, str):
@@ -409,13 +428,25 @@ class MixedGraph:
         return True
 
     def is_pag(self) -> bool:
-        """Only that the directed part is acyclic.
+        """Return ``True`` when the graph really is a complete PAG. This check is complete.
 
-        No circle-mark or orientation rule is checked, so this accepts many
-        graphs no FCI run would produce. The full check comes with the
-        discovery phase.
+        The round trip decides it, exactly as :meth:`is_cpdag` does for
+        CPDAGs: extract one member MAG (``mag_of_pag``), check it satisfies
+        the MAG rules, and require the canonical PAG of that member
+        (``pag_of_mag``) to be exactly this graph, so every invariant mark is
+        oriented and every varying mark is a circle. Selection bias is out of
+        scope: undirected and circle-tail edges fail. One known gap rides
+        along from :meth:`is_mag`: maximality of the member is not checked.
         """
-        return self.is_acyclic()
+        if not self.is_acyclic():
+            return False
+        from ._pag import mag_of_pag, pag_of_mag
+
+        try:
+            member = mag_of_pag(self)
+        except InvalidGraphError:
+            return False
+        return pag_of_mag(member).edges == self.edges
 
     def validate(self, kind: GraphKind | None = None) -> None:
         """Check the graph against ``kind`` (default: its own), raising on failure."""
@@ -537,5 +568,11 @@ def cpdag(edges: Iterable[EdgeSpec] = (), **kwargs: Any) -> MixedGraph:
 
 
 def pag(edges: Iterable[EdgeSpec] = (), **kwargs: Any) -> MixedGraph:
-    """Build a partial ancestral graph (any marks, including circles)."""
+    """Build a partial ancestral graph, validated as a complete PAG.
+
+    The marks must be exactly what an FCI run would leave: every invariant
+    mark oriented (closed under the orientation rules) and a circle wherever
+    the equivalence class disagrees. Build with :func:`mixed` instead when
+    you want circle marks without that guarantee.
+    """
     return mixed(edges, kind=GraphKind.PAG, **kwargs)

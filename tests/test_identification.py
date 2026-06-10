@@ -132,7 +132,7 @@ def test_identify_effect_reports_when_not_identifiable() -> None:
 
 def test_identification_rejects_pags() -> None:
     with pytest.raises(NotImplementedError):
-        identify_effect(pag(["X o-> Y"]), "X", "Y")
+        identify_effect(pag(["X o-o Y"]), "X", "Y")
 
 
 # -- latent nodes ------------------------------------------------------------

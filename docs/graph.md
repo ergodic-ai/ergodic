@@ -14,7 +14,7 @@ from ergodic import dag, admg, cpdag, pag
 g = dag(["Smoking -> Tar", "Tar -> Cancer", "Smoking -> Cancer"])
 confounded = admg(["X -> Y", "Y <-> Z"])      # <-> is a hidden common cause
 partial = cpdag(["A -- B", "A -- C", "B -> D", "C -> D"])   # -- is undirected
-discovered = pag(["X o-> Y", "Y o-o Z"])       # o is an unknown mark
+discovered = pag(["X o-> Y", "Z o-> Y"])       # o is an unknown mark
 ```
 
 The mark mini-language:
@@ -50,11 +50,11 @@ The kinds and what they allow:
 
 - `DAG`: directed edges, acyclic.
 - `ADMG`: directed and bidirected, acyclic. The object for latent confounding.
-- `CPDAG`: directed and undirected. What constraint-based discovery returns.
+- `CPDAG`: directed and undirected. What PC and GES return.
 - `MAG`: an ADMG with no almost-directed cycle.
-- `PAG`: any marks, including circles. What FCI returns.
+- `PAG`: circles where the equivalence class disagrees. What FCI returns.
 
-How deep do these checks go? `DAG` and `ADMG` are checked in full. The others are looser than their names suggest: `CPDAG` checks marks and acyclicity but not the Meek rules or that the graph stands for a real equivalence class, `MAG` rejects the undirected selection edges a MAG may legally carry and never tests maximality, and `PAG` checks acyclicity only. The full checks arrive with the discovery phase.
+How deep do these checks go? `DAG`, `ADMG`, `CPDAG`, and `PAG` are checked in full. A CPDAG must stand for a real equivalence class: some DAG has exactly its skeleton and v-structures, and the graph equals that DAG's CPDAG, so every compelled edge is directed and every reversible one is left undirected. A PAG gets the same treatment through its own round trip: one member MAG must extract (`mag_of_pag`), and the canonical PAG of that member (`pag_of_mag`) must be exactly the graph, so every invariant mark is oriented and every varying mark is a circle. `MAG` keeps two honest gaps: undirected selection edges are rejected (no selection bias anywhere yet) and maximality is not tested. Use `mixed(...)` when you want marks without these guarantees.
 
 Re-tag a graph with `as_kind`, which validates before it returns:
 
@@ -90,7 +90,17 @@ collider.d_separated("X", "Z")        # True: the collider is closed
 collider.d_separated("X", "Z", "Y")   # False: conditioning opens it
 ```
 
-The conditioning argument takes a single name or any iterable of names. Circle marks (PAGs) need separate reasoning that is not built yet, so a graph with a circle raises a clear error.
+The conditioning argument takes a single name or any iterable of names.
+
+Circle marks get Zhang's definite-status reading: a path connects only when every vertex on it has definite status (a collider by its arrowheads, or a definite non-collider by a tail or by unshielded circles). On a valid complete PAG the answer is a class invariant, the same in every member MAG, so `m_separated` on the PAG that FCI returns means exactly what it means on a known graph:
+
+```python
+from ergodic import pag
+
+p = pag(["X o-> Y", "Z o-> Y"])
+p.m_separated("X", "Z")        # True: the collider is invariant across the class
+p.m_separated("X", "Z", "Y")   # False
+```
 
 ## Intervening and slicing
 
@@ -114,6 +124,23 @@ MixedGraph.from_dict(data)
 
 networkx is used only here, at the edge of the package. The graph algorithms are native.
 
+## Moving between the faces
+
+The equivalence-class machinery is public, because discovery is built on it and tests want it too:
+
+```python
+from ergodic.graph import cpdag_of_dag, consistent_extension, mag_of_dag, pag_of_mag, mag_of_pag
+
+cpdag_of_dag(g)            # the CPDAG of a DAG's Markov equivalence class
+consistent_extension(c)    # one DAG member of a PDAG, or None (Dor-Tarsi)
+
+projected = mag_of_dag(dag(["L -> X", "L -> Y"], latent=["L"]))   # X <-> Y
+canonical = pag_of_mag(projected)                                  # X o-o Y
+member = mag_of_pag(canonical)                                     # one MAG back out
+```
+
+`mag_of_dag` is the latent projection: the MAG over the observed margin of a DAG or ADMG, preserving every m-separation among the observed. `pag_of_mag` computes the invariant marks of the Markov equivalence class (the canonical PAG, through the FCI rule closure), and `mag_of_pag` extracts one member. `meek_closure` and `fci_closure` (the orientation rule engines) are public too.
+
 ## Not built yet
 
-Adjustment sets and identification queries are built now; see [Identification](identification.md). Still planned: equivalence-class operations (skeleton to CPDAG, Markov equivalence), PAG separation, and latent projection. The implementation journal in `plans/` has the order.
+Adjustment sets and identification queries are built now; see [Identification](identification.md), and discovery returns these faces; see [Discovery](discovery.md). Still missing: selection bias end to end (selection nodes in the projection, undirected PAG edges, rules R5 to R7), possible m-separation (the existential cousin of the definite reading), and identification on PAGs and CPDAGs. The implementation journal in `plans/` has the order.

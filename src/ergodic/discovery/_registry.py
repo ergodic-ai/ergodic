@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Aliases and resolution: method names to algorithms, score specs to bound scores.
+"""Aliases and resolution: method names to algorithms, ingredient specs to bound oracles.
 
 Modules resolve lazily so importing the registry never pulls an algorithm in;
 ``discover`` and the algorithm classes share one source of truth for names.
+``resolve_test`` and ``resolve_score`` enforce the same rule: the data comes
+from exactly one place.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, cast
 
+from ._ci import CITest
 from ._score import Score
 
 if TYPE_CHECKING:
@@ -20,6 +23,8 @@ if TYPE_CHECKING:
 _BY_METHOD: dict[str, tuple[str, str]] = {
     "pc": ("ergodic.discovery.algorithms._pc", "PC"),
     "pc_stable": ("ergodic.discovery.algorithms._pc", "PC"),
+    "fci": ("ergodic.discovery.algorithms._fci", "FCI"),
+    "mmpc": ("ergodic.discovery.algorithms._mmpc", "MMPC"),
     "astar": ("ergodic.discovery.algorithms._astar", "AStar"),
     "a_star": ("ergodic.discovery.algorithms._astar", "AStar"),
     "exact": ("ergodic.discovery.algorithms._astar", "AStar"),
@@ -37,6 +42,70 @@ def algorithm_for(method: str) -> type[Any]:
         raise ValueError(f"unknown discovery method {method!r}; use one of {allowed}")
     module_name, attr = entry
     return cast("type[Any]", getattr(import_module(module_name), attr))
+
+
+_TEST_ALIASES: dict[str, tuple[str, str]] = {
+    "linear": ("ergodic.discovery.ci._linear", "Linear"),
+    "fisher_z": ("ergodic.discovery.ci._linear", "Linear"),
+    "discrete": ("ergodic.discovery.ci._discrete", "Discrete"),
+    "g_sq": ("ergodic.discovery.ci._discrete", "Discrete"),
+    "gsq": ("ergodic.discovery.ci._discrete", "Discrete"),
+    "mixed": ("ergodic.discovery.ci._mixed", "Mixed"),
+    "dg": ("ergodic.discovery.ci._mixed", "Mixed"),
+    "gcm": ("ergodic.discovery.ci._gcm", "GCM"),
+}
+
+
+def _auto_test_key(data: TabularData) -> str:
+    """Pick a test family from the column schema."""
+    kinds = [data.schema[name] for name in data.variables]
+    if all(c.is_continuous for c in kinds):
+        return "linear"
+    if all(c.is_discrete for c in kinds):
+        return "discrete"
+    return "mixed"
+
+
+def _test_class(key: str) -> type[CITest]:
+    """Resolve a test name to its class, importing the module only when asked."""
+    try:
+        module_name, attr = _TEST_ALIASES[key]
+    except KeyError:
+        names = ", ".join(sorted(_TEST_ALIASES))
+        raise ValueError(
+            f"unknown test {key!r}; use 'auto', one of: {names}, or pass a CITest instance"
+        ) from None
+    return cast("type[CITest]", getattr(import_module(module_name), attr))
+
+
+def resolve_test(spec: CITest | str, data: TabularData | None) -> CITest:
+    """Resolve the test spec and the data into one bound oracle.
+
+    Data comes from exactly one place: an unbound spec needs ``data`` at fit,
+    a bound test carries its own and must not be handed a different dataset.
+    """
+    if isinstance(spec, CITest):
+        if spec.is_bound:
+            if data is not None and data is not spec.data:
+                raise ValueError(
+                    f"{type(spec).__name__} is already bound to its own data; "
+                    "omit data at fit, or pass an unbound test to bind here"
+                )
+            return spec
+        if data is None:
+            raise ValueError(
+                f"{type(spec).__name__} is unbound and fit got no data; "
+                "construct the test with data or pass data to fit"
+            )
+        return spec.bind(data)
+    if isinstance(spec, str):
+        if data is None:
+            raise ValueError(f"test {spec!r} needs data to bind at fit; none was given")
+        key = spec.lower()
+        if key == "auto":
+            key = _auto_test_key(data)
+        return _test_class(key)(data)
+    raise TypeError(f"test must be a CITest or a string, got {type(spec).__name__}")
 
 
 _SCORE_ALIASES: dict[str, tuple[str, str]] = {

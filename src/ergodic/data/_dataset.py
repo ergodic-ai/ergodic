@@ -147,6 +147,22 @@ class Dataset:
 
     # -- immutable edits -----------------------------------------------------
 
+    def take(self, rows: Sequence[int] | npt.NDArray[np.int64]) -> Self:
+        """A new dataset with the rows at the given positions, in the given order.
+
+        Positions may repeat (a bootstrap resample) and may be negative
+        (Python indexing). Row identity is all this knows about; shapes with
+        row semantics (time series, panel) keep their index columns but it is
+        the caller's job to resample in a way their structure survives.
+        """
+        idx = np.asarray(rows, dtype=np.int64)
+        if idx.ndim != 1:
+            raise ValueError(f"rows must be one-dimensional, got shape {idx.shape}")
+        if idx.size and (int(idx.min()) < -self.n_rows or int(idx.max()) >= self.n_rows):
+            raise IndexError(f"row positions out of range for {self.n_rows} rows")
+        store = {name: arr[idx] for name, arr in self._store.items()}
+        return replace(self, _store=store, n_rows=int(idx.size))
+
     def select(self, names: Iterable[str]) -> Self:
         """A new dataset with the named columns, plus any index columns, in order."""
         chosen = [str(n) for n in names]

@@ -295,6 +295,15 @@ class DomainKnowledge:
     def requires_edge(self, cause: str, effect: str) -> bool:
         return (cause, effect) in self.required
 
+    def precedence(self) -> frozenset[tuple[str, str]]:
+        """Every ``(before, after)`` pair, with the order read transitively.
+
+        The projection discovery reads to orient: ``(a, b)`` here means ``b``
+        cannot be an ancestor of ``a``, which in a latent-variable search
+        (FCI) pins an arrowhead at ``b`` on any surviving adjacency.
+        """
+        return self._precedence_closure()
+
     def violations(self, graph: MixedGraph) -> list[str]:
         """Return the ways ``graph`` breaks this knowledge, empty when consistent."""
         out: list[str] = []

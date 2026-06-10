@@ -10,7 +10,7 @@ import pytest
 from ergodic import DomainKnowledge, dag, discover, estimate_effect, tabular
 from ergodic.data import TabularData
 from ergodic.discovery import BIC, GES, PC, AStar, DSeparationOracle, Linear
-from ergodic.graph import MixedGraph, consistent_extension, cpdag_of_dag
+from ergodic.graph import GraphKind, MixedGraph, consistent_extension, cpdag_of_dag
 
 
 def _chain(n: int = 4000, seed: int = 0) -> TabularData:
@@ -168,3 +168,45 @@ def test_skeleton_restriction_reaches_exact_search() -> None:
     found_pairs = {frozenset((e.u, e.v)) for e in result.graph.edges}
     truth_pairs = {frozenset((e.u, e.v)) for e in truth.edges}
     assert found_pairs <= truth_pairs
+
+
+def test_discover_routes_to_fci_and_mmpc() -> None:
+    rng = np.random.default_rng(5)
+    n = 3000
+    l1 = rng.normal(size=n)
+    l2 = rng.normal(size=n)
+    frame = pd.DataFrame(
+        {
+            "A": l1 + 0.5 * rng.normal(size=n),
+            "B": l2 + 0.5 * rng.normal(size=n),
+            "C": l1 + l2 + 0.5 * rng.normal(size=n),
+        }
+    )
+    data = tabular(frame)
+    by_fci = discover(data, method="fci", alpha=0.01)
+    assert by_fci.method == "fci"
+    assert by_fci.graph.kind is GraphKind.PAG
+    assert {e.glyph() for e in by_fci.graph.edges} == {"A o-> C", "B o-> C"}
+    with pytest.raises(ValueError, match="consumes a test"):
+        discover(data, method="fci", score="bic")
+
+    by_mmpc = discover(data, method="mmpc")
+    assert by_mmpc.method == "mmpc"
+    assert all(e.is_undirected for e in by_mmpc.graph.edges)
+    assert {frozenset((e.u, e.v)) for e in by_mmpc.graph.edges} == {
+        frozenset(("A", "C")),
+        frozenset(("B", "C")),
+    }
+
+
+def test_bootstrap_wraps_the_facade_end_to_end() -> None:
+    from ergodic.discovery import bootstrap
+
+    data = _chain()
+    result = bootstrap(data, method="pc", n_bootstrap=20, seed=0)
+    assert result.n_runs == 20
+    assert result.frequency("X", "M") >= 0.9
+    assert result.frequency("M", "Y") >= 0.9
+    assert result.frequency("X", "Y") <= 0.2
+    pairs = {frozenset((e.u, e.v)) for e in result.summary().edges}
+    assert pairs == {frozenset(("X", "M")), frozenset(("M", "Y"))}

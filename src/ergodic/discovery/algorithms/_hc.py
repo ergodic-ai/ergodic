@@ -19,7 +19,7 @@ node count is small enough for the exact optimum.
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import dag
 from .._registry import resolve_score
@@ -108,6 +108,8 @@ class HillClimb:
             ``None`` leaves the in-degree free. Required edges are seeded
             whatever the cap.
     """
+
+    ingredient: ClassVar[str] = "score"
 
     def __init__(
         self,

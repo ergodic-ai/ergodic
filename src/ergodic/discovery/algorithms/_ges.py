@@ -32,7 +32,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, replace
 from itertools import combinations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import Edge, GraphKind, InvalidGraphError, Mark, MixedGraph
 from ...graph._meek import consistent_extension, cpdag_of_dag, meek_closure
@@ -134,6 +134,8 @@ class GES:
     ``mixed`` face otherwise (forced knowledge orientations can leave the
     class; ``diagnostics["cpdag_valid"]`` says which happened).
     """
+
+    ingredient: ClassVar[str] = "score"
 
     def __init__(self, score: Score | str = "auto", *, max_degree: int | None = None) -> None:
         if not isinstance(score, Score | str):
