@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help sync lint format typecheck test check docs docs-serve build clean
+.PHONY: help sync lint format format-check typecheck test check docs docs-serve build clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -15,16 +15,19 @@ format: ## Auto-format and autofix with ruff
 	uv run ruff format .
 	uv run ruff check --fix .
 
+format-check: ## Verify formatting without rewriting
+	uv run ruff format --check .
+
 typecheck: ## Type-check with mypy
 	uv run mypy
 
 test: ## Run the test suite
 	uv run pytest
 
-check: lint typecheck test ## Lint + type-check + test
+check: lint format-check typecheck test ## Lint + format check + type-check + test
 
 docs: ## Build the documentation site
-	uv run --group docs mkdocs build
+	uv run --group docs mkdocs build --strict
 
 docs-serve: ## Serve docs locally with live reload
 	uv run --group docs mkdocs serve

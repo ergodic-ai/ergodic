@@ -52,6 +52,7 @@ dev = [
     "mypy>=1.11",
     "pandas-stubs>=2.1",
     "pymc>=5",
+    "scikit-learn>=1.9.0",
 ]
 docs = [
     "mkdocs>=1.6",
@@ -68,6 +69,22 @@ path = "src/ergodic/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ergodic"]
+
+[tool.hatch.build.targets.sdist]
+# Ship the package, tests, docs, and the user-facing metadata; keep local
+# tooling and agent config out of the distribution.
+exclude = [
+    ".claude",
+    ".devcontainer",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".python-version",
+    "CLAUDE.md",
+    "Makefile",
+    "mkdocs.yml",
+    "plans",
+    "uv.lock",
+]
 
 [tool.ruff]
 line-length = 100
@@ -102,6 +119,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

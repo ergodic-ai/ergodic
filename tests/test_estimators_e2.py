@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ergodic import EffectTarget, admg, dag, estimate_effect, identify_effect, tabular
+from ergodic import EffectTarget, dag, estimate_effect, identify_effect, tabular
 from ergodic.data import TabularData
 from ergodic.graph import MixedGraph
 from ergodic.inference import (

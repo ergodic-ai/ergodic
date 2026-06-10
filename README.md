@@ -16,7 +16,9 @@ By [ergodic.ai](https://ergodic.ai).
 | [`ergodic.inference`](src/ergodic/inference) | Causal inference: estimate causal effects from data and a causal model. |
 | [`ergodic.process`](src/ergodic/process) | Process mining and intelligence: discover and analyze processes from event logs. |
 
-The pillars are placeholders today. The shared objects they build on are written and tested: `ergodic.graph` (a mixed-graph family covering DAG, ADMG, CPDAG, MAG, and PAG) and `ergodic.knowledge` (`DomainKnowledge` for prior constraints). See the [docs](https://ergodic.ai) for guides.
+The shared objects are written and tested: `ergodic.graph` (a mixed-graph family covering DAG, ADMG, MAG, CPDAG, and PAG), `ergodic.knowledge` (`DomainKnowledge` for prior constraints), `ergodic.identification` (graph to estimand: adjustment, front-door, instruments), and `ergodic.data` (typed datasets: tabular, time series, panel, hierarchical, event log).
+
+Causal inference is built through effect estimation: `estimate_effect` turns a graph and a dataset into an effect with its uncertainty, over a library of estimators (doubly robust, double machine learning, the meta-learners, instruments) with sklearn-style learners in every nuisance slot, heterogeneous effects through `cate`, and an optional Bayesian posterior path through PyMC (`pip install ergodic[bayes]`). Causal discovery and process intelligence are placeholders today. See the [docs](https://ergodic.ai) for guides.
 
 ## Installation
 
@@ -41,6 +43,25 @@ g.do("Tar")                                  # the graph after intervening on Ta
 # state prior knowledge and check a graph against it
 dk = DomainKnowledge().with_tiers([["Smoking"], ["Tar"], ["Cancer"]])
 dk.is_consistent(g)   # True
+```
+
+Estimate a causal effect in one call:
+
+```python
+import numpy as np
+import pandas as pd
+from ergodic import dag, tabular, estimate_effect
+
+rng = np.random.default_rng(0)
+n = 4000
+z = rng.normal(size=n)
+a = (rng.uniform(size=n) < 1.0 / (1.0 + np.exp(-0.8 * z))).astype(float)
+y = 2.0 * a + 1.5 * z + rng.normal(size=n)   # the true effect of A on Y is 2.0
+
+g = dag(["Z -> A", "Z -> Y", "A -> Y"])
+data = tabular(pd.DataFrame({"A": a, "Z": z, "Y": y}))
+estimate_effect(g, data, "A", "Y")
+# EffectEstimate(aipw, analytic: ate=1.997, se=0.0342, 95% CI [1.93, 2.06], n=4000)
 ```
 
 ## Development
