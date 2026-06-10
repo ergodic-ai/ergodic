@@ -78,7 +78,7 @@ boot.draws.shape         # (1000,)
 boot.interval()          # the 2.5% and 97.5% draw quantiles
 ```
 
-AIPW's ATE has an analytic standard error from its influence function, since the estimator is Neyman-orthogonal. Outcome regression and IPW bootstrap, which fills the draws. A point estimate is the degenerate case of a distribution, so a later Bayesian estimator returns posterior draws through the same result and the same accessors.
+AIPW's ATE has an analytic standard error from its influence function, since the estimator is Neyman-orthogonal. Outcome regression and IPW bootstrap, which fills the draws. A point estimate is the degenerate case of a distribution, so the Bayesian path below returns posterior draws through the same result and the same accessors.
 
 ## Targets
 
@@ -210,5 +210,3 @@ Adjustment: `OutcomeRegression` (the S- and T-learner), `IPW`, `Stratification`,
 ## Not built yet
 
 TMLE and the orthogonal front-door. Multi-level and multi-valued treatment, and dose-response curves. Frequentist per-unit CATE intervals (the Bayesian path above gives them now; the analytic version needs per-unit standard errors). The Bayesian posterior covers the adjustment estimators, so the instrument and front-door posteriors, cross-fit Bayesian nuisances, and the joint PyMC estimators that sample the whole model come next, as does a JAX or NumPyro backend behind the same `predict_draws`. Panel-shape estimators (difference-in-differences, fixed effects, synthetic control) ride the panel data shape.
-
-::: ergodic.inference

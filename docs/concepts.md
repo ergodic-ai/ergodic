@@ -1,6 +1,6 @@
 # Concepts
 
-The two objects you build on are a causal graph and a domain-knowledge set. This page covers the model behind them, so the method-by-method guides read easily.
+Everything in ergodic builds on a small set of shared objects: the causal graph, the domain-knowledge set, the typed dataset, and the identification step that turns a graph into an estimand. This page covers the model behind the first two, the ones with the most ideas in them, so the method-by-method guides read easily.
 
 ## One graph, many kinds
 
@@ -43,6 +43,6 @@ Today the constraints are hard. A graph either satisfies them or it does not. So
 
 Discovery takes data and domain knowledge and returns a graph, often a CPDAG or a PAG. Inference takes a graph and data and returns an effect. Domain knowledge feeds both: it prunes and orients during discovery, and it states the conditions an effect needs to be identified. The graph and the knowledge are the two inputs every pillar reads.
 
-## Representation now, algorithms next
+## What is built
 
-The representation is done. Every kind of causal graph fits, and the knowledge object holds every hard constraint. The algorithms come in phases. Separation, the do-operator, consistency checks, and identification (adjustment sets, the front-door, instruments) are here. Equivalence classes and PAG-specific separation are next, tracked in the implementation journal under `plans/`.
+The representation is done, and the first two pillars run on it end to end. Separation reads every face, circle marks included, and on a CPDAG or PAG it answers for the whole equivalence class. Identification covers adjustment, the front-door, and instruments on a single graph, and the generalized adjustment criterion on a class, so a discovered graph identifies directly. Estimation turns an estimand into a number with its uncertainty over a library of estimators, with an optional Bayesian posterior path. Discovery learns a CPDAG (PC, GES, and friends) or a PAG that tolerates hidden confounders (FCI), with domain knowledge entering every search. Still ahead: selection bias, the process pillar, and soft knowledge, tracked in the implementation journal under `plans/`.

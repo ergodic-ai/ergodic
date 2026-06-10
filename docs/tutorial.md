@@ -111,6 +111,7 @@ Here the tiers pin every edge, so the skeleton turns into the original DAG. With
 
 ## Next
 
+- [Learn causal inference](learn/index.md) if the ideas themselves are new: six notebook guides, no background assumed.
 - [Concepts](concepts.md) for the model behind these objects: marks, kinds, and why graphs are immutable.
 - [Causal graphs](graph.md) and [Domain knowledge](knowledge.md) for the method-by-method guides.
 - [API reference](reference.md) for the full surface.

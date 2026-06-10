@@ -246,5 +246,3 @@ And the ingredients compose sideways: a warmed oracle across algorithms, a skele
 ## Not built yet
 
 Selection bias end to end (FCI's rules R5 to R7 and undirected PAG edges), RFCI and the conservative and majority variants, the graphical lasso screen, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, and the time-series shapes.
-
-::: ergodic.discovery

@@ -55,9 +55,13 @@ dev = [
     "scikit-learn>=1.9.0",
 ]
 docs = [
-    "mkdocs>=1.6",
+    "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
+    # The learn series: py:percent notebooks executed at build time.
+    "mkdocs-jupyter>=0.25",
+    "ipykernel>=6.29",
+    "matplotlib>=3.8",
 ]
 
 [build-system]
@@ -104,6 +108,11 @@ select = [
     "PTH", # flake8-use-pathlib
     "RUF", # ruff-specific rules
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# The learn notebooks: cells import where the narrative needs them (E402) and end
+# on a bare expression so the rendered notebook displays it (B018).
+"docs/learn/*.py" = ["E402", "B018"]
 
 [tool.mypy]
 python_version = "3.11"

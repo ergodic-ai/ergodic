@@ -25,6 +25,13 @@ theme:
 
 plugins:
   - search
+  - mkdocs-jupyter:
+      include: ["*.py"]
+      execute: true
+      allow_errors: false
+      kernel_name: python3
+      include_source: true
+      ignore_h1_titles: true
   - mkdocstrings:
       handlers:
         python:
@@ -37,6 +44,14 @@ plugins:
 nav:
   - Home: index.md
   - Getting started: tutorial.md
+  - Learn causal inference:
+      - Start here: learn/index.md
+      - 1. Why causality: learn/01-why-causality.py
+      - 2. Good and bad controls: learn/02-good-and-bad-controls.py
+      - 3. Estimating effects: learn/03-estimating-effects.py
+      - 4. Heterogeneous effects: learn/04-heterogeneous-effects.py
+      - 5. Hidden confounding: learn/05-hidden-confounding.py
+      - 6. Discovering structure: learn/06-discovering-structure.py
   - Concepts: concepts.md
   - Guides:
       - Causal graphs: graph.md

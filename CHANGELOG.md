@@ -109,6 +109,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dags_of_cpdag` and `mags_of_pag` (deterministic, capped without silent
   truncation). The front-door and instruments raise on a class and point at
   the enumerators (the per-member IDA pattern); mixed graphs raise.
+- The learn series: six beginner notebook guides (`docs/learn/`) that teach
+  causal inference from zero on commercial examples, confounding and Simpson's
+  paradox, good and bad controls, estimation with doubly robust and cross-fit
+  estimators, heterogeneous effects and uplift targeting, instruments and the
+  front door, and structure discovery ending at the discover-then-estimate
+  bridge. Each guide is a py:percent script that mkdocs-jupyter executes at
+  build time with fixed seeds, so the outputs and figures on the site are real
+  and a broken example fails `make docs`. Docs review alongside: the API
+  reference gains the discovery section (guide pages no longer inline `:::`
+  blocks), stale forward references brought current, and the index routes
+  beginners to the series.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

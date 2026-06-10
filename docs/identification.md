@@ -107,7 +107,7 @@ Two disconnected nodes land here too. Before this rule, such graphs read as "not
 
 ## Equivalence classes: identify on what discovery returns
 
-Discovery does not hand back a single DAG. `discover(data)` returns a CPDAG and `discover(data, method="fci")` returns a PAG: equivalence classes, where an undirected edge or a circle mark means the data could not decide. `identify_effect` accepts those faces directly (and MAGs), and the answer is stronger than it looks: a success holds in **every** graph the class represents, through the generalized adjustment criterion (Perkovic et al., 2018). You do not have to pick a member and hope.
+Discovery does not hand back a single DAG. `discover(data)` returns a CPDAG and `discover(data, method="fci")` returns a PAG: equivalence classes, where an undirected edge or a circle mark means the data could not decide. `identify_effect` accepts those faces directly (and MAGs), and the answer is stronger than it looks: a success holds in every graph the class represents, through the generalized adjustment criterion (Perkovic et al., 2018). You do not have to pick a member and hope.
 
 ```python
 from ergodic.graph import cpdag_of_dag
@@ -118,9 +118,9 @@ identify_effect(cp, "X", "Y").adjustment_set   # frozenset({'A', 'B'}): valid in
 
 Three things decide a class query:
 
-- **No possibly causal path.** When no member can route a directed path from treatment to outcome, the effect is zero everywhere and the strategy is `"null"`, exactly as on a DAG.
-- **Amenability.** Every possibly causal path out of the treatment must start with a directed edge that is *visible* (on a CPDAG every directed edge is; on a MAG or PAG visibility is Zhang's certificate that no member hides a confounder behind the edge). When the first edge is undecided or invisible, members disagree about the very thing adjustment needs, no set works uniformly, and the report says so.
-- **The criterion itself.** Possible ancestry replaces ancestry, the forbidden set grows to possible descendants, and blocking reads definite-status paths, so the answer is the class invariant.
+- No possibly causal path: when no member can route a directed path from treatment to outcome, the effect is zero everywhere and the strategy is `"null"`, exactly as on a DAG.
+- Amenability: every possibly causal path out of the treatment must start with a directed edge that is *visible* (on a CPDAG every directed edge is; on a MAG or PAG visibility is Zhang's certificate that no member hides a confounder behind the edge). When the first edge is undecided or invisible, members disagree about exactly what adjustment needs, no set works uniformly, and the report says so.
+- The criterion itself: possible ancestry replaces ancestry, the forbidden set grows to possible descendants, and blocking reads definite-status paths, so the answer is the class invariant.
 
 When the class is amenable, one estimand covers it; when it is not, enumerate the members and identify each (the IDA pattern):
 
@@ -133,7 +133,7 @@ identify_effect(chain, "X", "Y").identifiable     # False: not amenable
 # {'adjustment', 'null'}: the members genuinely disagree about the effect
 ```
 
-`mags_of_pag` does the same for a PAG. The front-door and instrument criteria are not class-invariant, so on a class face they raise and point you at the enumerators; `identify_effect` simply reports not-identifiable after adjustment fails. A `mixed` graph raises too: it certifies neither a single world nor a class, so re-face it with `as_kind` first (an FCI fallback output with `pag_valid` 0.0 stays mixed on purpose).
+`mags_of_pag` does the same for a PAG. The front-door and instrument criteria are not class-invariant, so on a class face they raise and point you at the enumerators; `identify_effect` reports not-identifiable after adjustment fails. A `mixed` graph raises too: it certifies neither a single world nor a class, so re-face it with `as_kind` first (an FCI fallback output with `pag_valid` 0.0 stays mixed on purpose).
 
 Because `estimate_effect` runs identification first, the whole bridge composes in two calls: discover a class from data, then estimate straight off it. The discovery guide closes with that loop.
 

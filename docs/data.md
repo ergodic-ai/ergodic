@@ -198,8 +198,8 @@ mutating the source dataframe or array afterwards doesn't reach the dataset.
 
 ## What's next on the data side
 
-The containers are here. The algorithms that read them land with their pillars:
-estimation over a `TabularData`, panel identification over a `PanelData`, temporal
-discovery and reconciliation over the time-series shapes, and process mining over
-an `EventLog`. The event log's projections into the grid shapes land with the
-process pillar too.
+The containers are here, and the first consumers are too: estimation and discovery
+both read a `TabularData` today. The rest land with their pillars: panel estimators
+over a `PanelData`, temporal discovery and reconciliation over the time-series
+shapes, and process mining over an `EventLog`. The event log's projections into the
+grid shapes land with the process pillar too.
