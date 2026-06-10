@@ -1,0 +1,57 @@
+site_name: Ergodic
+site_description: "Causal AI: causal discovery, causal inference, and process intelligence."
+site_url: https://ergodic.ai
+copyright: Copyright &copy; 2026 Ergodic
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+
+nav:
+  - Home: index.md
+  - Getting started: tutorial.md
+  - Concepts: concepts.md
+  - Guides:
+      - Causal graphs: graph.md
+      - Domain knowledge: knowledge.md
+      - Data: data.md
+      - Identification: identification.md
+  - Pillars:
+      - Causal Discovery: discovery.md
+      - Causal Inference: inference.md
+      - Process Intelligence: process.md
+  - API Reference: reference.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences

@@ -1,0 +1,48 @@
+# Concepts
+
+The two objects you build on are a causal graph and a domain-knowledge set. This page covers the model behind them, so the method-by-method guides read easily.
+
+## One graph, many kinds
+
+Causal work uses more than one kind of graph. A known model is a DAG. Constraint-based discovery (the PC algorithm) returns a CPDAG, a whole class of DAGs that fit the data equally well. Allow hidden confounders and FCI returns a PAG. Inference with latent variables uses an ADMG. ergodic represents all of them with one object by putting a mark on each end of every edge.
+
+A mark is a tail, an arrowhead, or a circle. The pair of marks on an edge says what the edge means:
+
+| Glyph | Marks | Meaning |
+| --- | --- | --- |
+| `A -> B` | tail, arrowhead | A is a direct cause of B |
+| `A <-> B` | arrowhead, arrowhead | A and B share a hidden common cause |
+| `A -- B` | tail, tail | adjacent, orientation unspecified |
+| `A o-> B` | circle, arrowhead | arrow at B, unknown at A |
+
+Each named kind is the same core under a rule about which marks it allows:
+
+- `DAG`: directed, acyclic.
+- `ADMG`: directed and bidirected, acyclic. The object for latent confounding.
+- `CPDAG`: directed and undirected. What constraint-based discovery returns.
+- `MAG`: an ADMG with no almost-directed cycle.
+- `PAG`: any marks, circles included. What FCI returns.
+
+`validate` enforces the rule, so a graph always knows its kind and refuses an illegal mark or a cycle. Building with `dag`, `admg`, `cpdag`, or `pag` validates for you and raises `InvalidGraphError` on a bad input.
+
+## Graphs are immutable
+
+A graph is a value, like a number or a string. Two graphs with the same nodes, edges, and kind are equal and hash the same, so they work as dict keys and set members. Every edit (`add_edge`, `orient`, `do`, `remove_edge`) returns a new graph and leaves the original alone.
+
+This matters because causal work is mostly graph surgery. The do-operator builds a mutilated graph, discovery orients one edge at a time, and adjustment criteria reason over modified graphs. With values, the version before a step and the version after it both exist, results cache cleanly, and there is no aliasing to track.
+
+One detail to know: edges store the smaller node name first, so a printed edge can read reversed. `season -> rain` shows as `rain <-- season` when `rain` sorts first. It is the same edge.
+
+## Domain knowledge narrows the graphs
+
+`DomainKnowledge` is a set of constraints on structure: edges that must or must not be there, the order variables come in, roots and sinks, confounded pairs. Read it as a filter on the space of possible graphs, where each constraint rules some out. Two knowledge objects combine with `&`, and the result keeps the graphs that satisfy both, so more knowledge means fewer graphs.
+
+Today the constraints are hard. A graph either satisfies them or it does not. Soft knowledge, a belief with a weight or a prior over graphs, attaches at `energy` and `log_prior`, which raise for now. That arrives with the Bayesian discovery work, and it will carry provenance too: where a belief came from, and how much to trust it.
+
+## How the pieces fit
+
+Discovery takes data and domain knowledge and returns a graph, often a CPDAG or a PAG. Inference takes a graph and data and returns an effect. Domain knowledge feeds both: it prunes and orients during discovery, and it states the conditions an effect needs to be identified. The graph and the knowledge are the two inputs every pillar reads.
+
+## Representation now, algorithms next
+
+The representation is done. Every kind of causal graph fits, and the knowledge object holds every hard constraint. The algorithms come in phases. Separation, the do-operator, and consistency checks are here. Identification (adjustment sets), equivalence classes, and PAG-specific separation are next, tracked in the implementation journal under `plans/`.
