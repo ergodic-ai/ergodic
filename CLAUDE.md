@@ -25,6 +25,7 @@ These re-export from the top level: `from ergodic import dag, admg, DomainKnowle
 - No graph posteriors yet; revisit at the Bayesian phase.
 - Data enters as a typed `Dataset`. The dataframe library lives only at `data/_frame.py` (pandas native, polars and arrow via `to_pandas`; narwhals deferred). The two axes, row shape and column schema, stay separate.
 - Estimation factors into a `CausalEstimator` (the strategy) and a `Learner` (the sklearn estimator surface, native by default, sklearn/xgboost optional). The result is distribution-shaped: a point now, posterior draws later through the same `EffectEstimate`.
+- Categorical encoding belongs to the algorithm wrapper, not the data layer. `data.matrix()` stays integer codes; estimation one-hots in its own design builder (`_covariate_matrix`); a discovery conditional-independence test owns its strategy, one-hot or natively categorical.
 
 ## Layout
 
@@ -33,7 +34,7 @@ These re-export from the top level: `from ergodic import dag, admg, DomainKnowle
 - `src/ergodic/inference/`: `_target`, `_result`, `_learner` (Learner + BayesianLearner), `_estimator`, `_crossfit`, `_estimate`, `_registry`, `learners/` (OLS, logistic, KNN, PyMC), `estimators/` (thirteen, grouped by family, plus `_null`).
 - `src/ergodic/knowledge.py`, `src/ergodic/identification.py`.
 - `tests/`: `test_graph.py`, `test_knowledge.py`, `test_identification.py`, `test_data.py`, `test_inference.py`, `test_estimators_e2.py`, `test_bayes.py`, `test_sklearn_interop.py`, `test_smoke.py`.
-- `plans/`: dated implementation journal, one entry per phase (`*-causal-graph-and-domain-knowledge.md`, `*-identification.md`, `*-data-objects.md`, `*-effect-estimation.md`, `*-bayesian-learners.md`, `*-audit-and-hardening.md`).
+- `plans/`: dated implementation journal, one entry per phase (`*-causal-graph-and-domain-knowledge.md`, `*-identification.md`, `*-data-objects.md`, `*-effect-estimation.md`, `*-bayesian-learners.md`, `*-audit-and-hardening.md`). Gitignored on purpose: an internal tracking device, not part of the repo.
 - `docs/`: user guides (tutorial, concepts, graph, knowledge, data, identification, inference) and the API reference, built with MkDocs.
 
 ## Working here
