@@ -47,8 +47,9 @@ def _codes_columns(
         col = data.schema[name]
         if not col.is_discrete:
             raise TypeError(
-                f"a codes-based test needs discrete columns; {name!r} is {col.kind}; "
-                "use Linear or Mixed for continuous data"
+                f"a codes-based test or score needs discrete columns; {name!r} is "
+                f"{col.kind}; use a numeric form (Linear, Mixed, BIC, MixedBIC) "
+                "for continuous data"
             )
         codes[name] = np.asarray(data.codes(name), dtype=np.int64)
         cards[name] = int(col.cardinality or 0)

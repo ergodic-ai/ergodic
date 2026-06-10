@@ -11,9 +11,12 @@ import pytest
 from ergodic import tabular
 from ergodic.discovery._ci import CIResult, CITest
 from ergodic.discovery._stats import _chi2_sf, _norm_cdf
+from ergodic.discovery.algorithms._pc import PC
 from ergodic.discovery.ci._discrete import Discrete
+from ergodic.discovery.ci._gcm import GCM
 from ergodic.discovery.ci._linear import Linear
 from ergodic.discovery.ci._mixed import Mixed
+from ergodic.inference import OLS
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -295,3 +298,88 @@ def test_chi2_survival_matches_the_classic_quantiles() -> None:
 
 def test_norm_cdf_matches_the_classic_quantile() -> None:
     assert _norm_cdf(1.959964) == pytest.approx(0.975, abs=1e-6)
+
+
+# -- GCM: the generalized covariance measure -------------------------------------
+
+
+def _quadratic_confounder(n: int = 2000, seed: int = 0) -> TabularData:
+    """X <- Z -> Y through Z**2 on a positive range: X indep Y given Z.
+
+    A linear regression of either endpoint on Z leaves the quadratic part in
+    the residual, those leftovers correlate, and the partial correlation
+    false-positives; a flexible regression takes the curve out.
+    """
+    rng = np.random.default_rng(seed)
+    z = rng.uniform(0.5, 2.0, size=n)
+    x = z**2 + 0.5 * rng.normal(size=n)
+    y = z**2 + 0.5 * rng.normal(size=n)
+    return tabular({"X": x, "Y": y, "Z": z})
+
+
+def test_gcm_calibrates_under_the_null_with_a_linear_learner() -> None:
+    p_values: list[float] = []
+    for seed in range(100):
+        rng = np.random.default_rng(seed)
+        z = rng.normal(size=300)
+        x = z + rng.normal(size=300)
+        y = z + rng.normal(size=300)
+        data = tabular({"X": x, "Y": y, "Z": z})
+        p_values.append(GCM(data, learner=OLS()).test("X", "Y", ["Z"]).p_value)
+    assert 0.35 < float(np.mean(p_values)) < 0.65
+    assert float(np.mean(np.asarray(p_values) < 0.05)) < 0.15
+
+
+def test_gcm_clears_the_quadratic_confounder_that_fools_the_linear_test() -> None:
+    # Both endpoints read Z**2 over a positive Z, so the linear residuals
+    # share the leftover curvature and the partial correlation rejects the
+    # true null; the default KNN regression removes the curve. Seed 0 leaves
+    # both margins wide (linear p ~ 1e-4, GCM p ~ 0.9).
+    data = _quadratic_confounder()
+    assert Linear(data).test("X", "Y", ["Z"]).p_value < 0.05
+    assert GCM(data).test("X", "Y", ["Z"]).p_value > 0.05
+
+
+def test_gcm_detects_dependence_a_nonlinear_regression_reveals() -> None:
+    rng = np.random.default_rng(3)
+    z = rng.normal(size=1500)
+    x = z + rng.normal(size=1500)
+    y = 0.5 * x + z**2 + rng.normal(size=1500)
+    data = tabular({"X": x, "Y": y, "Z": z})
+    assert GCM(data).test("X", "Y", ["Z"]).p_value < 0.01
+
+
+def test_gcm_requires_scalar_endpoints() -> None:
+    test = GCM(_mixed_chain())
+    with pytest.raises(TypeError, match="scalar"):
+        test.test("M", "Y")
+
+
+def test_gcm_accepts_a_sklearn_regressor_in_the_slot() -> None:
+    pytest.importorskip("sklearn")
+    from sklearn.ensemble import RandomForestRegressor
+
+    data = _quadratic_confounder()
+    test = GCM(data, learner=RandomForestRegressor(n_estimators=30, random_state=0))
+    result = test.test("X", "Y", ["Z"])
+    assert isinstance(result, CIResult)
+    assert 0.0 <= result.p_value <= 1.0
+    assert result.p_value > 0.05
+
+
+def test_pc_over_gcm_drops_the_spurious_edge_the_linear_test_keeps() -> None:
+    data = _quadratic_confounder()
+    linear_pairs = {frozenset((e.u, e.v)) for e in PC(Linear(data)).fit().graph.edges}
+    gcm_pairs = {frozenset((e.u, e.v)) for e in PC(GCM(data)).fit().graph.edges}
+    assert frozenset(("X", "Y")) in linear_pairs
+    assert gcm_pairs == {frozenset(("X", "Z")), frozenset(("Z", "Y"))}
+
+
+def test_gcm_with_no_conditioning_is_a_covariance_test() -> None:
+    rng = np.random.default_rng(7)
+    x = rng.normal(size=500)
+    dependent = tabular({"X": x, "Y": x + 0.5 * rng.normal(size=500)})
+    assert GCM(dependent).test("X", "Y").p_value < 0.01
+    rng = np.random.default_rng(8)
+    independent = tabular({"X": rng.normal(size=500), "Y": rng.normal(size=500)})
+    assert GCM(independent).test("X", "Y").p_value > 0.05

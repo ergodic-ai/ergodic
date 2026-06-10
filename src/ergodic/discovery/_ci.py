@@ -208,6 +208,10 @@ class DSeparationOracle(CITest):
     Quacks like any bound test (p-value 1.0 when separated, 0.0 when
     connected), so every constraint algorithm can be checked for exactness and
     run in teaching mode. Needs no data; ``bind`` returns ``self``.
+
+    Latent nodes are not query-able variables: the oracle exposes the observed
+    margin, which is what a constraint algorithm searching over data would
+    see. Separation is still computed on the full graph, latents included.
     """
 
     name: ClassVar[str] = "d_separation"
@@ -215,7 +219,7 @@ class DSeparationOracle(CITest):
     def __init__(self, graph: MixedGraph) -> None:
         super().__init__(None)
         self._graph = graph
-        self._names = frozenset(graph.nodes)
+        self._names = frozenset(graph.nodes) - graph.latent
 
     @property
     def is_bound(self) -> bool:

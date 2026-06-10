@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ._registry import algorithm_for
-from .algorithms._astar import AStar
 from .algorithms._pc import PC
 
 if TYPE_CHECKING:
@@ -35,8 +34,10 @@ def discover(
 
     ``test`` feeds a constraint method (a :class:`CITest` instance, bound or
     not, or an alias like ``"linear"``); ``score`` feeds a score-based method
-    (a :class:`Score` instance or ``"bic"``). Extra keyword arguments pass to
-    the algorithm (``max_cond_size``, ``max_parents``, ``node_limit``).
+    (a :class:`Score` instance or an alias like ``"bic"``, ``"bdeu"``); both
+    default to ``"auto"``, picked from the column schema. Extra keyword
+    arguments pass to the algorithm (``max_cond_size``, ``max_parents``,
+    ``node_limit``, ``max_degree``, ``tabu``).
     """
     cls = algorithm_for(method)
     if cls is PC:
@@ -46,5 +47,6 @@ def discover(
         return PC(test=chosen_test, alpha=alpha, **kwargs).fit(data, knowledge=knowledge)
     if test is not None:
         raise ValueError(f"method {method!r} consumes a score, not a test")
-    chosen_score = score if score is not None else "bic"
-    return AStar(score=chosen_score, **kwargs).fit(data, knowledge=knowledge)
+    chosen_score = score if score is not None else "auto"
+    result: DiscoveryResult = cls(score=chosen_score, **kwargs).fit(data, knowledge=knowledge)
+    return result

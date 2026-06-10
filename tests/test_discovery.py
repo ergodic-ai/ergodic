@@ -9,7 +9,7 @@ import pytest
 
 from ergodic import DomainKnowledge, dag, discover, estimate_effect, tabular
 from ergodic.data import TabularData
-from ergodic.discovery import PC, DSeparationOracle, Linear
+from ergodic.discovery import BIC, GES, PC, AStar, DSeparationOracle, Linear
 from ergodic.graph import MixedGraph, consistent_extension, cpdag_of_dag
 
 
@@ -71,8 +71,42 @@ def test_discover_gates_the_ingredients() -> None:
         discover(data, method="pc", score="bic")
     with pytest.raises(ValueError, match="consumes a score"):
         discover(data, method="astar", test="linear")
+    with pytest.raises(ValueError, match="consumes a score"):
+        discover(data, method="ges", test="linear")
     with pytest.raises(ValueError, match="unknown discovery method"):
         discover(data, method="nope")
+
+
+def test_discover_routes_to_ges_and_hill_climbing() -> None:
+    data = _chain()
+    by_ges = discover(data, method="ges")
+    assert by_ges.method == "ges"
+    assert by_ges.score == "bic"  # auto picked the Gaussian score
+    assert by_ges.graph == cpdag_of_dag(dag(["X -> M", "M -> Y"]))
+    by_hc = discover(data, method="hc")
+    assert by_hc.method == "hc"
+    assert by_hc.graph.is_dag()
+    assert cpdag_of_dag(by_hc.graph) == by_ges.graph
+
+
+def test_discover_auto_picks_the_score_from_the_schema() -> None:
+    rng = np.random.default_rng(7)
+    n = 2500
+    x = rng.integers(0, 3, size=n)
+    y = np.where(rng.uniform(size=n) < 0.85, x, rng.integers(0, 3, size=n))
+    z = np.where(rng.uniform(size=n) < 0.85, y, rng.integers(0, 3, size=n))
+    frame = pd.DataFrame({"X": x, "Y": y, "Z": z}).astype("category")
+    discrete = discover(tabular(frame), method="exact")
+    assert discrete.score == "bic_discrete"
+    assert cpdag_of_dag(discrete.graph) == cpdag_of_dag(dag(["X -> Y", "Y -> Z"]))
+    mixed = tabular(pd.DataFrame({"C": pd.Categorical(x), "W": rng.normal(size=n) + x}))
+    assert discover(mixed, method="ges").score == "bic_mixed"
+
+
+def test_discover_resolves_the_gcm_test_by_name() -> None:
+    result = discover(_chain(n=500), method="pc", test="gcm")
+    assert result.test == "gcm"
+    assert result.method == "pc"
 
 
 # -- the seams ----------------------------------------------------------------
@@ -92,6 +126,16 @@ def test_pc_and_exact_search_agree_through_the_equivalence_class() -> None:
     by_pc = discover(data, method="pc")
     by_astar = discover(data, method="astar")
     assert by_pc.graph == cpdag_of_dag(by_astar.graph) == cpdag_of_dag(truth)
+
+
+def test_a_warmed_score_serves_greedy_and_exact_search_alike() -> None:
+    data, truth = _five_node()
+    bic = BIC(data)
+    by_ges = GES(score=bic).fit()
+    hits_after_ges = bic.diagnostics()["cache_hits"]
+    by_astar = AStar(score=bic).fit()
+    assert bic.diagnostics()["cache_hits"] > hits_after_ges  # A* re-asked known locals
+    assert by_ges.graph == cpdag_of_dag(by_astar.graph) == cpdag_of_dag(truth)
 
 
 def test_the_oracle_run_is_the_recovery_guarantee() -> None:

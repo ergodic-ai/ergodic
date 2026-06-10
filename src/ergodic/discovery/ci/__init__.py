@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 from ._discrete import Discrete
+from ._gcm import GCM
 from ._linear import Linear
 from ._mixed import Mixed
 
-__all__ = ["Discrete", "Linear", "Mixed"]
+__all__ = ["GCM", "Discrete", "Linear", "Mixed"]

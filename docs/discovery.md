@@ -1,6 +1,6 @@
 # Causal discovery
 
-Discovery learns causal structure from data. Two ingredients drive every search in D1: a conditional independence test for the constraint algorithms, and a decomposable score for the exact search. Algorithms are thin consumers; the ingredients are objects you instantiate, configure, share, and replace.
+Discovery learns causal structure from data. Two ingredients drive every search: a conditional independence test for the constraint algorithms, and a decomposable score for the score-based ones. Algorithms are thin consumers; the ingredients are objects you instantiate, configure, share, and replace.
 
 ## One call
 
@@ -58,8 +58,9 @@ loose = PC(test=linear, alpha=0.10).fit()   # every p-value comes from the cache
 | `Linear` | `"linear"`, `"fisher_z"` | continuous | partial correlation, Fisher z |
 | `Discrete` | `"discrete"`, `"g_sq"` | categorical | G squared, natively on the codes |
 | `Mixed` | `"mixed"`, `"dg"` | anything | degenerate Gaussian: one-hot blocks, partial canonical correlations, Bartlett chi-square |
+| `GCM` | `"gcm"` | continuous | generalized covariance measure: a regression learner per endpoint, residual product |
 
-`test="auto"` (the default) reads the column schema: all continuous picks `Linear`, all discrete picks `Discrete`, anything else picks `Mixed`. `Mixed` agrees with `Linear` on continuous data, so it is the safe general choice; `Discrete` never encodes, so it is exact for categorical levels.
+`test="auto"` (the default) reads the column schema: all continuous picks `Linear`, all discrete picks `Discrete`, anything else picks `Mixed`. `Mixed` agrees with `Linear` on continuous data, so it is the safe general choice; `Discrete` never encodes, so it is exact for categorical levels; `GCM` is the one to reach for when the relationships are nonlinear, and you choose it explicitly.
 
 ## Write your own test
 
@@ -78,6 +79,22 @@ class MyTest(CITest):
 ```
 
 `MyTest(data)` now drops into PC like any shipped test.
+
+## Any learner is a test
+
+`GCM` (Shah and Peters 2020) turns a conditional-mean regressor into a conditional independence test: regress each endpoint on the conditioning set, and check that the product of the two residuals has mean zero. The regression slot is the same `Learner` surface estimation uses, so the native learners, any sklearn regressor, or xgboost drop in unchanged.
+
+```python
+from ergodic.discovery import GCM, PC
+
+gcm = GCM(data)                                  # the native KNN regressor by default
+PC(test=gcm).fit()
+
+from sklearn.ensemble import RandomForestRegressor
+PC(test=GCM(data, learner=RandomForestRegressor())).fit(data)
+```
+
+This is the test that catches what the partial correlation misses. A quadratic confounder (`X = Z**2 + noise`, `Y = Z**2 + noise`) leaves structure in both linear regressions, so `Linear` declares `X` and `Y` dependent given `Z` and PC keeps a spurious edge; `GCM` with a flexible learner removes it. The honest limit: dependence that leaves the conditional covariance at zero is invisible to it.
 
 ## The ground-truth oracle
 
@@ -111,7 +128,7 @@ dk = DomainKnowledge().restrict_to(skeleton_graph)
 discover(data, method="astar", knowledge=dk)   # exact search inside the support
 ```
 
-## The score and exact search
+## The scores and the score-based searches
 
 Score-based search runs on one queryable object: the local score of a node given its parents.
 
@@ -123,9 +140,28 @@ bic.local("Y", ["M"])            # cached local score
 result = AStar(score=bic).fit()  # the globally optimal DAG under the score
 ```
 
-`AStar` is the Yuan and Malone shortest path over the order lattice: exact, not greedy. It is honest about scale (a node limit, raised with a pointer at `max_parents` and `restrict_to`), and it consumes knowledge the same four ways. BIC is score-equivalent, so the returned DAG is one member of the optimal equivalence class; take `cpdag_of_dag` of it to compare with PC.
+| Score | Alias | Data | Form |
+| --- | --- | --- | --- |
+| `BIC` | `"bic"` | continuous | Gaussian BIC, one covariance pass, Schur complement locals |
+| `DiscreteBIC` | `"bic_discrete"` | categorical | multinomial BIC, natively on the codes |
+| `BDeu` | `"bdeu"` | categorical | Bayesian Dirichlet equivalent uniform, `ess` prior weight |
+| `MixedBIC` | `"bic_mixed"` | anything | degenerate Gaussian BIC: one-hot blocks as a joint Gaussian |
 
-A custom score is one method, mirroring the tests:
+`score="auto"` (the default) mirrors the tests: all continuous picks `BIC`, all discrete picks `DiscreteBIC`, anything else picks `MixedBIC`. All four are decomposable and score-equivalent, so equal totals across a Markov equivalence class are a tested property, not a hope; `BDeu` you ask for by name.
+
+Three searches consume the same object:
+
+```python
+from ergodic.discovery import GES, HillClimb
+
+GES(score=bic).fit()         # greedy over equivalence classes, returns a CPDAG
+HillClimb(score=bic).fit()   # add/remove/reverse over DAGs, with a tabu list
+AStar(score=bic).fit()       # the exact optimum, honest about scale
+```
+
+`GES` (Chickering 2002) is the standard: a forward pass inserts the best edge into the equivalence class until nothing improves, a backward pass deletes, and the result is a CPDAG directly. In the large-sample limit, with a score-equivalent score, it finds the optimal class; on real data the exact search is its referee, and the test suite holds GES to the A* optimum. `HillClimb` is the fast baseline: steepest ascent over DAGs with a tabu ring to escape plateaus, no optimality story. `AStar` is the Yuan and Malone shortest path over the order lattice: exact, not greedy, with a node limit raised with a pointer at `max_parents` and `restrict_to`. All three consume knowledge the same four ways, and a DAG result compares with PC through `cpdag_of_dag`.
+
+A custom score is one method, mirroring the tests: implement `local_from_arrays(y, X)` for numeric data, or declare `needs = "codes"` and implement `local_from_codes(y, y_card, zs, z_cards)` for native categorical scoring.
 
 ```python
 from ergodic.discovery import Score
@@ -155,6 +191,6 @@ And the ingredients compose sideways: a warmed oracle across algorithms, a skele
 
 ## Not built yet
 
-GES and the order-based searches (the score contract is ready for them), the mixed and discrete scores (BIC is Gaussian in D1), the GCM test that turns any `Learner` into a CI test, FCI and the PAG output (the PC skeleton machinery is most of it), permutation significance behind the same tests, per-pair test dispatch from the schema, the skeleton searches (graphical lasso, Markov blankets), the bootstrap stability wrapper, and the time-series shapes.
+FCI and the PAG output (the PC skeleton machinery is most of it), the skeleton searches (graphical lasso, Markov blankets), the bootstrap stability wrapper, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, and the time-series shapes.
 
 ::: ergodic.discovery

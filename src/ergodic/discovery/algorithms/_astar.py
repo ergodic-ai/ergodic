@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ...graph import dag
+from .._registry import resolve_score
 from .._result import DiscoveryResult
 from .._score import Score
 
@@ -64,7 +65,8 @@ class AStar:
 
     Args:
         score: A :class:`~ergodic.discovery.Score` instance (bound or
-            unbound) or the string ``"bic"``.
+            unbound) or a name: ``"auto"`` (pick by the data schema),
+            ``"bic"``, ``"bic_discrete"``, ``"bdeu"``, ``"bic_mixed"``.
         max_parents: An in-degree cap; ``None`` enumerates every parent set.
         node_limit: Refuse problems with more variables than this; exact
             search is exponential in the node count.
@@ -72,26 +74,18 @@ class AStar:
 
     def __init__(
         self,
-        score: Score | str = "bic",
+        score: Score | str = "auto",
         *,
         max_parents: int | None = None,
         node_limit: int = 20,
     ) -> None:
-        if isinstance(score, str):
-            if score != "bic":
-                raise ValueError(f"unknown score {score!r}; D1 ships 'bic'")
-            from ..scores._bic import BIC
-
-            resolved: Score = BIC()
-        elif isinstance(score, Score):
-            resolved = score
-        else:
-            raise TypeError(f"score must be a Score or 'bic', got {type(score).__name__}")
+        if not isinstance(score, Score | str):
+            raise TypeError(f"score must be a Score or a string, got {type(score).__name__}")
         if max_parents is not None and max_parents < 0:
             raise ValueError(f"max_parents must be non-negative, got {max_parents}")
         if node_limit < 1:
             raise ValueError(f"node_limit must be at least 1, got {node_limit}")
-        self._score = resolved
+        self._score = score
         self._max_parents = max_parents
         self._node_limit = node_limit
 
@@ -101,7 +95,7 @@ class AStar:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Search for a highest-scoring DAG and return it with its provenance."""
-        score = self._resolve_data(data)
+        score = resolve_score(self._score, data)
         variables = list(score.variables)
         if len(variables) > self._node_limit:
             raise ValueError(
@@ -130,31 +124,6 @@ class AStar:
             n=score.n,
             diagnostics=diagnostics,
         )
-
-    # -- data resolution ----------------------------------------------------------
-
-    def _resolve_data(self, data: TabularData | None) -> Score:
-        """One source of data: an unbound score binds here, a bound one must match."""
-        spec = self._score
-        if spec.is_bound:
-            if data is not None:
-                complete = data.dropna()
-                same = (
-                    complete.n_rows == spec.n
-                    and tuple(sorted(complete.variables)) == spec.variables
-                )
-                if not same:
-                    raise ValueError(
-                        "the score is bound to a different dataset (rows or variables "
-                        "differ after dropna); bind the score to this data or construct "
-                        "AStar with an unbound score"
-                    )
-            return spec
-        if data is None:
-            raise ValueError(
-                "no data to fit: pass data to fit(), or construct the score bound to data"
-            )
-        return spec.bind(data)
 
     # -- per-node tables ------------------------------------------------------------
 

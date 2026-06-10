@@ -66,6 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DomainKnowledge.restrict_to(skeleton)` confines any search to an adjacency
   support. The Meek rules, `cpdag_of_dag`, and the Dor-Tarsi extension check
   live in `ergodic.graph`, which makes `is_cpdag` a real validator.
+- Causal discovery, the score stack: `GES` (Chickering's greedy equivalence
+  search, held to the A* optimum in the tests) and `HillClimb` (steepest
+  ascent with a tabu list) consume the same `Score` contract as `AStar`;
+  `DiscreteBIC` (multinomial), `BDeu`, and `MixedBIC` (degenerate Gaussian,
+  no edge restriction) join the Gaussian `BIC`, with executable
+  score-equivalence tests; the `Score` base gains a native-categorical codes
+  form (`local_from_codes`); `score="auto"` picks the score from the column
+  schema the way `test="auto"` picks the test; and `GCM` (Shah and Peters)
+  turns any regression `Learner`, native or sklearn, into a conditional
+  independence test that catches nonlinear dependence the partial correlation
+  misses. `DSeparationOracle` now answers about the observed margin (latent
+  nodes are not query-able variables).
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

@@ -47,6 +47,7 @@ _TEST_ALIASES: dict[str, tuple[str, str]] = {
     "gsq": ("ergodic.discovery.ci._discrete", "Discrete"),
     "mixed": ("ergodic.discovery.ci._mixed", "Mixed"),
     "dg": ("ergodic.discovery.ci._mixed", "Mixed"),
+    "gcm": ("ergodic.discovery.ci._gcm", "GCM"),
 }
 
 
@@ -125,7 +126,7 @@ class PC:
         test: A :class:`CITest` instance (bound or unbound, including
             :class:`DSeparationOracle`), or a name: ``"auto"`` (pick by the
             data schema), ``"linear"``/``"fisher_z"``, ``"discrete"``/
-            ``"g_sq"``, ``"mixed"``/``"dg"``.
+            ``"g_sq"``, ``"mixed"``/``"dg"``, ``"gcm"``.
         alpha: Significance level for the independence decisions.
         max_cond_size: Cap on the conditioning-set size, ``None`` for no cap.
 

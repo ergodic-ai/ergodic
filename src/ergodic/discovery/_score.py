@@ -12,6 +12,10 @@ alike.
 Two declared properties matter to the searches: ``decomposable`` (everything
 here) and ``score_equivalent`` (equal scores across a Markov equivalence
 class; GES and the order-based searches require it).
+
+Like a test, a score declares the input form it needs: ``"numeric"`` hands
+``local_from_arrays`` 2-D float blocks (one-hot for discrete columns),
+``"codes"`` hands ``local_from_codes`` integer codes with cardinalities.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
-from ._encode import _numeric_blocks
+from ._encode import _codes_columns, _numeric_blocks
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -36,11 +40,13 @@ if TYPE_CHECKING:
 class Score:
     """Base for decomposable scores; see the module docstring.
 
-    Subclasses set ``name`` and the property flags, may take options in
-    ``__init__`` (set them before calling ``super().__init__(data)``), and
-    implement ``local_from_arrays``. ``_prepare`` runs once after binding for
-    sufficient statistics; a native score may also override ``_local_value``
-    to skip array assembly entirely (the covariance path in BIC).
+    Subclasses set ``name``, ``needs``, and the property flags, may take
+    options in ``__init__`` (set them before calling ``super().__init__(data)``),
+    and implement the method matching ``needs``: ``local_from_arrays`` for
+    ``"numeric"``, ``local_from_codes`` for ``"codes"``. ``_prepare`` runs once
+    after binding for sufficient statistics; a native score may also override
+    ``_local_value`` to skip array assembly entirely (the covariance path in
+    BIC).
     """
 
     name: ClassVar[str] = "score"
@@ -53,6 +59,8 @@ class Score:
         self._n: int = 0
         self._names: frozenset[str] = frozenset()
         self._blocks: dict[str, npt.NDArray[np.float64]] = {}
+        self._codes: dict[str, npt.NDArray[np.int64]] = {}
+        self._cards: dict[str, int] = {}
         self._cache: dict[tuple[str, frozenset[str]], float] = {}
         self._n_evals: int = 0
         self._cache_hits: int = 0
@@ -90,7 +98,15 @@ class Score:
         self._data = complete
         self._n = complete.n_rows
         self._names = frozenset(complete.variables)
-        self._blocks = _numeric_blocks(complete)
+        self._blocks = {}
+        self._codes = {}
+        self._cards = {}
+        if self.needs == "numeric":
+            self._blocks = _numeric_blocks(complete)
+        elif self.needs == "codes":
+            self._codes, self._cards = _codes_columns(complete)
+        else:
+            raise ValueError(f"{type(self).__name__}.needs must be 'numeric' or 'codes'")
         self._cache = {}
         self._n_evals = 0
         self._cache_hits = 0
@@ -156,17 +172,32 @@ class Score:
         """The local score from arrays: ``y`` is ``(n, dy)``, ``X`` is ``(n, k)``."""
         raise NotImplementedError(f"{type(self).__name__} does not implement local_from_arrays")
 
+    def local_from_codes(
+        self,
+        y: npt.NDArray[np.int64],
+        y_card: int,
+        zs: tuple[npt.NDArray[np.int64], ...],
+        z_cards: tuple[int, ...],
+    ) -> float:
+        """The local score from codes: ``y`` is ``(n,)`` integer codes, ``zs`` the parents'."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement local_from_codes")
+
     # -- internals -----------------------------------------------------------
 
     def _local_value(self, node: str, parents: frozenset[str]) -> float:
-        """Assemble arrays and call ``local_from_arrays``; native scores may override."""
-        y = self._blocks[node]
-        X = (
-            np.hstack([self._blocks[p] for p in sorted(parents)])
-            if parents
-            else np.empty((self._n, 0), dtype=np.float64)
-        )
-        return float(self.local_from_arrays(y, X))
+        """Assemble the declared input form and score it; native scores may override."""
+        ordered = sorted(parents)
+        if self.needs == "numeric":
+            y = self._blocks[node]
+            X = (
+                np.hstack([self._blocks[p] for p in ordered])
+                if ordered
+                else np.empty((self._n, 0), dtype=np.float64)
+            )
+            return float(self.local_from_arrays(y, X))
+        zs = tuple(self._codes[p] for p in ordered)
+        z_cards = tuple(self._cards[p] for p in ordered)
+        return float(self.local_from_codes(self._codes[node], self._cards[node], zs, z_cards))
 
     def _require_bound(self) -> None:
         if not self.is_bound:
