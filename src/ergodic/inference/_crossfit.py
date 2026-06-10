@@ -22,11 +22,29 @@ if TYPE_CHECKING:
     from ._learner import Learner
 
 
-def _folds(n: int, n_folds: int, rng: np.random.Generator) -> list[npt.NDArray[np.int64]]:
-    """Shuffled test-fold index arrays; the train set is every other fold."""
+def _folds(
+    n: int,
+    n_folds: int,
+    rng: np.random.Generator,
+    *,
+    stratify: npt.NDArray[np.float64] | None = None,
+) -> list[npt.NDArray[np.int64]]:
+    """Shuffled test-fold index arrays; the train set is every other fold.
+
+    With ``stratify`` (a binary 0/1 treatment) each class is permuted and split
+    separately, then the per-class chunks merge per fold, so every fold keeps
+    roughly the class ratio and no training fold loses an arm.
+    """
     k = max(2, min(n_folds, n))
-    order = rng.permutation(n)
-    return [np.asarray(fold, dtype=np.int64) for fold in np.array_split(order, k)]
+    if stratify is None:
+        order = rng.permutation(n)
+        return [np.asarray(fold, dtype=np.int64) for fold in np.array_split(order, k)]
+    merged: list[list[npt.NDArray[np.int64]]] = [[] for _ in range(k)]
+    for value in np.unique(stratify):
+        members = rng.permutation(np.flatnonzero(stratify == value))
+        for i, chunk in enumerate(np.array_split(members, k)):
+            merged[i].append(np.asarray(chunk, dtype=np.int64))
+    return [np.asarray(np.concatenate(parts), dtype=np.int64) for parts in merged]
 
 
 def _train_mask(n: int, test: npt.NDArray[np.int64]) -> npt.NDArray[np.bool_]:

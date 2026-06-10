@@ -41,6 +41,9 @@ def m_connected(
     targets = _as_set(y)
     conditioned = _as_set(given)
 
+    unknown = sorted((sources | targets | conditioned) - graph.nodes)
+    if unknown:
+        raise ValueError(f"unknown node names (not in the graph): {unknown}")
     if any(e.has_circle for e in graph.edges):
         raise NotImplementedError(
             "m-separation needs definite/possible reasoning for circle marks (PAGs); "

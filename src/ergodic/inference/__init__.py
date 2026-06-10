@@ -11,7 +11,7 @@ runs identification then estimation and returns an :class:`EffectEstimate`.
     >>> est = estimate_effect(graph, data, "T", "Y")          # doctest: +SKIP
     >>> est.value, est.interval()                              # doctest: +SKIP
 
-The learner is structurally a sklearn estimator, so ``estimate_effect(..., learner="gbm")``
+The learner is structurally a sklearn estimator, so ``estimate_effect(..., learner="knn")``
 or a slot mapping like ``learner={"outcome": GradientBoostingRegressor()}`` drops
 any sklearn or xgboost model into the slots with no adapter. The result is
 distribution-shaped: a point estimate with an analytic standard error, or
@@ -32,6 +32,7 @@ from .estimators import (
     IPW,
     PLIV,
     DRLearner,
+    NullEffect,
     OutcomeRegression,
     RLearner,
     Stratification,
@@ -64,6 +65,7 @@ __all__ = [
     "KNNRegressor",
     "Learner",
     "LogisticRegression",
+    "NullEffect",
     "OutcomeRegression",
     "PyMCClassifier",
     "PyMCLearner",

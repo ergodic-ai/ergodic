@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._estimator import ADJUSTMENT, FRONTDOOR, IV, CausalEstimator
+from ._estimator import ADJUSTMENT, FRONTDOOR, IV, NULL, CausalEstimator
 from ._target import EffectTarget
 from .estimators import (
     AIPW,
@@ -18,6 +18,7 @@ from .estimators import (
     IPW,
     PLIV,
     DRLearner,
+    NullEffect,
     OutcomeRegression,
     RLearner,
     Stratification,
@@ -34,6 +35,7 @@ _BY_FAMILY: dict[str, list[type[CausalEstimator]]] = {
     ADJUSTMENT: [AIPW, DML, DRLearner, OutcomeRegression, IPW, Stratification, RLearner, XLearner],
     FRONTDOOR: [TwoStageRegression],
     IV: [TwoStageLeastSquares, PLIV, Wald],
+    NULL: [NullEffect],
 }
 
 _BY_NAME: dict[str, type[CausalEstimator]] = {
@@ -69,12 +71,15 @@ _BY_NAME: dict[str, type[CausalEstimator]] = {
     "wald": Wald,
     "pliv": PLIV,
     "dml_iv": PLIV,
+    "null": NullEffect,
+    "null_effect": NullEffect,
 }
 
 _DEFAULT_TARGET: dict[str, EffectTarget] = {
     ADJUSTMENT: EffectTarget.ATE,
     FRONTDOOR: EffectTarget.ATE,
     IV: EffectTarget.LATE,
+    NULL: EffectTarget.ATE,
 }
 
 

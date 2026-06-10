@@ -13,7 +13,6 @@ from .._estimator import (
     Task,
     _AdjustmentBase,
     _covariate_matrix,
-    _numeric_vector,
     _outcome_vector,
     _require_complete,
     _single,
@@ -62,7 +61,7 @@ class DML(_AdjustmentBase):
         covariates = identification.adjustment_set or frozenset()
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
-        a = _numeric_vector(data, treatment, "treatment")
+        a = self._treatment_vector(data, treatment, allow_continuous=True)
         y, y_binary = _outcome_vector(data, outcome)
         z = _covariate_matrix(data, covariates)
         self._t_binary = set(np.unique(a).tolist()) <= {0.0, 1.0}
@@ -85,7 +84,8 @@ class DML(_AdjustmentBase):
         res_y = np.empty(n, dtype=np.float64)
         res_t = np.empty(n, dtype=np.float64)
         rng = np.random.default_rng(self._random_state)
-        for test in _folds(n, self.n_folds, rng):
+        stratify = a if self._t_binary else None
+        for test in _folds(n, self.n_folds, rng, stratify=stratify):
             train = _train_mask(n, test)
             res_y[test] = y[test] - _fit_predict(make["outcome"], z[train], y[train], z[test])
             res_t[test] = a[test] - _fit_predict(make["treatment"], z[train], a[train], z[test])
@@ -165,7 +165,7 @@ class DRLearner(_AdjustmentBase):
         mu1 = np.empty(n, dtype=np.float64)
         e = np.empty(n, dtype=np.float64)
         rng = np.random.default_rng(self._random_state)
-        for test in _folds(n, self.n_folds, rng):
+        for test in _folds(n, self.n_folds, rng, stratify=a):
             train = _train_mask(n, test)
             design = np.hstack([a[train].reshape(-1, 1), z[train]])
             outcome = make["outcome"]().fit(design, y[train])

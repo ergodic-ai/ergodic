@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import warnings
+from datetime import timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -75,6 +76,18 @@ def test_ordered_categorical_from_pandas_becomes_ordinal() -> None:
     assert ds.codes("risk").tolist() == [1, 0, 2, 0]
 
 
+def test_tz_aware_column_is_datetime_with_utc_stamps() -> None:
+    eastern = timezone(timedelta(hours=-5))
+    stamps = pd.to_datetime(["2020-01-01 00:00", "2020-01-02 00:00"]).tz_localize(eastern)
+    ds = tabular(pd.DataFrame({"d": stamps, "x": [1.0, 2.0]}))
+    assert ds.schema["d"].is_datetime
+    expected = [
+        float(pd.Timestamp("2020-01-01 05:00").value),
+        float(pd.Timestamp("2020-01-02 05:00").value),
+    ]
+    assert ds.matrix(["d"])[:, 0].tolist() == expected
+
+
 # -- overrides ---------------------------------------------------------------
 
 
@@ -95,6 +108,11 @@ def test_ordinal_override_orders_codes() -> None:
     assert col.ordered
     assert col.categories == ("I", "II", "III")
     assert ds.codes("stage").tolist() == [1, 0, 2, 0]
+
+
+def test_ordinal_override_rejects_missing_level() -> None:
+    with pytest.raises(ValueError, match=r"'stage'.*'IV'"):
+        tabular({"stage": ["I", "II", "I", "IV"]}, types={"stage": Ordinal(["I", "II", "III"])})
 
 
 def test_exclude_keeps_column_out_of_variables() -> None:
@@ -149,6 +167,26 @@ def test_missing_and_dropna() -> None:
     assert ds.n_rows == 3  # original unchanged
 
 
+def test_matrix_missing_category_is_nan() -> None:
+    ds = tabular({"c": np.array(["a", None, "b", "a"], dtype=object)})
+    assert ds.codes("c").tolist() == [0, -1, 1, 0]
+    column = ds.matrix(["c"])[:, 0]
+    assert np.isnan(column[1])
+    assert column[[0, 2, 3]].tolist() == [0.0, 1.0, 0.0]
+    assert ds.missing() == {"c": 1}
+    assert ds.dropna().n_rows == 3
+
+
+def test_matrix_nat_is_nan() -> None:
+    ds = tabular(pd.DataFrame({"d": pd.to_datetime(["2020-01-01", "NaT", "2020-03-01"])}))
+    column = ds.matrix(["d"])[:, 0]
+    assert column[0] == float(pd.Timestamp("2020-01-01").value)
+    assert np.isnan(column[1])
+    assert column[2] == float(pd.Timestamp("2020-03-01").value)
+    assert ds.missing() == {"d": 1}
+    assert ds.dropna().n_rows == 2
+
+
 # -- immutable edits ---------------------------------------------------------
 
 
@@ -174,6 +212,12 @@ def test_with_type_recomputes_categories_from_data() -> None:
     assert back.schema["g"].categories == (0, 1, 2)
 
 
+def test_with_type_rejects_categories_that_miss_data() -> None:
+    ds = tabular({"c": ["a", "b", "a", "z"]})
+    with pytest.raises(ValueError, match=r"'c'.*'z'"):
+        ds.with_type("c", "categorical", categories=["a", "b"])
+
+
 def test_frozen_dataset_rejects_mutation() -> None:
     ds = tabular({"x": [1.0, 2.0]})
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -192,6 +236,31 @@ def test_from_dict_and_numpy() -> None:
     ds2 = tabular(arr, columns=["a", "b"])
     assert ds2.names == ("a", "b")
     assert ds2.matrix().shape == (2, 2)
+
+
+def test_numpy_source_mutation_does_not_leak() -> None:
+    arr = np.array([[1.0, 2.0], [3.0, 4.0]])
+    ds = tabular(arr, columns=["a", "b"])
+    arr[0, 0] = 99.0
+    assert ds.column("a").tolist() == [1.0, 3.0]
+    assert ds.matrix()[:, 0].tolist() == [1.0, 3.0]
+
+
+def test_dict_source_mutation_does_not_leak() -> None:
+    source = {"x": np.array([1.0, 2.0, 3.0])}
+    ds = tabular(source)
+    source["x"][1] = 99.0
+    assert ds.column("x").tolist() == [1.0, 2.0, 3.0]
+    assert ds.matrix()[:, 0].tolist() == [1.0, 2.0, 3.0]
+
+
+def test_pandas_source_mutation_does_not_leak() -> None:
+    df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [4.0, 5.0, 6.0]})
+    ds = tabular(df)
+    df.iloc[0, 0] = 99.0
+    df.iloc[2, 1] = -1.0
+    assert ds.column("x").tolist() == [1.0, 2.0, 3.0]
+    assert ds.matrix()[:, 1].tolist() == [4.0, 5.0, 6.0]
 
 
 class _FakeFrame:
@@ -250,6 +319,19 @@ def test_timeseries_integer_step_index_no_warning() -> None:
     assert ts.schema["step"].is_continuous
     assert ts.variables == ("y",)
     assert ts.column("y").tolist() == [0.0, 10.0, 20.0]
+
+
+def test_timeseries_tz_aware_time_column() -> None:
+    df = pd.DataFrame(
+        {
+            "t": pd.to_datetime(["2020-03-01", "2020-01-01", "2020-02-01"]).tz_localize("UTC"),
+            "y": [3.0, 1.0, 2.0],
+        }
+    )
+    ts = timeseries(df, time="t")
+    assert ts.schema["t"].is_datetime
+    assert ts.times.dtype.kind == "M"
+    assert ts.column("y").tolist() == [1.0, 2.0, 3.0]
 
 
 def test_timeseries_missing_time_raises() -> None:
@@ -363,6 +445,37 @@ def test_hts_requires_leaf_columns() -> None:
     df = pd.DataFrame({"t": [0, 1], "a": [1.0, 2.0]})
     with pytest.raises(ValueError, match="leaves"):
         hts(df, time="t", hierarchy={"total": ["a", "b"]})
+
+
+def test_hts_nested_mean_coherence_matches_aggregate() -> None:
+    tree = Hierarchy.tree({"total": ["a", "mid"], "mid": ["b", "c"]}, aggregation="mean")
+    nested = pd.DataFrame(
+        {
+            "t": [0, 1],
+            "a": [0.0, 0.0],
+            "b": [2.0, 2.0],
+            "c": [4.0, 4.0],
+            "mid": [3.0, 3.0],
+            "total": [1.5, 1.5],
+        }
+    )
+    h = hts(nested, time="t", hierarchy=tree)
+    assert h.is_coherent()
+    assert h.aggregate("total").tolist() == [1.5, 1.5]
+
+    # the flat mean over the leaves, which the old aggregate produced
+    flat = hts(nested.assign(total=[2.0, 2.0]), time="t", hierarchy=tree)
+    assert not flat.is_coherent()
+    assert any("total" in issue for issue in flat.coherence())
+    assert flat.aggregate("total").tolist() == [1.5, 1.5]
+
+
+def test_hts_aggregate_recurses_through_absent_parent() -> None:
+    tree = Hierarchy.tree({"total": ["a", "mid"], "mid": ["b", "c"]}, aggregation="mean")
+    df = pd.DataFrame({"t": [0, 1], "a": [0.0, 0.0], "b": [2.0, 2.0], "c": [4.0, 4.0]})
+    h = hts(df, time="t", hierarchy=tree)
+    assert h.aggregate("mid").tolist() == [3.0, 3.0]
+    assert h.aggregate("total").tolist() == [1.5, 1.5]
 
 
 # -- event log ---------------------------------------------------------------

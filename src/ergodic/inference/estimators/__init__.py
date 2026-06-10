@@ -8,6 +8,7 @@ from ._doubly_robust import AIPW
 from ._frontdoor import TwoStageRegression
 from ._iv import PLIV, TwoStageLeastSquares, Wald
 from ._meta import RLearner, XLearner
+from ._null import NullEffect
 from ._regression import OutcomeRegression
 from ._weighting import IPW, Stratification
 
@@ -17,6 +18,7 @@ __all__ = [
     "IPW",
     "PLIV",
     "DRLearner",
+    "NullEffect",
     "OutcomeRegression",
     "RLearner",
     "Stratification",

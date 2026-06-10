@@ -145,14 +145,38 @@ def _parse_spec(spec: EdgeSpec) -> Edge:
     raise TypeError(f"unsupported edge spec: {spec!r}")
 
 
+def _pair_conflict_message(existing: Edge, incoming: Edge) -> str:
+    message = (
+        f"two different edges for the pair ({existing.u!r}, {existing.v!r}): "
+        f"{existing.glyph()!r} and {incoming.glyph()!r}"
+    )
+    bow = (existing.is_directed and incoming.is_bidirected) or (
+        existing.is_bidirected and incoming.is_directed
+    )
+    if bow:
+        message += (
+            "; the current data model holds one edge per pair, so a directed and a "
+            "bidirected edge cannot share one"
+        )
+    return message
+
+
+def _merge_edges(edges: Iterable[Edge]) -> frozenset[Edge]:
+    """Collapse to one edge per node pair, raising when two edges disagree."""
+    by_pair: dict[frozenset[str], Edge] = {}
+    for edge in edges:
+        pair = frozenset((edge.u, edge.v))
+        existing = by_pair.get(pair)
+        if existing is not None and existing != edge:
+            raise ValueError(_pair_conflict_message(existing, edge))
+        by_pair[pair] = edge
+    return frozenset(by_pair.values())
+
+
 def _build_edges(specs: Iterable[EdgeSpec]) -> frozenset[Edge]:
     if isinstance(specs, str):
         raise TypeError("pass an iterable of edge specs, not a single string")
-    by_pair: dict[frozenset[str], Edge] = {}
-    for spec in specs:
-        edge = _parse_spec(spec)
-        by_pair[frozenset((edge.u, edge.v))] = edge
-    return frozenset(by_pair.values())
+    return _merge_edges(_parse_spec(spec) for spec in specs)
 
 
 @dataclass(frozen=True)
@@ -269,13 +293,24 @@ class MixedGraph:
         return replace(self, nodes=self.nodes | frozenset(names))
 
     def add_edge(self, spec: EdgeSpec) -> MixedGraph:
+        """Add an edge on a free node pair; adding the edge already there is a no-op.
+
+        Raises ``ValueError`` when the pair already carries a different edge.
+        Call :meth:`remove_edge` first, or :meth:`orient` to redirect.
+        """
         edge = _parse_spec(spec)
         existing = self.get_edge(edge.u, edge.v)
-        rest = self.edges - ({existing} if existing else frozenset())
+        if existing == edge:
+            return self
+        if existing is not None:
+            raise ValueError(
+                f"the pair ({edge.u!r}, {edge.v!r}) already has edge {existing.glyph()!r}; "
+                f"call remove_edge first to replace it with {edge.glyph()!r}"
+            )
         return replace(
             self,
             nodes=self.nodes | {edge.u, edge.v},
-            edges=rest | {edge},
+            edges=self.edges | {edge},
             kind=GraphKind.MIXED,
         )
 
@@ -287,10 +322,16 @@ class MixedGraph:
 
     def orient(self, parent: str, child: str) -> MixedGraph:
         """Return a graph with the edge between the two nodes set to ``parent -> child``."""
-        return self.add_edge((parent, Mark.TAIL, child, Mark.ARROW))
+        return self.remove_edge(parent, child).add_edge((parent, Mark.TAIL, child, Mark.ARROW))
 
-    def as_kind(self, kind: GraphKind) -> MixedGraph:
-        """Re-tag the graph as ``kind`` after checking it satisfies that kind."""
+    def as_kind(self, kind: GraphKind | str) -> MixedGraph:
+        """Re-tag the graph as ``kind`` (an enum or its name) after checking it fits."""
+        if isinstance(kind, str):
+            try:
+                kind = GraphKind(kind.lower())
+            except ValueError:
+                names = ", ".join(k.value for k in GraphKind)
+                raise ValueError(f"unknown graph kind {kind!r}; expected one of: {names}") from None
         out = replace(self, kind=kind)
         out.validate()
         return out
@@ -298,38 +339,58 @@ class MixedGraph:
     # -- kind checks ---------------------------------------------------------
 
     def is_acyclic(self) -> bool:
+        """Return ``True`` if the directed part of the graph has no cycle.
+
+        Kahn's algorithm, iterative so deep graphs do not hit the recursion limit.
+        """
         forward: dict[str, set[str]] = {n: set() for n in self.nodes}
         for e in self.edges:
             pair = e.directed_pair()
             if pair is not None:
-                forward[pair[0]].add(pair[1])
-        color: dict[str, int] = {}
-
-        def visit(node: str) -> bool:
-            color[node] = 1
-            for nxt in forward.get(node, ()):
-                state = color.get(nxt, 0)
-                if state == 1:
-                    return False
-                if state == 0 and not visit(nxt):
-                    return False
-            color[node] = 2
-            return True
-
-        return all(visit(n) for n in self.nodes if color.get(n, 0) == 0)
+                forward.setdefault(pair[0], set()).add(pair[1])
+                forward.setdefault(pair[1], set())
+        indegree: dict[str, int] = dict.fromkeys(forward, 0)
+        for targets in forward.values():
+            for nxt in targets:
+                indegree[nxt] += 1
+        ready = [n for n, degree in indegree.items() if degree == 0]
+        removed = 0
+        while ready:
+            node = ready.pop()
+            removed += 1
+            for nxt in forward[node]:
+                indegree[nxt] -= 1
+                if indegree[nxt] == 0:
+                    ready.append(nxt)
+        return removed == len(forward)
 
     def is_dag(self) -> bool:
+        """Every edge directed and no directed cycle. This check is complete."""
         return all(e.is_directed for e in self.edges) and self.is_acyclic()
 
     def is_admg(self) -> bool:
+        """Directed or bidirected edges only, and no directed cycle. This check is complete."""
         marks_ok = all(e.is_directed or e.is_bidirected for e in self.edges)
         return marks_ok and self.is_acyclic()
 
     def is_cpdag(self) -> bool:
+        """Directed or undirected edges only, with an acyclic directed part.
+
+        A true CPDAG must also be closed under the Meek rules and represent a
+        Markov equivalence class. Neither is checked yet (both come with the
+        discovery phase), so this accepts some graphs that are not CPDAGs.
+        """
         marks_ok = all(e.is_directed or e.is_undirected for e in self.edges)
         return marks_ok and self.is_acyclic()
 
     def is_mag(self) -> bool:
+        """ADMG rules plus no almost-directed cycle (a bidirected edge between ancestors).
+
+        Two gaps remain until the discovery phase: undirected selection edges,
+        which a MAG may carry, are rejected because :meth:`is_admg` does not
+        allow them, and maximality (every non-adjacent pair separable) is not
+        checked.
+        """
         if not self.is_admg():
             return False
         for e in self.edges:
@@ -338,6 +399,12 @@ class MixedGraph:
         return True
 
     def is_pag(self) -> bool:
+        """Only that the directed part is acyclic.
+
+        No circle-mark or orientation rule is checked, so this accepts many
+        graphs no FCI run would produce. The full check comes with the
+        discovery phase.
+        """
         return self.is_acyclic()
 
     def validate(self, kind: GraphKind | None = None) -> None:

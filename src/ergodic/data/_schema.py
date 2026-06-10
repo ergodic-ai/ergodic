@@ -204,12 +204,18 @@ def _unique_nonnull(values: npt.NDArray[Any]) -> tuple[Any, ...]:
 
 
 def _encode(
-    values: npt.NDArray[Any], categories: tuple[Any, ...] | None, ordered: bool
+    values: npt.NDArray[Any], categories: tuple[Any, ...] | None, ordered: bool, name: str
 ) -> npt.NDArray[np.int64]:
+    """Category codes for one column: -1 for missing, an error for unknown values."""
     if categories is None:
         raise ValueError("cannot encode a column with no categories")
     import pandas as pd
 
+    allowed = set(categories)
+    present = values[~_missing_mask(values)]
+    offending = [v for v in dict.fromkeys(present.tolist()) if v not in allowed]
+    if offending:
+        raise ValueError(f"column {name!r} has values outside its declared categories: {offending}")
     codes = pd.Categorical(values, categories=list(categories), ordered=ordered).codes
     return np.asarray(codes, dtype=np.int64)
 
@@ -292,7 +298,12 @@ def infer_schema(
         if name in excluded:
             out.append(ColumnType(name, VariableType.EXCLUDED, inferred=False))
         elif name in overrides:
-            out.append(_resolve_type(name, _unique_nonnull(values), overrides[name], None))
+            spec = overrides[name]
+            resolved = _resolve_type(name, _unique_nonnull(values), spec, None)
+            if isinstance(spec, Ordinal):
+                # encode once now, so a level list that misses a value fails at build
+                _encode(values, resolved.categories, resolved.ordered, name)
+            out.append(resolved)
         elif name in declared:
             out.append(declared[name])
         else:

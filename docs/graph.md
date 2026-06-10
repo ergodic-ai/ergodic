@@ -32,7 +32,7 @@ You can also pass `(u, v)` tuples (read as `u -> v`) or build an `Edge` directly
 
 ### Edges, equality, and display
 
-A graph holds at most one edge per pair of nodes. Pass two specs for the same pair and the last one wins. Graphs are values: two with the same nodes, edges, and kind are equal and hash the same, so you can use them as dict keys or set members.
+A graph holds one edge per pair of nodes. Two different specs for the same pair raise a `ValueError` naming both, so `dag(["X -> Y", "Y -> X"])` fails loudly instead of keeping one silently. `add_edge` follows the same rule: adding the edge already there is a no-op, and adding a different one raises (remove it first, or use `orient` to redirect). Graphs are values: two with the same nodes, edges, and kind are equal and hash the same, so you can use them as dict keys or set members.
 
 Edges store the smaller node name first, so a printed edge can read reversed. `Smoking -> Cancer` shows as `Cancer <-- Smoking` when `Cancer` sorts first. It is the same edge, and `directed_pair()` always reports `('Smoking', 'Cancer')`.
 
@@ -53,6 +53,8 @@ The kinds and what they allow:
 - `CPDAG`: directed and undirected. What constraint-based discovery returns.
 - `MAG`: an ADMG with no almost-directed cycle.
 - `PAG`: any marks, including circles. What FCI returns.
+
+How deep do these checks go? `DAG` and `ADMG` are checked in full. The others are looser than their names suggest: `CPDAG` checks marks and acyclicity but not the Meek rules or that the graph stands for a real equivalence class, `MAG` rejects the undirected selection edges a MAG may legally carry and never tests maximality, and `PAG` checks acyclicity only. The full checks arrive with the discovery phase.
 
 Re-tag a graph with `as_kind`, which validates before it returns:
 
@@ -114,4 +116,4 @@ networkx is used only here, at the edge of the package. The graph algorithms are
 
 ## Not built yet
 
-Adjustment sets and other identification queries, equivalence-class operations (skeleton to CPDAG, Markov equivalence), PAG separation, and latent projection are planned. See the implementation journal in `plans/` for the order.
+Adjustment sets and identification queries are built now; see [Identification](identification.md). Still planned: equivalence-class operations (skeleton to CPDAG, Markov equivalence), PAG separation, and latent projection. The implementation journal in `plans/` has the order.

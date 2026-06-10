@@ -3,8 +3,8 @@
 
 Build it with :func:`hts`, giving the time column and a :class:`Hierarchy` (or a
 parent-to-children dict). The columns are the series, and the hierarchy says how
-they sum up. Coherence (a parent equals the aggregate of its children) is
-checkable, and a parent that has no column can be computed from its leaves.
+they sum up. Coherence (a parent equals the aggregate of its direct children) is
+checkable, and a parent that has no column can be computed from below.
 """
 
 from __future__ import annotations
@@ -34,12 +34,23 @@ class HierarchicalTSData(TimeSeriesData):
     hierarchy: Hierarchy
 
     def aggregate(self, node: str) -> npt.NDArray[np.float64]:
-        """Build a node's series by aggregating its leaf descendants' columns."""
-        leaves = self.hierarchy.leaf_descendants(node)
-        missing = [leaf for leaf in leaves if leaf not in self._store]
-        if missing:
-            raise KeyError(f"missing leaf columns for {node!r}: {missing}")
-        stacked = np.vstack([np.asarray(self._store[leaf], dtype=np.float64) for leaf in leaves])
+        """Build a node's series from its direct children, recursively.
+
+        A child contributes its own column when it has one, else its aggregate,
+        and the parent is the sum or mean of those child series. This is the same
+        definition :meth:`coherence` checks, so the two cannot disagree.
+        """
+        if self.hierarchy.is_leaf(node):
+            if node not in self._store:
+                raise KeyError(f"no column for leaf {node!r}")
+            return np.asarray(self._store[node], dtype=np.float64)
+        parts = [
+            np.asarray(self._store[kid], dtype=np.float64)
+            if kid in self._store
+            else self.aggregate(kid)
+            for kid in self.hierarchy.children_of(node)
+        ]
+        stacked = np.vstack(parts)
         if self.hierarchy.aggregation == "mean":
             reduced = stacked.mean(axis=0)
         else:
@@ -47,20 +58,19 @@ class HierarchicalTSData(TimeSeriesData):
         return np.asarray(reduced, dtype=np.float64)
 
     def coherence(self, rtol: float = 1e-05, atol: float = 1e-08) -> list[str]:
-        """Where a present parent column does not match the aggregate of its children."""
+        """Where a present parent column does not match :meth:`aggregate` of its children."""
         out: list[str] = []
         for parent in self.hierarchy.internal_nodes:
-            kids = self.hierarchy.children_of(parent)
-            if parent not in self._store or any(kid not in self._store for kid in kids):
+            if parent not in self._store:
                 continue
-            total = np.zeros(self.n_rows, dtype=np.float64)
-            for kid in kids:
-                total = total + np.asarray(self._store[kid], dtype=np.float64)
-            if self.hierarchy.aggregation == "mean":
-                total = total / len(kids)
+            try:
+                expected = self.aggregate(parent)
+            except KeyError:
+                continue
             present = np.asarray(self._store[parent], dtype=np.float64)
-            if not np.allclose(present, total, rtol=rtol, atol=atol):
-                out.append(f"{parent} != {self.hierarchy.aggregation}({', '.join(kids)})")
+            if not np.allclose(present, expected, rtol=rtol, atol=atol):
+                kids = ", ".join(self.hierarchy.children_of(parent))
+                out.append(f"{parent} != {self.hierarchy.aggregation}({kids})")
         return out
 
     def is_coherent(self, rtol: float = 1e-05, atol: float = 1e-08) -> bool:

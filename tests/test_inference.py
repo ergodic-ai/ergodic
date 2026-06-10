@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import warnings
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -12,10 +13,21 @@ import pytest
 from ergodic import EffectTarget, admg, dag, estimate, estimate_effect, identify_effect, tabular
 from ergodic.data import TabularData
 from ergodic.graph import MixedGraph
+from ergodic.identification import Identification
 from ergodic.inference import (
     OLS,
+    OutcomeRegression,
     candidates,
 )
+from ergodic.inference._learner import _fresh
+from ergodic.inference._result import EffectEstimate, _summary_fields
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import numpy.typing as npt
+
+    from ergodic.inference import Learner
 
 # -- known-truth simulations -------------------------------------------------
 
@@ -27,6 +39,17 @@ def _adjustment(n: int = 4000, seed: int = 0) -> tuple[TabularData, MixedGraph]:
     propensity = 1.0 / (1.0 + np.exp(-0.8 * z))
     a = (rng.uniform(size=n) < propensity).astype(float)
     y = 2.0 * a + 1.5 * z + rng.normal(size=n)
+    data = tabular(pd.DataFrame({"A": a, "Z": z, "Y": y}))
+    return data, dag(["Z -> A", "Z -> Y", "A -> Y"])
+
+
+def _drug_placebo(n: int = 3000, seed: int = 7) -> tuple[TabularData, MixedGraph]:
+    """String-coded treatment: the drug's true effect over placebo is +2.0."""
+    rng = np.random.default_rng(seed)
+    z = rng.normal(size=n)
+    drug = rng.uniform(size=n) < 1.0 / (1.0 + np.exp(-0.8 * z))
+    a = np.where(drug, "drug", "placebo")
+    y = 2.0 * drug.astype(float) + 1.5 * z + rng.normal(size=n)
     data = tabular(pd.DataFrame({"A": a, "Z": z, "Y": y}))
     return data, dag(["Z -> A", "Z -> Y", "A -> Y"])
 
@@ -51,7 +74,7 @@ def _instrument(n: int = 5000, seed: int = 2) -> tuple[TabularData, MixedGraph]:
     a = 0.8 * z + 1.0 * u + rng.normal(size=n)
     y = 1.5 * a + 2.0 * u + rng.normal(size=n)
     data = tabular(pd.DataFrame({"Z": z, "A": a, "Y": y}))
-    return data, admg(["Z -> A", "A -> Y", "A <-> Y"])
+    return data, dag(["Z -> A", "A -> Y", "U -> A", "U -> Y"], latent=["U"])
 
 
 # -- adjustment family -------------------------------------------------------
@@ -129,6 +152,57 @@ def test_binary_outcome_runs() -> None:
     assert -1.0 <= est.value <= 1.0
 
 
+# -- treatment coding --------------------------------------------------------
+
+
+def test_string_treatment_warns_and_codes_by_level_order() -> None:
+    data, graph = _drug_placebo()
+    with pytest.warns(UserWarning, match="coded 1 for level 'placebo'"):
+        est = estimate_effect(graph, data, "A", "Y", strategy="aipw")
+    # 'placebo' sorts after 'drug', so it codes to 1 and the sign flips
+    assert abs(est.value + 2.0) < 0.25
+
+
+def test_treated_picks_the_level_that_codes_to_one() -> None:
+    data, graph = _drug_placebo()
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        est = estimate_effect(graph, data, "A", "Y", strategy="aipw", treated="drug")
+    assert not [w for w in captured if issubclass(w.category, UserWarning)]
+    assert abs(est.value - 2.0) < 0.25
+
+
+def test_treated_att_recovers_the_drug_effect() -> None:
+    data, graph = _drug_placebo()
+    att = estimate_effect(
+        graph,
+        data,
+        "A",
+        "Y",
+        strategy="aipw",
+        target="att",
+        treated="drug",
+        random_state=0,
+        n_boot=80,
+    )
+    assert att.target is EffectTarget.ATT
+    assert abs(att.value - 2.0) < 0.3
+
+
+def test_treated_must_be_an_observed_level() -> None:
+    data, graph = _drug_placebo(n=200)
+    with pytest.raises(ValueError, match="placebo"):
+        estimate_effect(graph, data, "A", "Y", treated="aspirin")
+
+
+def test_numeric_zero_one_treatment_does_not_warn() -> None:
+    data, graph = _adjustment(n=800)
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        estimate_effect(graph, data, "A", "Y", strategy="aipw")
+    assert not [w for w in captured if issubclass(w.category, UserWarning)]
+
+
 # -- front-door --------------------------------------------------------------
 
 
@@ -182,7 +256,7 @@ def test_unknown_estimator_and_learner_raise() -> None:
 
 def test_unidentifiable_effect_raises() -> None:
     data = tabular(pd.DataFrame({"A": [0.0, 1.0, 0.0, 1.0], "Y": [1.0, 2.0, 1.5, 2.5]}))
-    graph = admg(["A -> Y", "A <-> Y"])  # latent confounding, no adjustment or instrument
+    graph = dag(["A -> Y", "U -> A", "U -> Y"], latent=["U"])  # confounded, no instrument
     with pytest.raises(ValueError, match="not identifiable"):
         estimate_effect(graph, data, "A", "Y")
 
@@ -197,6 +271,18 @@ def test_non_binary_treatment_is_not_yet_supported() -> None:
     graph = dag(["Z -> A", "Z -> Y", "A -> Y"])
     with pytest.raises(NotImplementedError, match="binary"):
         estimate_effect(graph, data, "A", "Y", strategy="ipw")
+
+
+def test_empty_treatment_arm_raises() -> None:
+    rng = np.random.default_rng(5)
+    n = 200
+    z = rng.normal(size=n)
+    a = np.ones(n)  # everyone treated, no control arm
+    y = 2.0 * a + z + rng.normal(size=n)
+    data = tabular(pd.DataFrame({"A": a, "Z": z, "Y": y}))
+    graph = dag(["Z -> A", "Z -> Y", "A -> Y"])
+    with pytest.raises(ValueError, match="200 treated and 0 control"):
+        estimate_effect(graph, data, "A", "Y", strategy="aipw")
 
 
 # -- the learner swap --------------------------------------------------------
@@ -246,6 +332,71 @@ def test_any_fit_predict_object_drops_in() -> None:
     assert abs(est.value) < 0.3
 
 
+def test_fresh_clones_a_meta_estimator_with_nested_params() -> None:
+    class _Inner:
+        def __init__(self, alpha: float = 1.0) -> None:
+            self.alpha = alpha
+
+        def fit(self, X: Any, y: Any, sample_weight: Any = None) -> _Inner:
+            return self
+
+        def predict(self, X: Any) -> Any:
+            return np.zeros(np.asarray(X).shape[0])
+
+    class _Meta:
+        def __init__(self, estimator: _Inner | None = None) -> None:
+            self.estimator = estimator if estimator is not None else _Inner()
+
+        def get_params(self, deep: bool = True) -> dict[str, Any]:
+            params: dict[str, Any] = {"estimator": self.estimator}
+            if deep:
+                # sklearn meta-estimators add nested keys no constructor accepts
+                params["estimator__alpha"] = self.estimator.alpha
+            return params
+
+        def fit(self, X: Any, y: Any, sample_weight: Any = None) -> _Meta:
+            return self
+
+        def predict(self, X: Any) -> Any:
+            return self.estimator.predict(X)
+
+    original = _Meta(_Inner(alpha=2.0))
+    clone = _fresh(original)
+    assert isinstance(clone, _Meta)
+    assert clone.estimator is not original.estimator
+    assert clone.estimator.alpha == 2.0
+
+
+# -- the bootstrap loop ------------------------------------------------------
+
+
+class _AlwaysFails(OutcomeRegression):
+    def _point(
+        self,
+        arrays: dict[str, npt.NDArray[np.float64]],
+        target: EffectTarget,
+        make: dict[str, Callable[[], Learner]],
+    ) -> float:
+        raise ValueError("degenerate resample")
+
+
+def test_bootstrap_with_no_surviving_draw_raises() -> None:
+    data, graph = _adjustment(n=400)
+    ident = identify_effect(graph, "A", "Y")
+    model = _AlwaysFails(n_boot=10).fit(ident, data)
+    with pytest.raises(RuntimeError, match="no finite draws"):
+        model._bootstrap(model._state, EffectTarget.ATE, np.random.default_rng(0))
+
+
+def test_bootstrap_records_its_draw_counts() -> None:
+    data, graph = _adjustment(n=800)
+    est = estimate_effect(
+        graph, data, "A", "Y", strategy="outcome_regression", random_state=0, n_boot=50
+    )
+    assert est.diagnostics["n_boot_requested"] == 50.0
+    assert est.diagnostics["n_boot_returned"] == 50.0
+
+
 # -- the facade and the result type ------------------------------------------
 
 
@@ -277,3 +428,56 @@ def test_target_not_offered_raises() -> None:
     data, graph = _instrument()
     with pytest.raises(ValueError, match="reports"):
         estimate_effect(graph, data, "A", "Y", target="att")
+
+
+# -- the null family ----------------------------------------------------------
+
+
+def test_null_strategy_estimates_an_exact_zero() -> None:
+    data = tabular(pd.DataFrame({"X": [0.0, 1.0, 0.0, 1.0], "Y": [1.0, 2.0, 1.5, 2.5]}))
+    ident = Identification(
+        treatment=frozenset({"X"}),
+        outcome=frozenset({"Y"}),
+        identifiable=True,
+        strategy="null",
+        estimand="P(Y | do(X)) = P(Y)",
+    )
+    est = estimate(ident, data)
+    assert est.estimator == "null_effect"
+    assert est.kind == "analytic"
+    assert est.value == 0.0
+    assert est.std_error == 0.0
+
+
+def test_null_strategy_checks_the_columns_exist() -> None:
+    data = tabular(pd.DataFrame({"X": [0.0, 1.0], "Y": [1.0, 2.0]}))
+    ident = Identification(
+        treatment=frozenset({"Q"}),
+        outcome=frozenset({"Y"}),
+        identifiable=True,
+        strategy="null",
+        estimand="P(Y | do(Q)) = P(Y)",
+    )
+    with pytest.raises(ValueError, match="not in the data"):
+        estimate(ident, data)
+
+
+def test_summary_fields_handle_a_point_only_estimate() -> None:
+    point_only = EffectEstimate(
+        target=EffectTarget.ATE, estimator="ipw", learners={}, n=10, kind="point", _point=1.5
+    )
+    fields = _summary_fields(point_only)
+    assert fields["value"] == 1.5
+    assert fields["ci_low"] is None
+    assert fields["ci_high"] is None
+    analytic = EffectEstimate(
+        target=EffectTarget.ATE,
+        estimator="ipw",
+        learners={},
+        n=10,
+        kind="analytic",
+        _point=1.5,
+        _std_error=0.1,
+    )
+    lo = _summary_fields(analytic)["ci_low"]
+    assert lo is not None and lo < 1.5

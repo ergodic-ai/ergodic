@@ -18,7 +18,8 @@ way everywhere.
 
 `tabular` and the other builders infer a `Schema` from the data. Floats read as
 continuous, strings and pandas categoricals as categorical, an ordered pandas
-categorical as ordinal, datetimes as datetime.
+categorical as ordinal, datetimes as datetime. A tz-aware datetime column
+converts to UTC and drops the zone, so it types as datetime like a naive one.
 
 ```python
 from ergodic import tabular, Ordinal
@@ -65,6 +66,12 @@ gives a float design matrix, with discrete columns turned into their codes.
 ds.codes("stage")    # array([1, 0, 2, 0])  (I=0, II=1, III=2)
 ds.matrix().shape    # (4, 3)
 ```
+
+Missing values stay visible: a missing category is -1 in `codes` and NaN in
+`matrix`, and a missing datetime (NaT) is NaN there too, so a gap can't slip
+into an estimator as a real number. Declared categories have to cover the data;
+a value outside them raises a `ValueError` naming the column and the stray
+values.
 
 The dataset shares its variable names with graphs and knowledge, so it checks
 against a graph directly.
@@ -155,7 +162,9 @@ tree.children_of("total")   # ('a', 'b')
 tree.levels()["a1"]  # 2
 ```
 
-Mean aggregation works too: `Hierarchy.tree(..., aggregation="mean")`. Crossed
+Mean aggregation works too: `Hierarchy.tree(..., aggregation="mean")`. With
+mean, a parent is the mean of its direct children. `aggregate` and `coherence`
+share that definition, so they agree on trees deeper than one level. Crossed
 groupings (region by category) come later.
 
 ## Event log
@@ -184,7 +193,8 @@ dict(log.directly_follows())  # {('A', 'B'): 1, ('B', 'C'): 1, ('A', 'C'): 1}
 A dataframe builds a dataset, the way networkx builds a graph, and stays at the
 edge. Inside, the data is a plain column store and the math runs in numpy. The
 builders take pandas natively and any object with a `to_pandas` method (polars,
-arrow), so you can hand in either.
+arrow), so you can hand in either. Every column is copied on the way in, so
+mutating the source dataframe or array afterwards doesn't reach the dataset.
 
 ## What's next on the data side
 

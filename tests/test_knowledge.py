@@ -27,6 +27,11 @@ def test_tiers_become_precedence() -> None:
     assert ("B", "A") not in knowledge.precedes
 
 
+def test_confound_rejects_identical_pair() -> None:
+    with pytest.raises(ValueError, match="distinct"):
+        DomainKnowledge().confound("A", "A")
+
+
 # -- permits -----------------------------------------------------------------
 
 
@@ -38,6 +43,17 @@ def test_permits_edge_respects_constraints() -> None:
     assert knowledge.permits_edge("C", "D")
     assert not knowledge.permits_edge("X", "R")  # nothing enters a root
     assert not knowledge.permits_edge("S", "X")  # nothing leaves a sink
+
+
+def test_precedence_is_transitive() -> None:
+    knowledge = DomainKnowledge().order("A", "B").order("B", "C")
+    assert not knowledge.permits_edge("C", "A")  # C is after A through B
+    assert knowledge.permits_edge("A", "C")
+    assert not knowledge.is_consistent(dag(["C -> A"], nodes=["A", "B", "C"]))
+    mask, labels = knowledge.edge_mask()
+    assert labels == ["A", "B", "C"]
+    assert not mask[2, 0]  # C -> A blocked through the closure
+    assert mask[0, 2]
 
 
 # -- conflict detection ------------------------------------------------------
@@ -68,6 +84,18 @@ def test_required_into_root_conflict() -> None:
 def test_required_against_order_conflict() -> None:
     knowledge = DomainKnowledge().require("X", "Y").order("Y", "X")
     assert knowledge.conflicts()
+
+
+def test_required_and_precedence_union_cycle_conflict() -> None:
+    knowledge = DomainKnowledge().require("U", "V").require("V", "W").order("W", "U")
+    assert any("cycle" in message for message in knowledge.conflicts())
+
+
+def test_deep_required_chain_validates_without_recursion_error() -> None:
+    knowledge = DomainKnowledge()
+    for i in range(2000):
+        knowledge = knowledge.require(f"N{i}", f"N{i + 1}")
+    assert knowledge.conflicts() == []
 
 
 def test_empty_knowledge_is_consistent() -> None:
@@ -108,6 +136,25 @@ def test_confounded_pair_needs_bidirected_edge() -> None:
     knowledge = DomainKnowledge().confound("X", "Y")
     assert knowledge.is_consistent(admg(["X <-> Y"]))
     assert not knowledge.is_consistent(dag(["X -> Y"]))
+
+
+def test_forbid_adjacency_bans_every_edge_type() -> None:
+    knowledge = DomainKnowledge().forbid_adjacency("A", "B")
+    assert not knowledge.is_consistent(dag(["A -> B"]))
+    assert not knowledge.is_consistent(admg(["A <-> B"]))
+    assert not knowledge.is_consistent(mixed(["A -- B"]))
+    assert knowledge.apply_to(admg(["A <-> B"])).get_edge("A", "B") is None
+    assert knowledge.apply_to(mixed(["A -- B"])).get_edge("A", "B") is None
+
+
+def test_single_direction_forbid_stays_directed_only() -> None:
+    knowledge = DomainKnowledge().forbid("A", "B")
+    assert knowledge.is_consistent(admg(["A <-> B"]))
+    assert knowledge.is_consistent(mixed(["A -- B"]))
+    oriented = knowledge.apply_to(mixed(["A -- B"]))
+    edge = oriented.get_edge("A", "B")
+    assert edge is not None
+    assert edge.directed_pair() == ("B", "A")  # only the allowed direction remains
 
 
 # -- projections -------------------------------------------------------------

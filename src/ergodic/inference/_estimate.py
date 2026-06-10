@@ -31,6 +31,7 @@ def estimate(
     strategy: str | None = None,
     learner: Any = None,
     target: EffectTarget | str | None = None,
+    treated: Any | None = None,
     random_state: int | None = None,
     n_boot: int = 1000,
     **kwargs: Any,
@@ -38,13 +39,18 @@ def estimate(
     """Estimate an identified effect over tabular data.
 
     ``strategy`` names the estimator (else the family default). ``learner`` is an
-    alias, a learner, or a slot-to-learner mapping (else the slot defaults). Extra
-    keyword arguments pass to the estimator (``per_arm``, ``scheme``, ``clip``).
+    alias, a learner, or a slot-to-learner mapping (else the slot defaults).
+    ``treated`` names the treatment level that codes to 1 for a two-level
+    treatment (else level order decides, with a warning when the levels are not
+    0/1). Extra keyword arguments pass to the estimator (``per_arm``, ``scheme``,
+    ``clip``).
     """
     if not identification.identifiable:
         raise ValueError(f"effect is not identifiable: {identification.estimand}")
     estimator_cls = estimator_for(identification, strategy)
-    estimator = estimator_cls(learner, random_state=random_state, n_boot=n_boot, **kwargs)
+    estimator = estimator_cls(
+        learner, random_state=random_state, n_boot=n_boot, treated=treated, **kwargs
+    )
     estimator.fit(identification, data)
     chosen = target if target is not None else default_target(identification)
     return estimator.effect(target=chosen)
@@ -59,11 +65,15 @@ def estimate_effect(
     strategy: str | None = None,
     learner: Any = None,
     target: EffectTarget | str | None = None,
+    treated: Any | None = None,
     random_state: int | None = None,
     n_boot: int = 1000,
     **kwargs: Any,
 ) -> EffectEstimate:
-    """Identify the effect of ``treatment`` on ``outcome`` in ``graph``, then estimate it."""
+    """Identify the effect of ``treatment`` on ``outcome`` in ``graph``, then estimate it.
+
+    ``treated`` names the treatment level that codes to 1 (see :func:`estimate`).
+    """
     identification = identify_effect(graph, treatment, outcome)
     if not identification.identifiable:
         raise ValueError(
@@ -75,6 +85,7 @@ def estimate_effect(
         strategy=strategy,
         learner=learner,
         target=target,
+        treated=treated,
         random_state=random_state,
         n_boot=n_boot,
         **kwargs,

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,6 +21,7 @@ from ergodic.inference import (
     XLearner,
     candidates,
 )
+from ergodic.inference._crossfit import _folds, _train_mask
 
 
 def _hetero(n: int = 4000, seed: int = 0) -> tuple[TabularData, MixedGraph, np.ndarray]:
@@ -38,7 +41,7 @@ def _instrument(n: int = 5000, seed: int = 2) -> tuple[TabularData, MixedGraph]:
     a = 0.8 * z + u + rng.normal(size=n)
     y = 1.5 * a + 2.0 * u + rng.normal(size=n)
     data = tabular(pd.DataFrame({"Z": z, "A": a, "Y": y}))
-    return data, admg(["Z -> A", "A -> Y", "A <-> Y"])
+    return data, dag(["Z -> A", "A -> Y", "U -> A", "U -> Y"], latent=["U"])
 
 
 # -- orthogonal estimators ---------------------------------------------------
@@ -144,6 +147,47 @@ def test_knn_regressor_and_classifier() -> None:
     proba = clf.predict_proba(x)
     assert proba.shape == (300, 2)
     assert np.corrcoef(proba[:, 1], (x[:, 0] > 0.0).astype(float))[0, 1] > 0.7
+
+
+def test_knn_zero_features_fall_back_to_the_training_mean() -> None:
+    x = np.empty((100, 0))
+    y = np.arange(100, dtype=np.float64)
+    reg = KNNRegressor(k=5).fit(x, y)
+    assert np.allclose(reg.predict(np.empty((3, 0))), 49.5)
+    labels = (np.arange(100) < 30).astype(np.float64)
+    clf = KNNClassifier(k=5).fit(np.empty((100, 0)), labels)
+    proba = clf.predict_proba(np.empty((2, 0)))
+    assert np.allclose(proba[:, 1], 0.3)
+
+
+# -- cross-fitting folds -----------------------------------------------------
+
+
+def test_folds_stratify_an_imbalanced_treatment() -> None:
+    n = 60
+    a = np.zeros(n, dtype=np.float64)
+    a[:6] = 1.0
+    folds = _folds(n, 5, np.random.default_rng(0), stratify=a)
+    assert sorted(np.concatenate(folds).tolist()) == list(range(n))
+    for test in folds:
+        assert a[test].sum() >= 1.0  # each test fold sees the rare arm
+        train = _train_mask(n, test)
+        assert a[train].sum() > 0.0
+        assert (1.0 - a[train]).sum() > 0.0
+
+
+def test_r_learner_final_slot_requires_sample_weight() -> None:
+    class _NoWeight:
+        def fit(self, X: Any, y: Any) -> _NoWeight:
+            return self
+
+        def predict(self, X: Any) -> Any:
+            return np.zeros(np.asarray(X).shape[0])
+
+    data, graph, _ = _hetero(n=400)
+    ident = identify_effect(graph, "A", "Y")
+    with pytest.raises(TypeError, match="sample_weight"):
+        RLearner({"final": _NoWeight()}, random_state=0).fit(ident, data)
 
 
 # -- registry ----------------------------------------------------------------

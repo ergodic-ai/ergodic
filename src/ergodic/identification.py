@@ -14,7 +14,15 @@ Three strategies are covered, in the order ``identify_effect`` tries them:
 2. Front-door. A mediator set that carries all of the effect, with the back-door
    conditions on both legs.
 3. Instruments. Conditional instrumental variables, for the cases adjustment and
-   the front-door miss.
+   the front-door miss. Instrument identification is parametric: it pins the
+   effect down under a linear model, where the other two strategies do not need
+   one.
+
+Before any of them, a trivial case is settled: when no directed path runs from
+the treatment to the outcome, the intervention cannot move the outcome, so
+P(y | do(x)) = P(y) and the strategy is ``"null"``. Latent nodes
+(``graph.latent``) are unobserved, so they never appear in adjustment sets,
+mediator sets, instruments, or conditioning sets.
 
 The full do-calculus ID algorithm (which decides every identifiable case) is not
 built yet. A graph with circle marks (a PAG) is rejected, since identification
@@ -42,6 +50,28 @@ def _as_set(value: str | Iterable[str]) -> frozenset[str]:
     return frozenset(value)
 
 
+def _join(names: frozenset[str]) -> str:
+    return ", ".join(sorted(names))
+
+
+def _validate(
+    graph: MixedGraph,
+    x: frozenset[str],
+    y: frozenset[str],
+    other: frozenset[str] = frozenset(),
+) -> None:
+    """Check treatment and outcome are nonempty and disjoint, and every name is a node."""
+    if not x:
+        raise ValueError("treatment must name at least one node")
+    if not y:
+        raise ValueError("outcome must name at least one node")
+    if x & y:
+        raise ValueError(f"treatment and outcome must be disjoint; both contain {_join(x & y)}")
+    unknown = (x | y | other) - graph.nodes
+    if unknown:
+        raise ValueError(f"unknown node names: {_join(unknown)}")
+
+
 def _check_no_circle(graph: MixedGraph) -> None:
     if any(e.has_circle for e in graph.edges):
         raise _PagNotSupportedError(
@@ -65,9 +95,16 @@ def _ancestors(graph: MixedGraph, nodes: frozenset[str]) -> frozenset[str]:
 
 
 def _causal_nodes(graph: MixedGraph, x: frozenset[str], y: frozenset[str]) -> frozenset[str]:
-    """Nodes on a proper causal path from ``x`` to ``y`` (the path's only x-node is its start)."""
+    """Nodes on a proper causal path from ``x`` to ``y`` (the path's only x-node is its start).
+
+    The leg toward ``y`` is traced with ``x`` removed from the graph, so a node
+    whose only routes to ``y`` pass through a treatment node does not count.
+    With a single treatment the two computations agree; the difference shows up
+    for set treatments, where one treatment sits downstream of another.
+    """
     reachable = _descendants(graph, x)
-    toward_y = _ancestors(graph, y) | y
+    without_x = graph.induced_subgraph((graph.nodes - x) | y)
+    toward_y = _ancestors(without_x, y) | y
     return (reachable & toward_y) - x
 
 
@@ -110,13 +147,15 @@ def is_valid_adjustment_set(
 
     Uses the complete adjustment criterion: the set avoids the forbidden nodes
     (descendants of the causal-path nodes) and blocks every proper non-causal path
-    from treatment to outcome.
+    from treatment to outcome. A set holding a latent node is never valid, since
+    a latent node cannot be conditioned on.
     """
     x = _as_set(treatment)
     y = _as_set(outcome)
     z = _as_set(adjustment)
+    _validate(graph, x, y, z)
     _check_no_circle(graph)
-    if (x & y) or (x & z) or (y & z):
+    if (x & z) or (y & z) or (z & graph.latent):
         return False
     cn = _causal_nodes(graph, x, y)
     if z & _forbidden(graph, x, y):
@@ -131,11 +170,13 @@ def adjustment_set(
     """Return the canonical valid adjustment set, or ``None`` if none exists.
 
     The canonical set is the ancestors of treatment and outcome, minus the
-    forbidden nodes. If any valid adjustment set exists, this one is valid.
+    forbidden nodes and the latent nodes. If any valid adjustment set over the
+    observed nodes exists, this one is valid.
     """
     x = _as_set(treatment)
     y = _as_set(outcome)
-    candidate = (_ancestors(graph, x | y) | x | y) - _forbidden(graph, x, y) - x - y
+    _validate(graph, x, y)
+    candidate = (_ancestors(graph, x | y) | x | y) - _forbidden(graph, x, y) - x - y - graph.latent
     if is_valid_adjustment_set(graph, x, y, candidate):
         return frozenset(candidate)
     return None
@@ -145,6 +186,7 @@ def minimal_adjustment_set(
     graph: MixedGraph, treatment: str | Iterable[str], outcome: str | Iterable[str]
 ) -> frozenset[str] | None:
     """Return one minimal valid adjustment set, or ``None`` if none exists."""
+    _validate(graph, _as_set(treatment), _as_set(outcome))
     start = adjustment_set(graph, treatment, outcome)
     if start is None:
         return None
@@ -168,12 +210,17 @@ def is_frontdoor_set(
     outcome: str | Iterable[str],
     mediators: str | Iterable[str],
 ) -> bool:
-    """Return ``True`` if ``mediators`` satisfies the front-door criterion."""
+    """Return ``True`` if ``mediators`` satisfies the front-door criterion.
+
+    A mediator set holding a latent node is never valid, since the front-door
+    formula conditions on the mediators.
+    """
     x = _as_set(treatment)
     y = _as_set(outcome)
     m = _as_set(mediators)
+    _validate(graph, x, y, m)
     _check_no_circle(graph)
-    if not m or (x & m) or (y & m) or (x & y):
+    if not m or (x & m) or (y & m) or (m & graph.latent):
         return False
     # (1) every directed path from x to y passes through m
     without_m = graph.induced_subgraph(graph.nodes - m)
@@ -191,12 +238,14 @@ def frontdoor_set(
 ) -> frozenset[str] | None:
     """Return a front-door mediator set, or ``None`` if none is found.
 
-    Tries the full set of nodes between treatment and outcome first, then single
-    mediators. This is a search over likely candidates, not every subset.
+    Tries the full set of observed nodes between treatment and outcome first,
+    then single mediators. This is a search over likely candidates, not every
+    subset.
     """
     x = _as_set(treatment)
     y = _as_set(outcome)
-    mediators = _causal_nodes(graph, x, y) - y - x
+    _validate(graph, x, y)
+    mediators = _causal_nodes(graph, x, y) - y - x - graph.latent
     if mediators and is_frontdoor_set(graph, x, y, mediators):
         return frozenset(mediators)
     for single in sorted(mediators):
@@ -217,17 +266,26 @@ def is_instrument(
 ) -> bool:
     """Return ``True`` if ``instrument`` is a conditional instrument given ``given``.
 
-    The conditioning set holds only non-descendants of the outcome, the instrument
-    is associated with the treatment, and the instrument reaches the outcome only
-    through the treatment (it separates from the outcome once the treatment's
-    outgoing edges are cut).
+    The instrument and the conditioning set are observed non-descendants of the
+    treatment and the outcome, the instrument is associated with the treatment,
+    and the instrument reaches the outcome only through the treatment (it
+    separates from the outcome once the treatment's outgoing edges are cut).
+
+    Descendants of the treatment are rejected outright: cutting the treatment's
+    outgoing edges would sever the very edge that makes them endogenous, so the
+    exclusion check alone would pass them.
     """
-    _check_no_circle(graph)
     i = frozenset({instrument})
     x = frozenset({treatment})
     y = frozenset({outcome})
     w = _as_set(given)
+    _validate(graph, x, y, i | w)
+    _check_no_circle(graph)
     if (i & x) or (i & y) or (w & (i | x | y)):
+        return False
+    if (i | w) & graph.latent:
+        return False
+    if (i | w) & _descendants(graph, x):
         return False
     if w & (_descendants(graph, y) | y):
         return False
@@ -241,14 +299,17 @@ def instruments(
 ) -> list[tuple[str, frozenset[str]]]:
     """Find conditional instruments for ``treatment -> outcome``.
 
-    Returns ``(instrument, conditioning set)`` pairs. The search tries the empty
-    set and single non-descendants of the outcome as conditioning sets.
+    Returns ``(instrument, conditioning set)`` pairs. Candidates and conditioning
+    nodes are observed non-descendants of the treatment and the outcome; the
+    search tries the empty set and single nodes as conditioning sets.
     """
     x = frozenset({treatment})
     y = frozenset({outcome})
-    non_descendant = sorted((graph.nodes - _descendants(graph, y) - y) - x)
+    _validate(graph, x, y)
+    usable = graph.nodes - graph.latent - _descendants(graph, x) - x - y
+    non_descendant = sorted(usable - _descendants(graph, y))
     found: list[tuple[str, frozenset[str]]] = []
-    for candidate in sorted(graph.nodes - x - y):
+    for candidate in sorted(usable):
         condition_sets: list[frozenset[str]] = [frozenset()]
         condition_sets += [frozenset({w}) for w in non_descendant if w != candidate]
         for w in condition_sets:
@@ -268,7 +329,7 @@ class Identification:
     treatment: frozenset[str]
     outcome: frozenset[str]
     identifiable: bool
-    strategy: str  # "adjustment", "frontdoor", "iv", or "none"
+    strategy: str  # "null", "adjustment", "frontdoor", "iv", or "none"
     adjustment_set: frozenset[str] | None = None
     mediators: frozenset[str] | None = None
     instruments: tuple[tuple[str, frozenset[str]], ...] = ()
@@ -282,10 +343,6 @@ class Identification:
         if not self.identifiable:
             return f"Identification(not identifiable, {arrow})"
         return f"Identification({self.strategy}: {self.estimand})"
-
-
-def _join(names: frozenset[str]) -> str:
-    return ", ".join(sorted(names))
 
 
 def _adjustment_formula(x: frozenset[str], y: frozenset[str], z: frozenset[str]) -> str:
@@ -308,10 +365,28 @@ def _frontdoor_formula(x: frozenset[str], y: frozenset[str], m: frozenset[str]) 
 def identify_effect(
     graph: MixedGraph, treatment: str | Iterable[str], outcome: str | Iterable[str]
 ) -> Identification:
-    """Try adjustment, then the front-door, then instruments, and report the result."""
+    """Try adjustment, then the front-door, then instruments, and report the result.
+
+    Before any strategy runs, the trivial case is settled: when no directed path
+    runs from the treatment to the outcome, the intervention cannot move the
+    outcome, so P(y | do(x)) = P(y) and the strategy is ``"null"``.
+    """
     x = _as_set(treatment)
     y = _as_set(outcome)
+    _validate(graph, x, y)
     _check_no_circle(graph)
+
+    if not (_descendants(graph, x) & y):
+        return Identification(
+            x,
+            y,
+            True,
+            "null",
+            estimand=(
+                f"P({_join(y)} | do({_join(x)})) = P({_join(y)}); "
+                "no directed path from treatment to outcome"
+            ),
+        )
 
     via_adjustment = adjustment_set(graph, x, y)
     if via_adjustment is not None:
@@ -345,7 +420,10 @@ def identify_effect(
                 True,
                 "iv",
                 instruments=tuple(found),
-                estimand=f"identified through instrument(s) {names}; needs an IV estimator",
+                estimand=(
+                    f"identified through instrument(s) {names} under a linear "
+                    "(parametric) model; needs an IV estimator"
+                ),
             )
 
     return Identification(

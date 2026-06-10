@@ -110,6 +110,8 @@ class DomainKnowledge:
 
     def confound(self, a: str, b: str) -> DomainKnowledge:
         """Record that ``a`` and ``b`` share a hidden common cause."""
+        if a == b:
+            raise ValueError(f"a confounded pair needs two distinct variables, got {a!r} twice")
         return replace(
             self,
             confounded=self.confounded | {frozenset({a, b})},
@@ -153,32 +155,39 @@ class DomainKnowledge:
                 out.append(f"required edge {u}->{v} contradicts root {v}")
             if u in self.sinks:
                 out.append(f"required edge {u}->{v} contradicts sink {u}")
-        out.extend(self._cycle_conflicts(self.required, "required edges"))
-        out.extend(self._cycle_conflicts(self.precedes, "precedence"))
+        required_cycles = self._cycle_conflicts(self.required, "required edges")
+        precedence_cycles = self._cycle_conflicts(self.precedes, "precedence")
+        out.extend(required_cycles)
+        out.extend(precedence_cycles)
+        if not required_cycles and not precedence_cycles:
+            # A required edge can close a loop through the precedence order even
+            # when each relation is acyclic on its own, so check their union too.
+            out.extend(
+                self._cycle_conflicts(
+                    self.required | self.precedes, "required edges and precedence together"
+                )
+            )
         return out
 
     @staticmethod
     def _cycle_conflicts(pairs: frozenset[tuple[str, str]], label: str) -> list[str]:
+        # Kahn's algorithm, iterative so long chains do not hit the recursion limit.
         forward: dict[str, set[str]] = {}
+        indegree: dict[str, int] = {}
         for a, b in pairs:
             forward.setdefault(a, set()).add(b)
-        color: dict[str, int] = {}
-        cyclic = False
-
-        def visit(node: str) -> bool:
-            color[node] = 1
+            indegree.setdefault(a, 0)
+            indegree[b] = indegree.get(b, 0) + 1
+        ready = [n for n, degree in indegree.items() if degree == 0]
+        removed = 0
+        while ready:
+            node = ready.pop()
+            removed += 1
             for nxt in forward.get(node, ()):
-                state = color.get(nxt, 0)
-                if state == 1 or (state == 0 and not visit(nxt)):
-                    return False
-            color[node] = 2
-            return True
-
-        for start in list(forward):
-            if color.get(start, 0) == 0 and not visit(start):
-                cyclic = True
-                break
-        return [f"{label} contain a cycle"] if cyclic else []
+                indegree[nxt] -= 1
+                if indegree[nxt] == 0:
+                    ready.append(nxt)
+        return [] if removed == len(indegree) else [f"{label} contain a cycle"]
 
     def validate(self) -> None:
         """Raise :class:`InconsistentKnowledgeError` if the knowledge contradicts itself."""
@@ -188,13 +197,39 @@ class DomainKnowledge:
 
     # -- projections used by algorithms --------------------------------------
 
-    def permits_edge(self, cause: str, effect: str) -> bool:
-        """Return ``True`` if a directed edge ``cause -> effect`` is allowed."""
+    def _precedence_closure(self) -> frozenset[tuple[str, str]]:
+        """The transitive closure of ``precedes``, walked with an explicit stack."""
+        forward: dict[str, set[str]] = {}
+        for a, b in self.precedes:
+            forward.setdefault(a, set()).add(b)
+        closed: set[tuple[str, str]] = set()
+        for start in forward:
+            seen: set[str] = set()
+            stack = list(forward[start])
+            while stack:
+                node = stack.pop()
+                if node in seen:
+                    continue
+                seen.add(node)
+                stack.extend(forward.get(node, ()))
+            seen.discard(start)
+            closed.update((start, later) for later in seen)
+        return frozenset(closed)
+
+    def _permits(self, cause: str, effect: str, precedes: frozenset[tuple[str, str]]) -> bool:
         if (cause, effect) in self.forbidden:
             return False
-        if (effect, cause) in self.precedes:
+        if (effect, cause) in precedes:
             return False
         return not (effect in self.roots or cause in self.sinks)
+
+    def permits_edge(self, cause: str, effect: str) -> bool:
+        """Return ``True`` if a directed edge ``cause -> effect`` is allowed.
+
+        Precedence is read transitively: with ``A`` before ``B`` and ``B``
+        before ``C``, an edge ``C -> A`` is not permitted.
+        """
+        return self._permits(cause, effect, self._precedence_closure())
 
     def requires_edge(self, cause: str, effect: str) -> bool:
         return (cause, effect) in self.required
@@ -206,11 +241,21 @@ class DomainKnowledge:
             edge = graph.get_edge(u, v)
             if edge is None or edge.directed_pair() != (u, v):
                 out.append(f"missing required edge {u}->{v}")
+        # A pair forbidden in both directions is an adjacency ban, so any edge
+        # between the two (bidirected and undirected included) violates it.
+        reported: set[frozenset[str]] = set()
         for u, v in sorted(self.forbidden):
             edge = graph.get_edge(u, v)
-            if edge is not None and edge.directed_pair() == (u, v):
+            if edge is None:
+                continue
+            if (v, u) in self.forbidden:
+                pair = frozenset((u, v))
+                if pair not in reported:
+                    reported.add(pair)
+                    out.append(f"present edge between {u} and {v}, forbidden in both directions")
+            elif edge.directed_pair() == (u, v):
                 out.append(f"present forbidden edge {u}->{v}")
-        for before, after in sorted(self.precedes):
+        for before, after in sorted(self._precedence_closure()):
             if (
                 before in graph.nodes
                 and after in graph.nodes
@@ -237,21 +282,26 @@ class DomainKnowledge:
     def apply_to(self, graph: MixedGraph) -> MixedGraph:
         """Enforce the hard constraints on ``graph``: drop forbidden, add required edges.
 
-        Edges left undirected or with a circle are oriented when only one
-        direction stays permitted. The result is returned as a new graph.
+        A pair forbidden in both directions loses its edge whatever the marks; a
+        single-direction ban only drops the matching directed edge. Edges left
+        undirected or with a circle are oriented when only one direction stays
+        permitted. The result is returned as a new graph.
         """
         out = graph
         for u, v in self.forbidden:
             edge = out.get_edge(u, v)
-            if edge is not None and edge.directed_pair() == (u, v):
+            if edge is None:
+                continue
+            if (v, u) in self.forbidden or edge.directed_pair() == (u, v):
                 out = out.remove_edge(u, v)
         for u, v in self.required:
             out = out.orient(u, v)
+        precedes = self._precedence_closure()
         for edge in list(out.edges):
             if edge.is_directed:
                 continue
-            forward_ok = self.permits_edge(edge.u, edge.v)
-            backward_ok = self.permits_edge(edge.v, edge.u)
+            forward_ok = self._permits(edge.u, edge.v, precedes)
+            backward_ok = self._permits(edge.v, edge.u, precedes)
             if forward_ok and not backward_ok:
                 out = out.orient(edge.u, edge.v)
             elif backward_ok and not forward_ok:
@@ -271,10 +321,11 @@ class DomainKnowledge:
 
         labels = list(variables) if variables is not None else sorted(self.variables)
         size = len(labels)
+        precedes = self._precedence_closure()
         mask = np.zeros((size, size), dtype=bool)
         for i, cause in enumerate(labels):
             for j, effect in enumerate(labels):
-                if i != j and self.permits_edge(cause, effect):
+                if i != j and self._permits(cause, effect, precedes):
                     mask[i, j] = True
         return mask, labels
 

@@ -95,11 +95,15 @@ def _as_learner(spec: Any, *, want_classifier: bool = False) -> Learner:
 
 def _fresh(learner: Learner) -> Learner:
     """An unfitted clone, so a resample or an arm never reuses fitted state."""
-    if hasattr(learner, "get_params"):
-        params = learner.get_params()
-        return type(learner)(**params)
     import copy
 
+    if hasattr(learner, "get_params"):
+        try:
+            # deep=True would add nested "step__param" keys that no constructor takes
+            params = learner.get_params(deep=False)
+        except TypeError:
+            params = learner.get_params()
+        return type(learner)(**{key: copy.deepcopy(value) for key, value in params.items()})
     return copy.deepcopy(learner)
 
 

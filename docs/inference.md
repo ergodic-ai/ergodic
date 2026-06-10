@@ -18,7 +18,7 @@ data = tabular(pd.DataFrame({"A": a, "Z": z, "Y": y}))
 
 g = dag(["Z -> A", "Z -> Y", "A -> Y"])
 est = estimate_effect(g, data, "A", "Y")
-est            # EffectEstimate(aipw, analytic: ate=2, se=0.0342, 95% CI [1.93, 2.06], n=4000)
+est            # EffectEstimate(aipw, analytic: ate=1.997, se=0.0342, 95% CI [1.93, 2.06], n=4000)
 est.value      # ~2.0
 est.interval() # (~1.93, ~2.06)
 ```
@@ -40,12 +40,14 @@ estimate_effect(g, data, "A", "Y", strategy="aipw")                # doubly robu
 Swap the learner by alias, by a slot mapping, or with any object that has `fit` and `predict`:
 
 ```python
-estimate_effect(g, data, "A", "Y", strategy="aipw", learner="ols")
+estimate_effect(g, data, "A", "Y", strategy="aipw", learner="knn")
 estimate_effect(
     g, data, "A", "Y", strategy="aipw",
     learner={"outcome": "ols", "propensity": "logistic"},
 )
 ```
+
+A single alias fills every slot, so it has to suit them all. `"knn"` works here because the propensity slot gets its classifier variant; `"ols"` alone would be refused there, since that slot needs a classifier. When the slots need different models, pass a slot mapping.
 
 The learner is structurally a sklearn estimator, so any sklearn or xgboost model drops into a slot with no adapter:
 
@@ -87,21 +89,31 @@ estimate_effect(g, data, "A", "Y", strategy="aipw", target="ate")
 estimate_effect(g, data, "A", "Y", strategy="aipw", target="att")
 ```
 
+A two-level treatment that is not 0/1 (say `"drug"` and `"placebo"`) gets coded by level order, and that order may not be the contrast you mean. Pass `treated=` to name the level that codes to 1:
+
+```python
+estimate_effect(g, data, "A", "Y", treated="drug")   # the effect of drug over placebo
+```
+
+Without it the estimate still runs, with a warning naming the implicit coding.
+
 ## Front-door and instruments
 
 Same call, a different graph. When a confounder is unobserved, a mediator or an instrument carries the identification, and the matching estimator is selected.
 
 ```python
-from ergodic import admg
+from ergodic import admg, dag
 
 # front-door: binary treatment A, binary mediator M, unobserved A-Y confounding
 fd = admg(["A -> M", "M -> Y", "A <-> Y"])
 estimate_effect(fd, data_fd, "A", "Y")   # two_stage_regression, target ATE
 
-# instrument Z reaches Y only through A
-iv = admg(["Z -> A", "A -> Y", "A <-> Y"])
+# instrument Z reaches Y only through A; U is the unobserved confounder
+iv = dag(["Z -> A", "A -> Y", "U -> A", "U -> Y"], latent=["U"])
 estimate_effect(iv, data_iv, "A", "Y")   # two_stage_least_squares, target LATE
 ```
+
+A graph holds one edge per node pair, so a treatment with both a direct effect and unobserved confounding on the same pair (the bow) is written as above: the confounder is its own node, marked latent.
 
 ## Cross-fitting, orthogonal estimators, and heterogeneous effects
 
@@ -193,7 +205,7 @@ estimate_effect(g, data, "A", "Y", strategy="ipw", learner=OLS())
 
 ## The estimator library
 
-Adjustment: `OutcomeRegression` (the S- and T-learner), `IPW`, `Stratification`, `AIPW`, `DML`, `DRLearner`, `RLearner`, `XLearner`. Front-door: `TwoStageRegression`. Instruments: `TwoStageLeastSquares`, `Wald`, `PLIV`. The default per family is the doubly-robust or orthogonal one. Standard errors come from an influence function where one is known (AIPW, DML, DRLearner, two-stage least squares, PLIV), bootstrap otherwise. Treatment is binary for most, binary or continuous for `DML` and `PLIV`; the outcome is continuous or binary; the data is tabular.
+Adjustment: `OutcomeRegression` (the S- and T-learner), `IPW`, `Stratification`, `AIPW`, `DML`, `DRLearner`, `RLearner`, `XLearner`. Front-door: `TwoStageRegression`. Instruments: `TwoStageLeastSquares`, `Wald`, `PLIV`. The default per family is the doubly-robust or orthogonal one. Standard errors come from an influence function where one is known (AIPW, DML, DRLearner, two-stage least squares, PLIV), bootstrap otherwise. Treatment is binary for most, binary or continuous for `DML` and `PLIV`; the outcome is continuous or binary; the data is tabular. One more family is trivial by design: a graph with no directed path from treatment to outcome identifies the `null` strategy, and `NullEffect` reports an exact zero.
 
 ## Not built yet
 

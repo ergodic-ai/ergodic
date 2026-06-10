@@ -22,10 +22,12 @@ The constraints you can state:
 
 - `require(cause, effect)` and `forbid(cause, effect)` for single directed edges.
 - `forbid_adjacency(a, b)` to rule out any edge between two variables.
-- `order(before, after)` and `with_tiers(...)` for temporal order.
+- `order(before, after)` and `with_tiers(...)` for temporal order, read transitively.
 - `root(*names)` and `sink(*names)` for variables with no causes or no effects.
 - `confound(a, b)` for a known hidden common cause.
 - `forbid_between(group_a, group_b)` to ban every edge from one set into another.
+
+A pair forbidden in both directions is an adjacency ban: no directed, bidirected, or undirected edge may join the two. A single `forbid(cause, effect)` constrains that directed edge only, so `A <-> B` or `A -- B` still passes. And order is transitive: with A before B and B before C, an edge from C into A is out even though no single constraint names that pair.
 
 ## Tiers are the natural form
 

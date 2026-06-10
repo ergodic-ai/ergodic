@@ -16,6 +16,7 @@ estimate) and, when an influence function is known, ``_analytic``.
 
 from __future__ import annotations
 
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 ADJUSTMENT = "adjustment"
 FRONTDOOR = "frontdoor"
 IV = "iv"
+NULL = "null"
 
 
 class Task(Enum):
@@ -114,6 +116,28 @@ def _numeric_vector(data: TabularData, name: str, role: str) -> npt.NDArray[np.f
     raise NotImplementedError(f"E1 needs a continuous or binary {role}; {name!r} is {col.kind}")
 
 
+def _coded_treatment(data: TabularData, name: str, treated: Any) -> npt.NDArray[np.float64]:
+    """Code the treatment 1 where it equals ``treated`` and 0 on the other level."""
+    col = data.schema[name]
+    raw = data.column(name)
+    if col.is_discrete and col.cardinality == 2:
+        levels: tuple[Any, ...] = tuple(col.categories or ())
+    elif col.is_continuous:
+        uniques = np.unique(np.asarray(raw, dtype=np.float64))
+        if uniques.shape[0] != 2:
+            raise ValueError(
+                f"treated= needs a two-level treatment; {name!r} has {uniques.shape[0]} level(s)"
+            )
+        levels = tuple(uniques.tolist())
+    else:
+        raise ValueError(f"treated= needs a two-level treatment; {name!r} is {col.kind}")
+    if treated not in levels:
+        raise ValueError(
+            f"treated={treated!r} is not a level of {name!r}; observed levels are {list(levels)}"
+        )
+    return np.asarray(np.asarray(raw) == treated, dtype=np.float64)
+
+
 def _outcome_vector(data: TabularData, name: str) -> tuple[npt.NDArray[np.float64], bool]:
     col = data.schema[name]
     if col.is_discrete and col.cardinality == 2:
@@ -178,10 +202,12 @@ class CausalEstimator(ABC):
         *,
         random_state: int | None = None,
         n_boot: int = 1000,
+        treated: Any | None = None,
     ) -> None:
         self._spec = learners
         self._random_state = random_state
         self._n_boot = n_boot
+        self._treated = treated
         self._fit_state: _FitState | None = None
         self._covariates: tuple[str, ...] = ()
 
@@ -266,9 +292,28 @@ class CausalEstimator(ABC):
             return self._state.arrays["Z"]
         return _covariate_matrix(data, list(self._covariates))
 
-    def effect(
-        self, *, target: EffectTarget | str | None = None, level: float = 0.95
-    ) -> EffectEstimate:
+    def _treatment_vector(
+        self, data: TabularData, name: str, *, allow_continuous: bool = False
+    ) -> npt.NDArray[np.float64]:
+        """The treatment as floats, honoring ``treated`` and warning on an implicit coding."""
+        if self._treated is not None:
+            return _coded_treatment(data, name, self._treated)
+        col = data.schema[name]
+        if col.is_discrete and col.cardinality == 2:
+            cats = tuple(col.categories or ())
+            # {0, 1} also admits booleans, since False == 0 and True == 1
+            if not set(cats) <= {0, 1}:
+                warnings.warn(
+                    f"treatment {name!r} was coded 1 for level {cats[1]!r} and 0 for "
+                    f"{cats[0]!r} by level order; pass treated=... to choose",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        if allow_continuous:
+            return _numeric_vector(data, name, "treatment")
+        return _binary_vector(data, name, "treatment")
+
+    def effect(self, *, target: EffectTarget | str | None = None) -> EffectEstimate:
         """Report the effect, with an analytic standard error or a bootstrap one."""
         from ._result import EffectEstimate
 
@@ -293,13 +338,18 @@ class CausalEstimator(ABC):
         rng = np.random.default_rng(self._random_state)
         point = self._point(state.arrays, chosen, state.make)
         draws = self._bootstrap(state, chosen, rng)
+        diagnostics = {
+            **state.diagnostics,
+            "n_boot_requested": float(self._n_boot),
+            "n_boot_returned": float(draws.shape[0]),
+        }
         return EffectEstimate(
             target=chosen,
             estimator=self.name,
             learners=dict(state.learner_names),
             n=state.n,
             kind="bootstrap",
-            diagnostics=dict(state.diagnostics),
+            diagnostics=diagnostics,
             _point=point,
             _draws=draws,
         )
@@ -391,6 +441,11 @@ class CausalEstimator(ABC):
                 continue
             draws[filled] = value
             filled += 1
+        if filled == 0:
+            raise RuntimeError(
+                f"bootstrap for {self.name} produced no finite draws in {attempts} attempts; "
+                "every resample failed to estimate"
+            )
         return draws[:filled]
 
     # -- per-estimator -------------------------------------------------------
@@ -444,13 +499,20 @@ class _AdjustmentBase(CausalEstimator):
         covariates = identification.adjustment_set or frozenset()
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
-        a = _binary_vector(data, treatment, "treatment")
+        a = self._treatment_vector(data, treatment)
         y, y_binary = _outcome_vector(data, outcome)
         z = _covariate_matrix(data, covariates)
         arrays = {"A": a, "Y": y, "Z": z}
+        n_treated = int(np.sum(a == 1.0))
+        n_control = int(np.sum(a == 0.0))
+        if n_treated == 0 or n_control == 0:
+            raise ValueError(
+                f"treatment {treatment!r} has an empty arm: "
+                f"{n_treated} treated and {n_control} control rows"
+            )
         diagnostics = {
-            "n_treated": float(np.sum(a == 1.0)),
-            "n_control": float(np.sum(a == 0.0)),
+            "n_treated": float(n_treated),
+            "n_control": float(n_control),
             "n_covariates": float(z.shape[1]),
         }
         return arrays, y_binary, diagnostics
@@ -466,7 +528,7 @@ class _FrontdoorBase(CausalEstimator):
         outcome = _single(identification.outcome, "outcome")
         mediator = _single(identification.mediators or frozenset(), "mediator")
         _require_complete(data, {treatment, outcome, mediator})
-        a = _binary_vector(data, treatment, "treatment")
+        a = self._treatment_vector(data, treatment)
         m = _binary_vector(data, mediator, "mediator")
         y, y_binary = _outcome_vector(data, outcome)
         arrays = {"A": a, "M": m, "Y": y}
@@ -487,7 +549,7 @@ class _IVBase(CausalEstimator):
         conditioning = sorted({w for _, given in identification.instruments for w in given})
         instrument_names, conditioning = self._iv_columns(instrument_names, conditioning)
         _require_complete(data, {treatment, outcome, *instrument_names, *conditioning})
-        a = _numeric_vector(data, treatment, "treatment")
+        a = self._treatment_vector(data, treatment, allow_continuous=True)
         y, _ = _outcome_vector(data, outcome)
         zi = _covariate_matrix(data, instrument_names)
         w = _covariate_matrix(data, conditioning)

@@ -57,7 +57,7 @@ class RLearner(_AdjustmentBase):
         res_y = np.empty(n, dtype=np.float64)
         res_t = np.empty(n, dtype=np.float64)
         rng = np.random.default_rng(self._random_state)
-        for test in _folds(n, self.n_folds, rng):
+        for test in _folds(n, self.n_folds, rng, stratify=a):
             train = _train_mask(n, test)
             res_y[test] = y[test] - _fit_predict(make["outcome"], z[train], y[train], z[test])
             e = np.clip(
@@ -75,7 +75,13 @@ class RLearner(_AdjustmentBase):
         pseudo = res_y / res_t
         weight = res_t * res_t
         final = make["final"]()
-        final.fit(arrays["Z"], pseudo, sample_weight=weight)
+        try:
+            final.fit(arrays["Z"], pseudo, sample_weight=weight)
+        except TypeError as exc:
+            raise TypeError(
+                "slot 'final' needs a learner whose fit accepts sample_weight; "
+                f"got {type(final).__name__}"
+            ) from exc
         return final
 
     def fit(self, identification: Identification, data: TabularData) -> Self:

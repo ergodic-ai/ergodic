@@ -83,17 +83,21 @@ class Dataset:
         return arr
 
     def codes(self, name: str) -> npt.NDArray[np.int64]:
-        """Integer category codes for a categorical or ordinal column, -1 for missing."""
+        """Integer category codes for a categorical or ordinal column, -1 for missing.
+
+        A non-missing value outside the column's categories raises a ``ValueError``.
+        """
         col = self.schema[name]
         if not col.is_discrete:
             raise ValueError(f"column {name!r} is {col.kind.value}, not categorical or ordinal")
-        return _encode(self._store[name], col.categories, col.ordered)
+        return _encode(self._store[name], col.categories, col.ordered, name)
 
     def categories(self, name: str) -> tuple[Any, ...] | None:
         return self.schema[name].categories
 
     def matrix(self, names: Sequence[str] | None = None) -> npt.NDArray[np.float64]:
-        """A float matrix of the named columns. Discrete columns become their codes."""
+        """A float matrix of the named columns. Discrete columns become their codes,
+        and a missing value (an NA category or NaT) becomes NaN."""
         chosen = list(names) if names is not None else list(self.variables)
         if not chosen:
             return np.empty((self.n_rows, 0), dtype=np.float64)
@@ -103,10 +107,14 @@ class Dataset:
             if col.is_continuous:
                 cols.append(np.asarray(self._store[name], dtype=np.float64))
             elif col.is_discrete:
-                cols.append(self.codes(name).astype(np.float64))
+                encoded = self.codes(name).astype(np.float64)
+                encoded[encoded == -1.0] = np.nan
+                cols.append(encoded)
             elif col.is_datetime:
                 stamps = np.asarray(self._store[name], dtype="datetime64[ns]")
-                cols.append(stamps.view(np.int64).astype(np.float64))
+                floats = stamps.view(np.int64).astype(np.float64)
+                floats[np.isnat(stamps)] = np.nan
+                cols.append(floats)
             else:
                 raise ValueError(f"column {name!r} is excluded; it has no numeric form")
         return np.asarray(np.column_stack(cols), dtype=np.float64)
@@ -162,6 +170,9 @@ class Dataset:
         if name not in self.schema:
             raise KeyError(name)
         new = _resolve_type(name, _unique_nonnull(self._store[name]), kind, categories)
+        if new.is_discrete and (categories is not None or isinstance(kind, Ordinal)):
+            # encode once now, so declared categories that miss a value fail here
+            _encode(self._store[name], new.categories, new.ordered, name)
         cols = tuple(new if c.name == name else c for c in self.schema.columns)
         return replace(self, schema=Schema(cols))
 

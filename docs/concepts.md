@@ -45,4 +45,4 @@ Discovery takes data and domain knowledge and returns a graph, often a CPDAG or 
 
 ## Representation now, algorithms next
 
-The representation is done. Every kind of causal graph fits, and the knowledge object holds every hard constraint. The algorithms come in phases. Separation, the do-operator, and consistency checks are here. Identification (adjustment sets), equivalence classes, and PAG-specific separation are next, tracked in the implementation journal under `plans/`.
+The representation is done. Every kind of causal graph fits, and the knowledge object holds every hard constraint. The algorithms come in phases. Separation, the do-operator, consistency checks, and identification (adjustment sets, the front-door, instruments) are here. Equivalence classes and PAG-specific separation are next, tracked in the implementation journal under `plans/`.

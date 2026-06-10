@@ -95,7 +95,10 @@ class EffectEstimate:
 
 def _summary_fields(estimate: EffectEstimate) -> dict[str, Any]:
     """A flat dict of the estimate, handy for tables and tests."""
-    lo, hi = estimate.interval()
+    lo: float | None = None
+    hi: float | None = None
+    if estimate._draws is not None or estimate._std_error is not None:
+        lo, hi = estimate.interval()
     return {
         "target": str(estimate.target),
         "estimator": estimate.estimator,

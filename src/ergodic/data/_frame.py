@@ -4,8 +4,10 @@
 Input can be a pandas dataframe, a polars or arrow object (handled through its
 ``to_pandas``), a mapping of name to column, or a 2-D numpy array. Output is a
 dict of name to 1-D numpy array plus the row count, the one internal form the
-dataset and its algorithms compute on. Pandas categorical columns carry their
-category order out, so an ordered categorical lands as an ordinal column.
+dataset and its algorithms compute on. Every column is copied on the way in, so
+the dataset never aliases caller memory. Pandas categorical columns carry their
+category order out, so an ordered categorical lands as an ordinal column, and a
+tz-aware datetime column converts to UTC and drops the zone.
 
 This is the only place a dataframe library is touched. Swapping in narwhals for
 true polars and arrow support later is a change to this file alone.
@@ -29,7 +31,16 @@ Columns = tuple[dict[str, "npt.NDArray[Any]"], int, dict[str, ColumnType]]
 
 
 def to_columns(data: Any, columns: Sequence[str] | None = None) -> Columns:
-    """Normalize any supported input into ``(store, n_rows, declared)``."""
+    """Normalize any supported input into ``(store, n_rows, declared)``.
+
+    Each column is a fresh read-only copy, so mutating the source afterwards
+    cannot change the dataset.
+    """
+    store, n_rows, declared = _read(data, columns)
+    return {name: _own(arr) for name, arr in store.items()}, n_rows, declared
+
+
+def _read(data: Any, columns: Sequence[str] | None) -> Columns:
     if isinstance(data, Mapping):
         return _from_mapping(data)
     if isinstance(data, np.ndarray):
@@ -43,6 +54,12 @@ def to_columns(data: Any, columns: Sequence[str] | None = None) -> Columns:
         f"cannot build a dataset from {type(data)!r}; pass a pandas or polars dataframe, "
         "a dict of columns, or a numpy array"
     )
+
+
+def _own(arr: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    out = np.array(arr, copy=True)
+    out.setflags(write=False)
+    return out
 
 
 def _from_mapping(data: Mapping[Any, Any]) -> Columns:
@@ -93,6 +110,9 @@ def _from_pandas(df: Any) -> Columns:
             kind = VariableType.ORDINAL if dtype.ordered else VariableType.CATEGORICAL
             declared[name] = ColumnType(name, kind, tuple(dtype.categories.tolist()))
             store[name] = np.asarray(series.astype(object).to_numpy())
+        elif isinstance(dtype, pd.DatetimeTZDtype):
+            naive = series.dt.tz_convert("UTC").dt.tz_localize(None)
+            store[name] = np.asarray(naive.to_numpy())
         else:
             store[name] = np.asarray(series.to_numpy())
     return store, len(df), declared

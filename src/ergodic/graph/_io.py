@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ._graph import Edge, GraphKind, MixedGraph
+from ._graph import Edge, GraphKind, MixedGraph, _merge_edges
 from ._marks import Mark
 
 if TYPE_CHECKING:
@@ -40,7 +40,9 @@ def from_networkx(graph: Any, *, kind: GraphKind | None = None) -> MixedGraph:
 
     Edges with ``u_mark``/``v_mark`` data keep those marks. A plain edge is read
     as directed (``u -> v``). With no ``kind`` given, the result is tagged ``DAG``
-    when every edge is directed and acyclic, otherwise ``MIXED``.
+    when every edge is directed and acyclic, otherwise ``MIXED``. Two arcs that
+    disagree about one node pair (say ``X -> Y`` and ``Y -> X``) raise
+    ``ValueError``, since a :class:`MixedGraph` holds one edge per pair.
     """
     specs: list[Edge] = []
     for u, v, data in graph.edges(data=True):
@@ -52,7 +54,7 @@ def from_networkx(graph: Any, *, kind: GraphKind | None = None) -> MixedGraph:
     selection = {n for n, d in graph.nodes(data=True) if d.get("selection")}
     out = MixedGraph(
         nodes=frozenset(graph.nodes),
-        edges=frozenset(specs),
+        edges=_merge_edges(specs),
         latent=frozenset(latent),
         selection=frozenset(selection),
         kind=GraphKind.MIXED,
@@ -97,8 +99,11 @@ def to_dict(graph: MixedGraph) -> dict[str, Any]:
 
 
 def from_dict(data: dict[str, Any]) -> MixedGraph:
-    """Rebuild a graph from :func:`to_dict` output."""
-    edges = frozenset(
+    """Rebuild a graph from :func:`to_dict` output.
+
+    Two entries that disagree about one node pair raise ``ValueError``.
+    """
+    edges = _merge_edges(
         Edge.make(e["u"], Mark(e["u_mark"]), e["v"], Mark(e["v_mark"])) for e in data["edges"]
     )
     graph = MixedGraph(

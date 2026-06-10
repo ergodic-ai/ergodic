@@ -46,8 +46,8 @@ class _KNNBase:
         assert self._x is not None and self._y is not None
         query = self._standardize(_2d(x))
         if self._x.shape[1] == 0:
-            k = min(self.k, self._x.shape[0])
-            idx = np.tile(np.arange(k), (query.shape[0], 1))
+            # with no features every training row ties, so all of them are neighbors
+            idx = np.tile(np.arange(self._x.shape[0]), (query.shape[0], 1))
             return np.asarray(self._y[idx], dtype=np.float64)
         sq = (
             np.sum(query**2, axis=1)[:, None]
@@ -58,9 +58,7 @@ class _KNNBase:
         nearest = np.argpartition(sq, kth=k - 1, axis=1)[:, :k]
         return np.asarray(self._y[nearest], dtype=np.float64)
 
-    def _fit_xy(
-        self, X: npt.NDArray[np.float64], y: npt.NDArray[np.float64]
-    ) -> None:
+    def _fit_xy(self, X: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> None:
         self._x = self._standardize_fit(_2d(X))
         self._y = np.asarray(y, dtype=np.float64).reshape(-1)
 

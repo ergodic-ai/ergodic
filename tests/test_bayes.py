@@ -253,7 +253,9 @@ def test_dr_posterior_without_bayesian_bootstrap() -> None:
 
 
 def test_dr_att_posterior() -> None:
-    data, graph, _ = _hetero()
+    data, graph, z = _hetero()
+    a = np.asarray(data.column("A"), dtype=np.float64)
+    truth = float(1.0 + np.mean(z[a == 1.0]))  # tau(z) = 1 + z over the treated
     ident = identify_effect(graph, "A", "Y")
     est = (
         AIPW({"outcome": _BayesLinear(), "propensity": _BayesLogit()})
@@ -262,6 +264,10 @@ def test_dr_att_posterior() -> None:
     )
     assert est.kind == "posterior"
     assert est.target is EffectTarget.ATT
+    # the treated share follows the same Dirichlet draw as the scores
+    assert abs(est.value - truth) < 0.25
+    lo, hi = est.interval()
+    assert lo < truth < hi
 
 
 # -- graceful degrade, never an MCMC bootstrap -------------------------------

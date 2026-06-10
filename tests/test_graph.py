@@ -60,6 +60,39 @@ def test_self_loop_rejected() -> None:
         Edge.make("X", Mark.TAIL, "X", Mark.ARROW)
 
 
+# -- one edge per pair ---------------------------------------------------------
+
+
+def test_conflicting_specs_on_one_pair_raise() -> None:
+    with pytest.raises(ValueError, match=r"'X'.*'Y'.*X --> Y.*X <-- Y"):
+        dag(["X -> Y", "Y -> X"])
+
+
+def test_directed_plus_bidirected_bow_raises() -> None:
+    with pytest.raises(ValueError, match="one edge per pair"):
+        admg(["X -> Y", "X <-> Y"])
+
+
+def test_exact_duplicate_spec_passes() -> None:
+    graph = dag(["X -> Y", "X -> Y"])
+    assert len(graph.edges) == 1
+
+
+def test_add_edge_identical_is_noop() -> None:
+    base = dag(["X -> Y"])
+    again = base.add_edge("X -> Y")
+    assert again == base
+    assert again.kind is GraphKind.DAG
+
+
+def test_add_edge_conflict_raises() -> None:
+    base = dag(["X -> Y"])
+    with pytest.raises(ValueError, match="remove_edge"):
+        base.add_edge("X <-> Y")
+    with pytest.raises(ValueError, match="remove_edge"):
+        base.add_edge("Y -> X")
+
+
 # -- kinds and validation ----------------------------------------------------
 
 
@@ -96,6 +129,27 @@ def test_as_kind_validates() -> None:
     with pytest.raises(InvalidGraphError):
         graph.as_kind(GraphKind.DAG)
     assert graph.as_kind(GraphKind.ADMG).kind is GraphKind.ADMG
+
+
+def test_as_kind_accepts_strings() -> None:
+    graph = mixed(["X <-> Y"])
+    assert graph.as_kind("admg").kind is GraphKind.ADMG
+    with pytest.raises(InvalidGraphError):
+        graph.as_kind("dag")
+    with pytest.raises(ValueError, match="unknown graph kind"):
+        graph.as_kind("not-a-kind")
+
+
+def test_deep_chain_builds_without_recursion_error() -> None:
+    chain = dag([f"N{i} -> N{i + 1}" for i in range(1999)])  # 2000 nodes
+    assert len(chain) == 2000
+    assert chain.is_acyclic()
+
+
+def test_deep_cycle_is_rejected() -> None:
+    edges = [f"N{i} -> N{i + 1}" for i in range(1999)] + ["N1999 -> N0"]
+    with pytest.raises(InvalidGraphError):
+        dag(edges)
 
 
 def test_mag_rejects_almost_directed_cycle() -> None:
@@ -192,6 +246,18 @@ def test_separation_requires_disjoint_sets() -> None:
         dag(["X -> Y"]).d_separated("X", "Y", "X")
 
 
+def test_separation_rejects_unknown_names() -> None:
+    graph = dag(["X -> M", "M -> Y"])
+    with pytest.raises(ValueError, match="Y_TYPO"):
+        graph.m_separated("X", "Y_TYPO")
+    with pytest.raises(ValueError, match="M_TYPO"):
+        graph.m_separated("X", "Y", "M_TYPO")
+    with pytest.raises(ValueError, match="X_TYPO"):
+        graph.m_separated("X_TYPO", "Y")
+    with pytest.raises(ValueError, match=r"A_TYPO.*B_TYPO"):
+        graph.d_separated("X", {"Y", "B_TYPO"}, {"A_TYPO"})
+
+
 # -- surgery -----------------------------------------------------------------
 
 
@@ -206,7 +272,7 @@ def test_do_cuts_incoming_edges() -> None:
 
 
 def test_do_cuts_bidirected_confounding() -> None:
-    graph = admg(["X -> Y", "X <-> Y"])  # the bidirected edge wins the pair
+    graph = admg(["X <-> Y"])
     assert graph.do("Y").get_edge("X", "Y") is None
 
 
@@ -233,6 +299,20 @@ def test_networkx_round_trip_preserves_edges() -> None:
     back = MixedGraph.from_networkx(graph.to_networkx())
     assert back.edges == graph.edges
     assert back.nodes == graph.nodes
+
+
+def test_from_networkx_rejects_conflicting_arcs() -> None:
+    import networkx as nx
+
+    with pytest.raises(ValueError, match="two different edges"):
+        MixedGraph.from_networkx(nx.DiGraph([("X", "Y"), ("Y", "X")]))
+
+
+def test_from_dict_rejects_two_edges_on_one_pair() -> None:
+    data = dag(["X -> Y"]).to_dict()
+    data["edges"].append({"u": "X", "v": "Y", "u_mark": "arrow", "v_mark": "arrow"})
+    with pytest.raises(ValueError, match="one edge per pair"):
+        MixedGraph.from_dict(data)
 
 
 def test_adjacency_matrix() -> None:

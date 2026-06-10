@@ -147,12 +147,17 @@ class AIPW(_AdjustmentBase):
         rng = np.random.default_rng(self._random_state)
         draws = np.empty(n_draws, dtype=np.float64)
         for s in range(n_draws):
+            w = _dirichlet_weights(n, rng) if self.bayesian_bootstrap else None
             if target is EffectTarget.ATT:
-                phi = _aipw_att_scores(a, y, mu0d[s], ed[s], p1)
+                if w is None:
+                    phi = _aipw_att_scores(a, y, mu0d[s], ed[s], p1)
+                else:
+                    # the treated share must follow the same reweighted measure
+                    p1_w = float(np.sum(w * a))
+                    if p1_w <= 0.0:
+                        raise ValueError("a Bayesian-bootstrap draw left no treated weight for ATT")
+                    phi = _aipw_att_scores(a, y, mu0d[s], ed[s], p1_w)
             else:
                 phi = _aipw_ate_scores(a, y, mu0d[s], mu1d[s], ed[s])
-            if self.bayesian_bootstrap:
-                draws[s] = float(np.sum(_dirichlet_weights(n, rng) * phi))
-            else:
-                draws[s] = float(np.mean(phi))
+            draws[s] = float(np.mean(phi)) if w is None else float(np.sum(w * phi))
         return draws

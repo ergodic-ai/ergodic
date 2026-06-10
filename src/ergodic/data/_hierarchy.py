@@ -24,7 +24,7 @@ _AGGREGATIONS = ("sum", "mean")
 
 @dataclass(frozen=True)
 class Hierarchy:
-    """A tree of named series, child to parent, with an aggregation rule."""
+    """A tree of named series, with edges running parent to child, and an aggregation rule."""
 
     edges: frozenset[tuple[str, str]]
     aggregation: str = "sum"
