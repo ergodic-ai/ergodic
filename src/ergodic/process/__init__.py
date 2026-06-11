@@ -22,11 +22,31 @@ series), so a process change becomes a natural experiment for
 :func:`~ergodic.inference.did`, :func:`~ergodic.inference.event_study`,
 :func:`~ergodic.inference.synthetic_control`, and
 :func:`~ergodic.inference.interrupted_time_series`.
+
+The model layer goes past the map. :func:`discover_model` is the inductive
+miner: it cuts the log into a block-structured :class:`ProcessTree` (build one
+by hand with :func:`seq`, :func:`xor`, :func:`par`, :func:`loop`, and
+:data:`TAU`) whose :meth:`~ProcessTree.to_net` gives a :class:`WorkflowNet`
+that is sound by construction, with :func:`is_sound` checking any net for
+real. :func:`conformance` replays the log against a model, token replay for
+the fast fitness and optimal alignments for the per-variant deviations. And
+:func:`decision_points` with :func:`decision_table` make the model causal: an
+exclusive split is a decision, the branch taken is a treatment, the features
+known at the decision moment are the honest adjusters, and positivity ships
+as a first-class report instead of a footnote.
 """
 
 from __future__ import annotations
 
 from ._case_table import CaseTable, case_table
+from ._conformance import ConformanceResult, VariantConformance, conformance
+from ._decisions import (
+    DecisionPoint,
+    DecisionTable,
+    PositivityReport,
+    decision_points,
+    decision_table,
+)
 from ._filters import (
     filter_activities,
     filter_endpoints,
@@ -36,28 +56,51 @@ from ._filters import (
     filter_variants,
 )
 from ._map import END, START, ArcStats, ProcessMap, process_map
+from ._mine import ProcessModel, discover_model
+from ._net import WorkflowNet, net_of_tree
 from ._panel import kpi_panel
 from ._performance import ActivityStats, ProcessPerformance, performance
+from ._soundness import is_sound
+from ._tree import TAU, ProcessTree, loop, par, seq, xor
 from ._variants import Variant, variant_table
 
 __all__ = [
     "END",
     "START",
+    "TAU",
     "ActivityStats",
     "ArcStats",
     "CaseTable",
+    "ConformanceResult",
+    "DecisionPoint",
+    "DecisionTable",
+    "PositivityReport",
     "ProcessMap",
+    "ProcessModel",
     "ProcessPerformance",
+    "ProcessTree",
     "Variant",
+    "VariantConformance",
+    "WorkflowNet",
     "case_table",
+    "conformance",
+    "decision_points",
+    "decision_table",
+    "discover_model",
     "filter_activities",
     "filter_endpoints",
     "filter_follows",
     "filter_performance",
     "filter_time",
     "filter_variants",
+    "is_sound",
     "kpi_panel",
+    "loop",
+    "net_of_tree",
+    "par",
     "performance",
     "process_map",
+    "seq",
     "variant_table",
+    "xor",
 ]

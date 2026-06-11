@@ -35,6 +35,9 @@ The guides, in order:
 8. [Process intelligence](08-process-intelligence.py): when the data is an event log. The
    process map blames a review step for double its true cost; case tables and KPI panels
    carry the log into the causal machinery and answer what changing the process would do.
+9. [Decision points](09-decision-points.py): mine the process model itself, check the log
+   against it, and read a routing split as a decision: what sending a case down the other
+   lane would actually cost, and when the data is too one-sided to say.
 
 The examples are commercial because money concentrates the mind, but nothing is specific to
 commerce. Swap "discount" for "drug" and "spend" for "blood pressure" and every argument

@@ -2,7 +2,7 @@
 
 An event log is the native record of an operational process: one row per event, with a case id (the ticket, the order), an activity name, and a timestamp. Whatever else the system wrote rides along as attributes. An attribute that is constant within a case (the team, the product line) describes the case; one that varies (the resource on each step) describes the event. `event_log(df, case=..., activity=..., timestamp=...)` builds the typed container, with rows grouped by case and sorted in time; the [data guide](data.md) covers its accessors.
 
-`ergodic.process` reads that log on two layers. The descriptive layer recovers what process-mining tools do daily: the map, the timing, the variants, the filters. The causal layer asks the question those tools can't: what would happen to the cycle time if we changed the process.
+`ergodic.process` reads that log on three layers. The descriptive layer recovers what process-mining tools do daily: the map, the timing, the variants, the filters. The model layer mines an executable process model from the log and checks the log against it. The causal layer asks the question those tools can't: what would happen to the cycle time if we changed the process.
 
 ## The log
 
@@ -214,8 +214,183 @@ The naive comparison fails here for the same reason it failed per case: the adop
 
 Two caveats travel with the aggregation. A case is attributed to the bucket where it starts, so a case that spans the rollout counts its whole duration where it began. And the aggregation assumes the log is complete: an export taken while cases are still open is missing exactly the long cases near its end, which biases late-bucket cycle times downward. Trim the tail with `filter_time`, or wait for the cases to close.
 
+## The model
+
+The map counts which step follows which. A model claims more: how the whole process runs, which steps are choices, which repeat, which interleave. `discover_model` mines one from the log with the inductive miner (Leemans, Fahland, and van der Aalst 2013). It builds the directly-follows graph of the traces, looks for a cut (an exclusive choice, a sequence, a parallel split, or a loop), partitions the activities, projects the traces into one sublog per part, and recurses.
+
+A fresh log for this layer: a repair desk, 400 cases. Tickets open and get diagnosed, then cycle through fix and test until the test passes, with a rework step between rounds. Five cases carry the kind of broken stamps this page keeps meeting: fix logged before diagnose.
+
+```python
+rng = np.random.default_rng(3)
+rows = []
+for i in range(400):
+    case = f"r{i:03d}"
+    steps = ["open", "diagnose", "fix", "test"]
+    while rng.uniform() < 0.3:
+        steps += ["rework", "fix", "test"]   # a failed test goes back through rework
+    steps.append("close")
+    if i < 5:
+        steps[1], steps[2] = steps[2], steps[1]   # five cases with swapped stamps
+    t = rng.uniform(0.0, 5000.0)
+    for act in steps:
+        rows.append((case, act, t))
+        t += rng.uniform(1.0, 3.0)
+
+df = pd.DataFrame(rows, columns=["case", "activity", "time"])
+log = event_log(df, case="case", activity="activity", timestamp="time")
+```
+
+```python
+from ergodic import discover_model
+
+discover_model(log).tree
+# seq('open', loop(seq(par(xor(TAU, 'diagnose'), 'fix'), 'test'), 'rework'), 'close')
+```
+
+The result is a process tree, read through its operators: `seq` runs its children left to right, `xor` runs exactly one, `par` interleaves them, `loop(do, redo)` runs the do body and then any number of redo-then-do rounds, and `TAU` is the silent step that leaves no event. So this tree claims diagnose is optional and runs in parallel with fix. That's wrong, and the miner is right to say it, because it's what the log shows. On a map the swapped stamps would sit in a few thin arcs you could see and judge; a tree is global, so five bad cases out of 400 reshape the whole structure.
+
+`noise=` is the infrequent-variant filter (the 2014 follow-up paper): at every recursion, before cut detection, a directly-follows edge is dropped when its count falls below `noise` times the heaviest edge leaving the same activity.
+
+```python
+model = discover_model(log, noise=0.1)
+model.tree              # seq('open', 'diagnose', loop(seq('fix', 'test'), 'rework'), 'close')
+model.n_filtered_arcs   # 3: the directly-follows edges the swapped stamps had created
+model.fallthroughs      # (): no subtree fell back to the flower model
+```
+
+The planted process, exactly. And the rule that governed `simplify(keep=)` governs here too: whatever the miner removes is written on the result. `n_filtered_arcs` counts the filtered edges. `fallthroughs` lists the paths of every subtree where no cut was valid and the miner gave up into the flower model, `loop(TAU, xor(...))`, which accepts its activities in any order; an empty tuple means every subtree came from a real cut. `n_dropped_events` and `dropped_share` count the events discarded when an exclusive-choice cut sends each trace whole to one branch (zero here). A model that reported `noise=0.1` and nothing else would hide how much of the log it ignored; this one can't.
+
+Trees are immutable values with structural equality, and the builders are public, so a mined tree compares directly against one written by hand:
+
+```python
+from ergodic.process import loop, seq
+
+model.tree == seq("open", "diagnose", loop(seq("fix", "test"), "rework"), "close")   # True
+```
+
+`xor` and `par` keep their children in a canonical order, so equal models are equal objects however they were assembled.
+
+A tree also executes. `model.net` is its workflow net (`tree.to_net()`), a Petri net with one source place, one sink place, and a silent transition wherever the control flow needs glue:
+
+```python
+from ergodic.process import is_sound
+
+model.net             # WorkflowNet(places=8, transitions=8 (2 silent), arcs=16)
+is_sound(model.net)   # True
+```
+
+`is_sound` decides van der Aalst's classical soundness by exploring the reachable markings: from every reachable marking the run can still finish (option to complete), a token on the sink means the run ended with nothing left behind (proper completion), and every transition fires on some path (no dead transitions). A net built from a tree is sound by construction, and the checker still verifies it for real, since nets can arrive from anywhere. A sound net is bounded, so the exploration terminates; past `max_states` distinct markings it raises rather than guess.
+
+## Conformance
+
+`conformance` holds the model fixed and asks where the log deviates from it. The model mined at `noise=0.1` says diagnose comes before fix; the five swapped cases are still in the log, so the check should find exactly those five.
+
+```python
+from ergodic import conformance
+
+res = conformance(log, model)
+res                 # ConformanceResult(fitness=0.999, alignment_fitness=0.998, fitting=395/400 cases)
+res.share_fitting   # 0.9875
+```
+
+The fit question is answered twice. Token replay (Rozinat and van der Aalst 2008) pushes each trace through the net and counts the tokens it had to invent (`missing`) and the ones left behind (`remaining`); the standard half-and-half of the two ratios gives the `fitness` of 0.999. Optimal alignments (Adriansyah 2014) run a shortest-path search that walks the trace and the model together and names every deviation. Replay is the fast diagnostic, and it can part-credit a trace that never forms a real run of the net; the alignment is the optimal explanation and costs a search per variant. A case is fitting when its variant aligns at cost zero, which makes `share_fitting` the honest headline: 395 of 400 cases fit, and the five swapped ones are the gap.
+
+Both checks run once per distinct variant and weight by case count, most frequent variant first. The deviating variants name what went wrong:
+
+```python
+worst = [v for v in res.variants if v.cost > 0][0]
+worst.sequence, worst.n_cases   # (('open', 'fix', 'diagnose', 'test', 'close'), 3)
+worst.alignment
+# (('sync', 'open'), ('model', 'diagnose'), ('sync', 'fix'),
+#  ('log', 'diagnose'), ('sync', 'test'), ('sync', 'close'))
+```
+
+A `sync` move is the trace and the model agreeing. A `model` move is a required visible step the trace skipped: diagnose was due after open and didn't come. A `log` move is an event the model can't mirror: the diagnose that showed up after fix. Silent model steps cost nothing and are omitted from the list. Two unit-cost moves against a `worst_cost` of 10 (delete the whole trace, run the model's cheapest visible path) put this variant's `alignment_fitness` at 0.8. The other two deviating variants are the same swap with rework rounds attached.
+
+Every search inside (the silent closures in replay, the alignment itself) is capped by `max_states` and raises past the cap rather than return a partial answer, the same convention `is_sound` follows.
+
+## Decision points
+
+An xor node is where the process decides, and `decision_points` reads a mined model's splits causally: the branch taken is a treatment, the features known when a case reaches the split are the honest adjusters, and how thinly the data covers each branch is a first-class output rather than a surprise in the standard errors later.
+
+One last world, with the truth planted. Tickets open, get triaged, then route through expedite or standard handling before resolving. Complexity drives the routing (hard tickets tend to be expedited) and drives the remaining time on its own; expediting saves exactly 5.0 seconds.
+
+```python
+rng = np.random.default_rng(7)
+n = 1200
+complexity = rng.uniform(0.0, 1.0, size=n)
+expedite = rng.uniform(size=n) < 1.0 / (1.0 + np.exp(-3.0 * (complexity - 0.5)))
+remaining = 12.0 + 8.0 * complexity - 5.0 * expedite + rng.normal(0.0, 1.0, size=n)
+start = rng.uniform(0.0, 6000.0, size=n)
+
+rows = []
+for i in range(n):
+    case = f"d{i:04d}"
+    triaged = start[i] + rng.uniform(0.5, 1.5)
+    routed = triaged + rng.uniform(0.5, 2.0)
+    branch = "expedite" if expedite[i] else "standard"
+    rows.append((case, "open", start[i], complexity[i]))
+    rows.append((case, "triage", triaged, complexity[i]))
+    rows.append((case, branch, routed, complexity[i]))
+    rows.append((case, "resolve", routed + remaining[i], complexity[i]))
+
+df = pd.DataFrame(rows, columns=["case", "activity", "time", "complexity"])
+log = event_log(df, case="case", activity="activity", timestamp="time")
+```
+
+```python
+from ergodic import decision_points
+
+model = discover_model(log)
+model.tree   # seq('open', 'triage', xor('expedite', 'standard'), 'resolve')
+decision_points(log, model)   # (DecisionPoint(path=(2,), expedite=591, standard=609),)
+```
+
+`decision_points` locates every xor split and the branch each case took, read from which branch's activity alphabet its events hit; a mined tree carries each activity in exactly one leaf, so the read is unambiguous, and a tree that breaks the invariant raises. A case whose events hit two or more branches is ambiguous (a loop above a split can replay it) and is excluded from the counts; a case hitting none is skipped, or counted as the silent branch when the split has one and is always reached.
+
+`decision_table` encodes one split for the causal stack, one row per unambiguously assigned case. The landmark is the case's first event inside the split's combined alphabet, the moment it reveals its branch, and every covariate is measured strictly before that moment, the same gate `case_table`'s landmark modes apply. The default outcome is `remaining_time`, seconds from the landmark to the case's last event, because time already spent before the decision isn't an effect of the branch. And the tier knowledge rides along as before: covariates, then `branch`, then the outcome.
+
+```python
+from ergodic import decision_table
+
+dt = decision_table(
+    log, model, covariates=["complexity", "elapsed_at_landmark", "workload_at_landmark"]
+)
+dt   # DecisionTable(cases=1200, branches=('expedite', 'standard'), outcome='remaining_time', covariates=3)
+
+b, y = dt.data.column("branch"), dt.data.column("remaining_time")
+float(y[b == "expedite"].mean() - y[b == "standard"].mean())   # ~-3.1, against the planted -5.0
+```
+
+The naive branch gap undersells expedite by nearly two seconds, the same trap as ever: expedite gets the complex tickets, and complex tickets run long. With `covariates="auto"` the table would also take `workload_at_start`; we name three because the two workload reads are the same queue a few seconds apart, and a near-duplicate pair leaves discovery an undirected covariate edge the tiers can't orient.
+
+Before estimating, read the positivity report:
+
+```python
+p = dt.positivity
+p.shares          # (0.4925, 0.5075)
+p.overlap_share   # 1.0
+p.flagged         # False
+```
+
+`overlap_share` is the share of cases whose in-sample propensity, a logistic regression of the branch on the covariates, lands inside [0.05, 0.95]. Here it's 1.0: by the covariates, every ticket had a real chance of going either way, so the branch comparison rests on data everywhere. `flagged` turns True when a branch holds under five percent of the cases or fewer than ten, or when `overlap_share` falls below 0.8, meaning the covariates nearly decide the branch for over a fifth of the cases and the comparison there rests on extrapolation. A flag is a warning that the branches barely overlap, not a verdict that an estimate is wrong, so it reports instead of raising.
+
+Estimation is the same composition the case table used: discover under the table's knowledge, re-face the fully oriented result as the DAG it is, and estimate with `treated=` naming a branch; the [inference guide](inference.md) covers the estimators and learners.
+
+```python
+result = discover(dt.data, knowledge=dt.knowledge, alpha=0.01)
+graph = result.graph.as_kind("dag")
+est = estimate_effect(graph, dt.data, "branch", "remaining_time", strategy="dml",
+                      random_state=0, treated="expedite")
+est.value   # ~-5.01, against the planted -5.0
+```
+
+PC found `complexity -> branch`, both arrows into `remaining_time`, and no edge from the workload or elapsed-time features: they were candidate confounders, and the data cleared them. Expediting saves the planted 5 seconds, and the 1.9 the naive gap hid belonged to complexity.
+
+A split with a silent branch is refused: taking `TAU` leaves no event, so the decision moment is unobservable without alignment-based replay (future work; `decision_points` still reports such splits). Classic decision mining fits a classifier at the split and predicts which branch a case will take. `decision_table` asks what taking the other branch would do, which is the number a routing change needs.
+
 ## Limits and what's next
 
 The per-case estimators assume cases don't interfere, and in a real process they do: cases share resources, so reviewing one ticket can slow its neighbours through the queue. No method on this page pretends otherwise. When an intervention shifts a whole queue, prefer the panel route, where the unit is the team-week rather than the case. The other standing assumption is that constant attribute columns are known at case start: a label back-filled at close is post-treatment however constant it looks, and the table can't tell when a constant column was written.
 
-Two layers come next. The model layer: inductive-miner-style discovery from the log to a sound process model, and conformance checking against it. And the frontier: off-policy evaluation of intervention policies, effect drift over time, and object-centric logs that drop the single-case assumption. The [API reference](reference.md) covers the full surface of what's here today.
+The frontier comes next: off-policy evaluation of intervention policies, effect drift over time, and object-centric logs that drop the single-case assumption. The [API reference](reference.md) covers the full surface of what's here today.

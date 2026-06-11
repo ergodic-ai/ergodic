@@ -67,7 +67,15 @@ from .inference import (
     synthetic_control,
 )
 from .knowledge import DomainKnowledge, InconsistentKnowledgeError
-from .process import case_table, kpi_panel, process_map
+from .process import (
+    case_table,
+    conformance,
+    decision_points,
+    decision_table,
+    discover_model,
+    kpi_panel,
+    process_map,
+)
 
 __version__ = "0.0.1"
 
@@ -97,11 +105,15 @@ __all__ = [
     "adjustment_set",
     "admg",
     "case_table",
+    "conformance",
     "cpdag",
     "d_separated",
     "dag",
+    "decision_points",
+    "decision_table",
     "did",
     "discover",
+    "discover_model",
     "estimate",
     "estimate_effect",
     "event_log",

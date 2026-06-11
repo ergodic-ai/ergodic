@@ -178,6 +178,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quasi-experimental designs. Learn guide 8 walks the whole arc: the process
   map convicts a review step of double its true cost, the case table acquits
   it, and a routing rollout is measured with `kpi_panel` into `did`.
+- The process model layer (`ergodic.process`, second build). `discover_model`
+  is the Inductive Miner implemented from the papers (pm4py is AGPL and is not
+  used): recursive cuts of the directly-follows graph (exclusive choice,
+  sequence, parallel, loop) into a block-structured `ProcessTree` (build one
+  by hand with `seq`, `xor`, `par`, `loop`, and `TAU`; structural equality,
+  canonical child order), with the infrequent variant behind `noise=` and
+  provenance on the returned `ProcessModel` (flower fall-through paths,
+  filtered arcs, dropped events). `ProcessTree.to_net()` converts to a
+  `WorkflowNet` that is sound by construction, and `is_sound` verifies any
+  net for real by reachability (option to complete, proper completion, no
+  dead transitions; capped, raising past the cap rather than guessing).
+  `conformance` checks a log against a model by token replay (the standard
+  missing/remaining/consumed/produced fitness) and by optimal alignments
+  (Dijkstra over the synchronous product with deterministic tie-breaking;
+  per-variant costs and sync/log/model moves). `decision_points` and
+  `decision_table` read an exclusive split causally: the branch taken is the
+  treatment, the landmark is the moment the case reveals its branch, every
+  covariate is measured strictly before it (workload, calendar, prefix
+  features, case attributes), the auto-built `DomainKnowledge` tiers order
+  covariates before branch before outcome, the default outcome is the
+  remaining time from the decision, and a first-class `PositivityReport`
+  (per-branch counts and shares, propensity overlap for two-way splits)
+  warns when the branches barely overlap. Splits with a silent branch are
+  refused with the reason. Learn guide 9 walks the arc: the miner finds the
+  routing split, conformance separates deviation from structure, the naive
+  lane comparison overstates the cost of review by a factor of three, and
+  the decision table recovers the planted effect.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
