@@ -32,6 +32,9 @@ The guides, in order:
 7. [Quasi-experiments](07-quasi-experiments.py): a rollout nobody randomized. Stores
    compared through time with difference-in-differences and event studies, and a market
    with no twin gets a synthetic one.
+8. [Process intelligence](08-process-intelligence.py): when the data is an event log. The
+   process map blames a review step for double its true cost; case tables and KPI panels
+   carry the log into the causal machinery and answer what changing the process would do.
 
 The examples are commercial because money concentrates the mind, but nothing is specific to
 commerce. Swap "discount" for "drug" and "spend" for "blood pressure" and every argument

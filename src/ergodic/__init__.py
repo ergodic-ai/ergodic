@@ -67,6 +67,7 @@ from .inference import (
     synthetic_control,
 )
 from .knowledge import DomainKnowledge, InconsistentKnowledgeError
+from .process import case_table, kpi_panel, process_map
 
 __version__ = "0.0.1"
 
@@ -95,6 +96,7 @@ __all__ = [
     "__version__",
     "adjustment_set",
     "admg",
+    "case_table",
     "cpdag",
     "d_separated",
     "dag",
@@ -113,11 +115,13 @@ __all__ = [
     "is_frontdoor_set",
     "is_instrument",
     "is_valid_adjustment_set",
+    "kpi_panel",
     "m_separated",
     "minimal_adjustment_set",
     "mixed",
     "pag",
     "panel",
+    "process_map",
     "synthetic_control",
     "tabular",
     "timeseries",

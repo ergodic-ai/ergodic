@@ -202,6 +202,6 @@ The containers are here, and most of the consumers are too: estimation and
 discovery read a `TabularData`, the quasi-experimental designs read a `PanelData`
 (`did`, `event_study`, `synthetic_control`) and a `TimeSeriesData`
 (`interrupted_time_series`), and temporal discovery reads both time-series shapes
-(`discover(..., method="pcmci")`, `granger`). Still ahead: hierarchical
-reconciliation over `HierarchicalTSData`, and process mining over an `EventLog`,
-whose projections into the grid shapes land with the process pillar.
+(`discover(..., method="pcmci")`, `granger`). The process pillar now reads an `EventLog` too:
+`case_table` projects it into a `TabularData` and `kpi_panel` into a `PanelData` or
+`TimeSeriesData`. Still ahead: hierarchical reconciliation over `HierarchicalTSData`.

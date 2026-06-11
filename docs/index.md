@@ -5,7 +5,7 @@ Causal AI: causal discovery, causal inference, and process intelligence.
 !!! warning "Pre-alpha"
     This project is early scaffolding. The public API is not settled and will change.
 
-New to causal inference itself? Start with the [learn series](learn/index.md): seven notebook guides that teach the ideas on commercial examples, no background assumed. Know the field and want the API? Walk through the [tutorial](tutorial.md), then read the [concepts](concepts.md).
+New to causal inference itself? Start with the [learn series](learn/index.md): eight notebook guides that teach the ideas on commercial examples, no background assumed. Know the field and want the API? Walk through the [tutorial](tutorial.md), then read the [concepts](concepts.md).
 
 The work is organized around three pillars:
 

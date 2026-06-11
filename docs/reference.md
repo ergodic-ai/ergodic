@@ -1,6 +1,6 @@
 # API reference
 
-The shared objects live at the top level of `ergodic`, and the pillars under their own modules. Process intelligence is still a placeholder.
+The shared objects live at the top level of `ergodic`, and the pillars under their own modules.
 
 ## Causal graphs
 
@@ -25,3 +25,7 @@ The shared objects live at the top level of `ergodic`, and the pillars under the
 ## Causal inference
 
 ::: ergodic.inference
+
+## Process intelligence
+
+::: ergodic.process

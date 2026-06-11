@@ -156,6 +156,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change measured against its synthetic control, with the naive comparisons
   failing first. A new "Panel and time-series designs" guide page documents
   the design family, and the discovery guide gains its time-series section.
+- Process intelligence (`ergodic.process`), the first build. The descriptive
+  layer recovers the daily workflow over an `EventLog`: `process_map` (the
+  directly-follows map as a value object with frequency and gap statistics
+  and a `simplify` that records exactly what it dropped), `performance`
+  (cycle times, and a waiting/service split when a lifecycle column carries
+  start/complete pairs; with one timestamp per activity the split is honestly
+  impossible and the result says so), `variant_table`, and six composable
+  filters (time, variants, endpoints, activities, follows, performance), each
+  declaring whether it drops events or whole cases and refusing to return an
+  empty log. The causal layer is the point: `case_table` encodes a log into
+  one row per case with timestamp-gated features (case-start features in
+  `when="anytime"`; landmark modes `("after_events", k)` and
+  `("after_elapsed", x)` measure prefix features at the landmark, drop
+  already-treated cases with counts, and state their population), the named
+  process confounders (open-case workload, calendar features), and an
+  auto-built `DomainKnowledge` whose tiers forbid post-treatment adjustment
+  mechanically, feeding `discover`, `identify_effect`, and `estimate_effect`
+  unchanged; `kpi_panel` aggregates a log into a `PanelData` (or a single
+  `TimeSeriesData`) so a process change becomes a natural experiment for the
+  quasi-experimental designs. Learn guide 8 walks the whole arc: the process
+  map convicts a review step of double its true cost, the case table acquits
+  it, and a routing rollout is measured with `kpi_panel` into `did`.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
