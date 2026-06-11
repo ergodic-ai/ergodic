@@ -3,7 +3,9 @@
 
 Recovery tests run on simulated VAR worlds with planted structure and fixed
 seeds, so every assertion is deterministic. The lagged-frame unit tests check
-shapes, alignment, panel stacking, and the spacing warning directly.
+shapes, alignment, panel stacking, and the spacing warning directly. The
+knowledge tests pin each process-level mapping: a constraint on a pair
+applies at every lag, the contemporaneous slice included.
 """
 
 from __future__ import annotations
@@ -98,6 +100,18 @@ def _common_driver_world(seed: int, n: int = 2000) -> TimeSeriesData:
     return timeseries({"t": np.arange(n), "X": x, "Y": y, "Z": z}, time="t")
 
 
+def _feedback_world(seed: int, n: int = 2000) -> TimeSeriesData:
+    """X[t] = 0.4 X[t-1] + 0.4 Y[t-1] + e and symmetrically for Y: a two-way VAR."""
+    rng = np.random.default_rng(seed)
+    ex, ey = rng.normal(size=(2, n))
+    x, y = np.zeros(n), np.zeros(n)
+    x[0], y[0] = ex[0], ey[0]
+    for t in range(1, n):
+        x[t] = 0.4 * x[t - 1] + 0.4 * y[t - 1] + ex[t]
+        y[t] = 0.4 * y[t - 1] + 0.4 * x[t - 1] + ey[t]
+    return timeseries({"t": np.arange(n), "X": x, "Y": y}, time="t")
+
+
 def _lag2_world(seed: int, n: int = 3000) -> TimeSeriesData:
     """X is AR(1); Y[t] = 0.8 X[t-2] + 0.5 Y[t-1] + e: the X link sits at lag 2."""
     rng = np.random.default_rng(seed)
@@ -179,6 +193,85 @@ def test_max_lag_is_honest_about_what_it_can_see() -> None:
     assert ("X", "Y", 1) not in deep.links
 
 
+# -- knowledge on processes: every constraint applies at every lag ------------------
+
+
+def test_tiers_prune_later_to_earlier_at_every_lag() -> None:
+    world = _feedback_world(seed=11)
+    base = PCMCI(max_lag=1, alpha=0.01).fit(world)
+    assert ("Y", "X", 1) in base.links  # the pruned link is real before knowledge
+    assert base.diagnostics["n_knowledge_pruned"] == 0.0
+    tiers = DomainKnowledge().with_tiers([["X"], ["Y"]])
+    result = PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=tiers)
+    assert set(result.links) == {("X", "X", 1), ("X", "Y", 1), ("Y", "Y", 1)}
+    assert not any(key[:2] == ("Y", "X") for key in result.links)  # no lag, no direction
+    assert result.diagnostics["n_knowledge_pruned"] == 2.0  # one lagged link, one direction
+
+
+def test_forbidden_direction_dies_at_every_lag_and_the_reverse_survives() -> None:
+    world = _feedback_world(seed=11)
+    forbid = DomainKnowledge().forbid("X", "Y")
+    result = PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=forbid)
+    assert set(result.links) == {("X", "X", 1), ("Y", "X", 1), ("Y", "Y", 1)}
+    assert not any(key[:2] == ("X", "Y") for key in result.links)
+    assert result.diagnostics["n_knowledge_pruned"] == 2.0
+
+
+def test_forbid_self_removes_only_the_self_memory() -> None:
+    world = _feedback_world(seed=11)
+    result = PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=DomainKnowledge().forbid("X", "X"))
+    assert set(result.links) == {("X", "Y", 1), ("Y", "X", 1), ("Y", "Y", 1)}
+    assert result.diagnostics["n_knowledge_pruned"] == 1.0
+
+
+def test_adjacency_ban_removes_the_contemporaneous_pair() -> None:
+    ban = DomainKnowledge().forbid_adjacency("V", "W")
+    result = PCMCI(max_lag=1, alpha=0.01).fit(_contemporaneous_world(seed=1), knowledge=ban)
+    assert set(result.links) == {("V", "V", 1)}  # the real W[t] - V[t] pair is gone
+    assert result.graph.get_edge("V[t]", "W[t]") is None
+    assert result.sepsets is not None
+    assert frozenset({"V[t]", "W[t]"}) not in result.sepsets  # never tested, no sepset
+    assert result.diagnostics["n_knowledge_pruned"] == 3.0  # two lagged links, one pair
+
+
+def test_tiers_orient_a_real_contemporaneous_edge_earlier_to_later() -> None:
+    tiers = DomainKnowledge().with_tiers([["W"], ["V"]])
+    result = PCMCI(max_lag=1, alpha=0.01).fit(_contemporaneous_world(seed=1), knowledge=tiers)
+    edge = result.graph.get_edge("W[t]", "V[t]")
+    assert edge is not None and edge.directed_pair() == ("W[t]", "V[t]")
+    assert ("W", "V", 0) in result.links
+    assert ("V", "W", 0) not in result.links  # keyed oriented now, not as a sorted pair
+    assert result.diagnostics["n_oriented"] == 1.0
+    assert result.diagnostics["orientation_conflicts"] == 0.0
+    assert result.diagnostics["n_knowledge_pruned"] == 2.0
+
+
+def test_root_and_sink_keep_self_memory_and_kill_cross_links() -> None:
+    world = _var_world(seed=0)
+    self_only = {("X", "X", 1), ("Y", "Y", 1), ("Z", "Z", 1)}
+    rooted = PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=DomainKnowledge().root("Y"))
+    assert set(rooted.links) == self_only  # the real X -> Y dies, Y's own memory stays
+    assert rooted.diagnostics["n_knowledge_pruned"] == 4.0
+    sunk = PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=DomainKnowledge().sink("X"))
+    assert set(sunk.links) == self_only  # X keeps its memory but loses X -> Y
+    assert sunk.diagnostics["n_knowledge_pruned"] == 4.0
+
+
+def test_required_validates_after_the_run() -> None:
+    world = _var_world(seed=0)
+    satisfied = DomainKnowledge().require("X", "Y")
+    result = PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=satisfied)
+    assert ("X", "Y", 1) in result.links  # met by the lag-1 link
+    assert result.diagnostics["n_knowledge_pruned"] == 0.0  # required prunes nothing
+    with pytest.raises(ValueError, match="found no lag"):
+        PCMCI(max_lag=1, alpha=0.01).fit(world, knowledge=DomainKnowledge().require("Z", "Y"))
+
+
+def test_confounded_knowledge_raises() -> None:
+    with pytest.raises(NotImplementedError, match="window graph"):
+        PCMCI().fit(_var_world(seed=0, n=50), knowledge=DomainKnowledge().confound("X", "Y"))
+
+
 # -- validation and determinism ---------------------------------------------------
 
 
@@ -199,11 +292,6 @@ def test_pcmci_rejects_bad_parameters() -> None:
         PCMCI(max_lag=0)
     with pytest.raises(ValueError, match="max_cond_size"):
         PCMCI(max_cond_size=-1)
-
-
-def test_pcmci_knowledge_is_not_supported_yet() -> None:
-    with pytest.raises(NotImplementedError, match="later phase"):
-        PCMCI().fit(_var_world(seed=0, n=50), knowledge=DomainKnowledge())
 
 
 def test_pcmci_too_short_series_raises() -> None:

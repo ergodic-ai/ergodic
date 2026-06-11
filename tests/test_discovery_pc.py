@@ -476,7 +476,7 @@ def test_vote_triples_majority_decision_updates_the_sepset() -> None:
         ("X", "Y", frozenset({"W", "Z"})),
     }
     oracle = _CannedTest(_CHAIN_NODES, independent)
-    sepsets = {frozenset({"X", "Y"}): frozenset()}
+    sepsets: dict[frozenset[str], frozenset[str]] = {frozenset({"X", "Y"}): frozenset()}
     colliders, ambiguous = _vote_triples(
         oracle,
         sorted(_CHAIN_NODES),
@@ -537,7 +537,7 @@ def test_vote_triples_honors_max_cond_size() -> None:
         ("X", "Y", frozenset({"W", "Z"})),
     }
     oracle = _CannedTest(_CHAIN_NODES, independent)
-    sepsets = {frozenset({"X", "Y"}): frozenset()}
+    sepsets: dict[frozenset[str], frozenset[str]] = {frozenset({"X", "Y"}): frozenset()}
     colliders, ambiguous = _vote_triples(
         oracle,
         sorted(_CHAIN_NODES),

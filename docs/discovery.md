@@ -356,7 +356,16 @@ discover(ts, method="pc")
 # misread them; use method='pcmci' for time series and panels, ...
 ```
 
-The stability `bootstrap` refuses the temporal methods too: resampling rows breaks exactly the dependence PCMCI reads, and the moving-block variant that would respect it is future work. Background knowledge isn't wired into temporal discovery yet either; passing `knowledge=` raises.
+The stability `bootstrap` reads the temporal shapes through a design that respects the dependence. Plain row resampling would break exactly what PCMCI measures, so a time series resamples moving blocks instead, and the trick is that each drawn block becomes an entity of a panel: PCMCI pools lag windows within entities, so no window ever crosses a block seam, and glued blocks never manufacture a fake adjacency. A panel resamples whole entities (the same cluster bootstrap the panel designs use). `block_length` overrides the default (roughly the square root of the series length, floored to out-span the lag depth), and the frequencies come back over window-graph glyphs:
+
+```python
+stability = bootstrap(ts, method="pcmci", n_bootstrap=50, max_lag=2, seed=0)
+stability.marks                    # {"X[t-1] --> Y[t]": 1.0, ...}
+```
+
+The honesty note rides along: block resampling treats the series as stationary at the block scale.
+
+Background knowledge enters PCMCI with variables read as processes, so a constraint on a pair applies at every lag, contemporaneous included. A directional forbid kills the link at all lags and the lag-zero orientation; an adjacency ban removes the pair; tiers prune later-to-earlier at every lag and orient a real contemporaneous edge from the earlier tier to the later; roots and sinks forbid cross-variable links while self-memory (`X[t-1] -> X[t]`) survives. Two constraints stay honest about not translating: `require` names no lag, so it validates after the run (no surviving lag raises), and `confound` has no analogue in a window graph and raises. `diagnostics["n_knowledge_pruned"]` counts what knowledge removed.
 
 ## Putting the pieces together
 

@@ -213,6 +213,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work), and drill into the slice that hurts, with `simplify` declaring what
   it dropped. The process guides renumber to make room: process intelligence
   is guide 9 and decision points is guide 10.
+- Selection bias end to end in the graph layer: `is_mag` reads the full
+  Richardson-Spirtes ancestral conditions (undirected endpoints carry no
+  arrowheads), `mag_of_dag` projects latent and selection nodes together
+  through the one-witness-set theorem, `fci_closure` runs Zhang's complete
+  ten rules (R5 to R7 are the selection rules), `mag_of_pag` resolves
+  circle-tail edges by arrowhead augmentation, and `mags_of_pag` enumerates
+  the selection members behind an explicit `selection=` switch. The
+  d-separation oracle conditions every query on `graph.selection`, so FCI
+  needs no algorithmic change and lands exactly on the canonical PAG of
+  random latent-plus-selection worlds, held executably (Richardson-Spirtes
+  Theorem 4.18, round trips, and the chordless-cycle world only R5 can
+  orient). Identification raises on selection marks instead of silently
+  misreading them.
+- Discovery D4, the iid completion. PC gains `colliders="conservative"`
+  and `"majority"` (Ramsey 2006; Colombo-Maathuis 2014): unshielded triples
+  are voted across both neighborhoods' subsets, ambiguous triples are never
+  oriented and gate Meek R1/R3 through `meek_closure`'s new `ambiguous=`
+  parameter, and the face stays honest. RFCI (`method="rfci"`) skips FCI's
+  possible-d-sep phase, re-tests triples and discriminating paths instead,
+  and returns an RFCI-PAG whose marks stay sound (held executably against
+  random latent, confounded, and selection worlds, with exact FCI agreement
+  wherever possible-d-sep has nothing to do). BOSS and GRaSP (`method=
+  "boss"`, `"grasp"`) search permutations through a grow-shrink projection,
+  BOSS with a BES pass reusing GES's backward phase, both held to the A*
+  optimum. DirectLiNGAM (`method="lingam"`) fully orients a DAG from
+  non-Gaussian data with the Hyvarinen-Smith pairwise likelihood ratio and
+  native backward-BIC pruning. A graphical-lasso screen (`method="glasso"`)
+  estimates a sparse precision by block coordinate descent (matching
+  sklearn entry for entry), picks the penalty by EBIC at the
+  support-restricted refit MLE, and feeds `restrict_to` like MMPC. The
+  facade learns methods that consume neither a test nor a score.
+- Temporal unblockers: `bootstrap` accepts `method="pcmci"` through a
+  moving-block design (a series resamples blocks that become entities of a
+  panel, so no lag window ever crosses a block seam; a panel resamples
+  whole entities; `block_length` overrides the default), and PCMCI reads
+  `DomainKnowledge` with variables as processes: forbids, tiers, roots, and
+  sinks prune at every lag, tiers orient contemporaneous edges, self-memory
+  survives, `require` validates after the run, and `confound` raises.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
