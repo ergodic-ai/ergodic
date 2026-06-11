@@ -51,10 +51,10 @@ The kinds and what they allow:
 - `DAG`: directed edges, acyclic.
 - `ADMG`: directed and bidirected, acyclic. The object for latent confounding.
 - `CPDAG`: directed and undirected. What PC and GES return.
-- `MAG`: an ADMG with no almost-directed cycle.
+- `MAG`: directed, bidirected, and undirected edges under the ancestral rules. The object for latent confounding and selection bias together: an undirected edge says both endpoints cause the selection.
 - `PAG`: circles where the equivalence class disagrees. What FCI returns.
 
-How deep do these checks go? `DAG`, `ADMG`, `CPDAG`, and `PAG` are checked in full. A CPDAG must stand for a real equivalence class: some DAG has exactly its skeleton and v-structures, and the graph equals that DAG's CPDAG, so every compelled edge is directed and every reversible one is left undirected. A PAG gets the same treatment through its own round trip: one member MAG must extract (`mag_of_pag`), and the canonical PAG of that member (`pag_of_mag`) must be exactly the graph, so every invariant mark is oriented and every varying mark is a circle. `MAG` keeps two honest gaps: undirected selection edges are rejected (no selection bias anywhere yet) and maximality is not tested. Use `mixed(...)` when you want marks without these guarantees.
+How deep do these checks go? All five are checked in full. A CPDAG must stand for a real equivalence class: some DAG has exactly its skeleton and v-structures, and the graph equals that DAG's CPDAG, so every compelled edge is directed and every reversible one is left undirected. A PAG gets the same treatment through its own round trip: one member MAG must extract (`mag_of_pag`), and the canonical PAG of that member (`pag_of_mag`) must be exactly the graph, so every invariant mark is oriented and every varying mark is a circle. `MAG` checks the ancestral conditions of Richardson and Spirtes: no directed or almost-directed cycle, and no arrowhead at the endpoint of any undirected edge. One honest gap: maximality (every non-adjacent pair separable) is not tested on its own, though the `is_pag` round trip exercises it. Use `mixed(...)` when you want marks without these guarantees.
 
 Re-tag a graph with `as_kind`, which validates before it returns:
 
@@ -139,11 +139,13 @@ consistent_extension(c)    # one DAG member of a PDAG, or None (Dor-Tarsi)
 projected = mag_of_dag(dag(["L -> X", "L -> Y"], latent=["L"]))   # X <-> Y
 canonical = pag_of_mag(projected)                                  # X o-o Y
 member = mag_of_pag(canonical)                                     # one MAG back out
+
+selected = mag_of_dag(dag(["X -> S", "Y -> S"], selection=["S"]))  # X --- Y
 ```
 
-`mag_of_dag` is the latent projection: the MAG over the observed margin of a DAG or ADMG, preserving every m-separation among the observed. `pag_of_mag` computes the invariant marks of the Markov equivalence class (the canonical PAG, through the FCI rule closure), and `mag_of_pag` extracts one member. `meek_closure` and `fci_closure` (the orientation rule engines) are public too.
+`mag_of_dag` is the projection: the MAG over the observed margin of a DAG or ADMG, preserving every m-separation among the observed, conditional on whatever was selected on. Latent nodes leave bidirected edges behind; selection nodes leave undirected ones (sampling only the cases where S happened couples its causes). `pag_of_mag` computes the invariant marks of the Markov equivalence class (the canonical PAG, through the FCI rule closure, all ten of Zhang's rules including the selection rules R5 to R7), and `mag_of_pag` extracts one member. `meek_closure` and `fci_closure` (the orientation rule engines) are public too.
 
-When one member is not enough, enumerate the class. `dags_of_cpdag` lists every consistent extension of a CPDAG and `mags_of_pag` every MAG of a PAG, deterministically, with a `max_members` cap that raises rather than truncating. These power the all-members tests behind class identification and the per-member (IDA-style) workflow when a class query comes back undecided.
+When one member is not enough, enumerate the class. `dags_of_cpdag` lists every consistent extension of a CPDAG and `mags_of_pag` every MAG of a PAG, deterministically, with a `max_members` cap that raises rather than truncating. By default `mags_of_pag` lists the members without undirected edges, the reading every consumer that assumes no selection quantifies over; `selection=True` widens to the full Markov equivalence class. These power the all-members tests behind class identification and the per-member (IDA-style) workflow when a class query comes back undecided.
 
 Three reachability-and-certificate helpers ride along. `possible_descendants` and `possible_ancestors` follow possibly directed paths (no arrowhead back toward the start), so they answer "could X cause Y in some member?" on any face; on a DAG they are plain ancestry. `visible_edges` returns the directed MAG or PAG edges that Zhang's criterion certifies free of hidden confounding in every represented world, the certificate that class-level adjustment leans on:
 
@@ -158,4 +160,4 @@ visible_edges(canonical)           # {(tail, head), ...}
 
 ## Not built yet
 
-Adjustment sets and identification queries are built now, including on CPDAGs, MAGs, and PAGs; see [Identification](identification.md). Discovery returns these faces; see [Discovery](discovery.md). Still missing: selection bias end to end (selection nodes in the projection, undirected PAG edges, rules R5 to R7) and possible m-separation (the existential cousin of the definite reading). The implementation journal in `plans/` has the order.
+Adjustment sets and identification queries are built now, including on CPDAGs, MAGs, and PAGs; see [Identification](identification.md). Discovery returns these faces, selection marks included; see [Discovery](discovery.md). One caveat rides along on purpose: identification raises on a class whose marks say selection is there, because the generalized adjustment criterion assumes none. Still missing: possible m-separation (the existential cousin of the definite reading). The implementation journal in `plans/` has the order.

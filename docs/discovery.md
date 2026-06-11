@@ -51,6 +51,17 @@ strict = PC(test=linear, alpha=0.01).fit()
 loose = PC(test=linear, alpha=0.10).fit()   # every p-value comes from the cache
 ```
 
+## When triples disagree: conservative and majority colliders
+
+Standard PC decides each v-structure from one separating set, the first one the skeleton phase happened to record. On real data different sets can disagree, and a collider decided by a coin flip of search order is how PC earns its reputation for flakiness. The conservative and majority rules re-test each unshielded triple against every subset of both endpoints' neighborhoods and vote:
+
+```python
+result = discover(data, method="pc", colliders="majority")
+result.diagnostics["n_ambiguous_triples"]   # 0.0 on this clean chain
+```
+
+`"conservative"` (Ramsey, Zhang, and Spirtes 2006) orients a collider only when the middle node sits in no separating set at all, and calls the triple ambiguous on any disagreement. `"majority"` (Colombo and Maathuis 2014) lets the fraction decide, with an exact half ambiguous. Ambiguous triples are never oriented as colliders, and the Meek rules that would read them as definite non-colliders skip them too, so the ambiguity propagates honestly instead of hardening into an arrow. When any triple stays ambiguous the result may not be a valid CPDAG; it then keeps the `mixed` face with `cpdag_valid` 0.0, the same convention knowledge conflicts use. Under a perfect oracle on a faithful world no triple is ever ambiguous and all three settings agree, which the test suite holds executably.
+
 ## The tests
 
 | Test | Alias | Data | Statistic |
@@ -133,11 +144,38 @@ result.graph        # the PAG: A o-> C <-o B
 
 Read that result the only way it can be read: C does not cause A and does not cause B (the arrowheads at C), and whether A and B cause C or merely share hidden causes with it stays open (the circles). No CPDAG can say this.
 
-The run is PC's stable skeleton, then the possible-d-sep phase (with latents, a separating set can live outside both neighbourhoods, so candidate sets widen), then re-orientation and Zhang's complete rule closure, assuming no selection bias. With a perfect oracle the output is exactly the canonical PAG of the truth, `pag_of_mag(mag_of_dag(truth))`, and the test suite holds it to that identity across random graphs. `max_cond_size` caps both testing phases, and the same warmed oracle that served PC serves FCI from cache.
+The run is PC's stable skeleton, then the possible-d-sep phase (with latents, a separating set can live outside both neighbourhoods, so candidate sets widen), then re-orientation and Zhang's complete rule closure, all ten rules. With a perfect oracle the output is exactly the canonical PAG of the truth, `pag_of_mag(mag_of_dag(truth))`, and the test suite holds it to that identity across random graphs, with and without selection. `max_cond_size` caps both testing phases, and the same warmed oracle that served PC serves FCI from cache.
+
+Selection bias needs nothing extra from you, because it lives in the world, not the algorithm: data sampled under selection simply answers every independence test conditional on it. What changes is what the marks can say. An undirected edge in the output states that both endpoints cause the selection in every member of the class, and a `-o` edge that one end is settled while the other stays open. The classic worry, two independent causes of admission looking dependent in the admitted sample, lands as an `o-o` edge: real dependence, source honestly undecided. With richer structure the selection rules R5 to R7 pin the marks exactly; the chordless cycle below is the textbook case, here read off a ground-truth oracle:
+
+```python
+from ergodic import dag
+from ergodic.discovery import DSeparationOracle, FCI
+
+world = dag(
+    ["A -> S1", "B -> S1", "B -> S2", "C -> S2",
+     "C -> S3", "D -> S3", "D -> S4", "A -> S4"],
+    selection=["S1", "S2", "S3", "S4"],
+)
+FCI(test=DSeparationOracle(world)).fit().graph
+# the PAG: A --- B --- C --- D --- A, every mark an invariant tail
+```
+
+One consumer refuses on purpose: identification raises on a class whose marks say selection is there, because the generalized adjustment criterion assumes none, and a causal effect is generally not identifiable from a selection-biased margin.
 
 Knowledge translates through ancestry, not edge direction. `require(u, v)` orients `u -> v`; `confound(a, b)` orients `a <-> b` (a confounded pair is read as a pure hidden common cause); a tier pins only an arrowhead at the later end, because a later variable cannot cause an earlier one while confounding stays possible. Directional forbids, roots, and sinks fix no single mark in a latent world, so they only validate. Knowledge-seeded marks are not class invariants: the result then keeps the `mixed` face and `diagnostics["pag_valid"]` is `0.0`.
 
-## The skeleton screen
+### RFCI, the fast relaxation
+
+FCI's cost center is the possible-d-sep phase: with latents, a separating set can hide anywhere, so FCI re-tests every adjacency against subsets of a widened candidate pool. RFCI (Colombo, Maathuis, Kalisch, and Richardson 2012) skips that phase entirely and only ever conditions on subsets of neighborhoods and recorded separating sets, paying with a weaker but still honest output:
+
+```python
+discover(data, method="rfci", alpha=0.01)   # same call shape as fci
+```
+
+The trade is precise. Extra independence tests on each unshielded triple and along each discriminating path catch most of what possible-d-sep would have caught (and can remove edges of their own); what survives is an RFCI-PAG whose skeleton may keep an edge the FCI PAG removes. Every arrowhead and tail it does show is a sound ancestral statement about the true MAG, and the test suite holds that soundness executably against random latent, confounded, and selection worlds, alongside exact agreement with FCI wherever possible-d-sep has nothing to do. One reading note: an RFCI-PAG can stand for more than one Markov equivalence class, so a `mixed` face with `pag_valid` 0.0 is an expected honest outcome on hard worlds, not an error.
+
+## The skeleton screens
 
 MMPC (max-min parents and children) is a constraint search that stops at the skeleton: for each target it keeps the variables no subset of the candidate set can separate from it, then keeps an adjacency only when it holds from both sides. It is the cheap screen you run before an expensive search, and its output is built to feed `restrict_to`:
 
@@ -148,6 +186,16 @@ discover(data, method="astar", knowledge=support)   # exact search inside the sc
 ```
 
 That composition is the classic MMHC hybrid, recovered here as two objects instead of one algorithm. A score search inside the screen loses nothing (scores need no separating sets); PC inside the screen keeps the skeleton but can orient less, because a pruned pair is never tested and so never witnesses a v-structure.
+
+The graphical lasso is the second screen, for continuous data: a sparse precision matrix estimated by the Friedman, Hastie, and Tibshirani block coordinate descent, with the penalty picked by EBIC over a warm-started path. A precision zero is a conditional independence under Gaussianity, so the nonzeros are a skeleton source, not causal structure, and the result says so by coming back undirected on the `mixed` face:
+
+```python
+screen = discover(data, method="glasso")    # EBIC picks the penalty
+screen.diagnostics["lam"]                   # the chosen penalty rides along
+discover(data, method="ges", knowledge=DomainKnowledge().restrict_to(screen.graph))
+```
+
+A screen is judged on recall, and that is the honest framing for this one: on strongly correlated data the penalized precision keeps extra edges at every penalty (a known property of the estimator, not of this implementation, which matches sklearn entry for entry), and the downstream search prunes them. Adjacency knowledge translates directly: a banned pair gets an infinite penalty, a required pair an unpenalized one.
 
 ## How stable is that edge?
 
@@ -203,17 +251,21 @@ result = AStar(score=bic).fit()  # the globally optimal DAG under the score
 
 `score="auto"` (the default) mirrors the tests: all continuous picks `BIC`, all discrete picks `DiscreteBIC`, anything else picks `MixedBIC`. All four are decomposable and score-equivalent, so equal totals across a Markov equivalence class are a tested property, not a hope; `BDeu` you ask for by name.
 
-Three searches consume the same object:
+Five searches consume the same object:
 
 ```python
-from ergodic.discovery import GES, HillClimb
+from ergodic.discovery import BOSS, GES, GRaSP, HillClimb
 
 GES(score=bic).fit()         # greedy over equivalence classes, returns a CPDAG
 HillClimb(score=bic).fit()   # add/remove/reverse over DAGs, with a tabu list
 AStar(score=bic).fit()       # the exact optimum, honest about scale
+BOSS(score=bic).fit()        # best-order search over permutations, a CPDAG
+GRaSP(score=bic).fit()       # permutation search by tucks, a CPDAG
 ```
 
-`GES` (Chickering 2002) is the standard: a forward pass inserts the best edge into the equivalence class until nothing improves, a backward pass deletes, and the result is a CPDAG directly. In the large-sample limit, with a score-equivalent score, it finds the optimal class; on real data the exact search is its referee, and the test suite holds GES to the A* optimum. `HillClimb` is the fast baseline: steepest ascent over DAGs with a tabu ring to escape plateaus, no optimality story. `AStar` is the Yuan and Malone shortest path over the order lattice: exact, not greedy, with a node limit raised with a pointer at `max_parents` and `restrict_to`. All three consume knowledge the same four ways, and a DAG result compares with PC through `cpdag_of_dag`.
+`GES` (Chickering 2002) is the standard: a forward pass inserts the best edge into the equivalence class until nothing improves, a backward pass deletes, and the result is a CPDAG directly. In the large-sample limit, with a score-equivalent score, it finds the optimal class; on real data the exact search is its referee, and the test suite holds GES to the A* optimum. `HillClimb` is the fast baseline: steepest ascent over DAGs with a tabu ring to escape plateaus, no optimality story. `AStar` is the Yuan and Malone shortest path over the order lattice: exact, not greedy, with a node limit raised with a pointer at `max_parents` and `restrict_to`. All five consume knowledge the same four ways, and a DAG result compares with PC through `cpdag_of_dag`.
+
+`BOSS` and `GRaSP` are the order-based pair, the current accuracy state of the art among greedy searches. Both read a permutation of the variables through the same projection: each node takes the parents that grow-shrink picks from its predecessors, and the permutation's score is the sum of those locals. `BOSS` (Andrews and colleagues 2023) moves one variable at a time to its best position and sweeps until nothing improves, then runs the backward phase of GES on the result (`use_bes=False` turns that off); `GRaSP` (Lam, Andrews, and Ramsey 2022) walks tuck operations depth-first. Both are held to the A* optimum in the test suite, the same referee GES answers to. Under heavy domain knowledge prefer `BOSS`: tucks only move existing edges, so a tier-gated variable can strand, which the GRaSP docstring documents.
 
 A custom score is one method, mirroring the tests: implement `local_from_arrays(y, X)` for numeric data, or declare `needs = "codes"` and implement `local_from_codes(y, y_card, zs, z_cards)` for native categorical scoring.
 
@@ -227,6 +279,23 @@ class MyScore(Score):
         ...
         return value
 ```
+
+## When the noise tells the direction: DirectLiNGAM
+
+Everything above stops at the equivalence class, because observational data under Gaussian noise cannot tell `X -> Y` from `Y -> X`. Non-Gaussian noise can. In a linear model with independent non-Gaussian disturbances the direction is identifiable, and DirectLiNGAM (Shimizu and colleagues 2011) finds it directly: the most exogenous variable is the one whose regression residuals look most independent of it, measured by the Hyvarinen and Smith pairwise likelihood ratio; regress it out, repeat on the residuals, and the causal order falls out. A backward BIC pass then prunes the dense order down to a DAG.
+
+```python
+rng = np.random.default_rng(0)
+n = 3000
+x = rng.uniform(-1, 1, size=n)              # uniform noise: non-Gaussian
+m = 0.8 * x + rng.uniform(-1, 1, size=n)
+y = 0.7 * m + rng.uniform(-1, 1, size=n)
+data = tabular(pd.DataFrame({"X": x, "M": m, "Y": y}))
+
+discover(data, method="lingam").graph        # the DAG: X -> M -> Y, fully oriented
+```
+
+The output is a full DAG, the only family here that orients inside the equivalence class. The assumptions are the price: linearity, no hidden confounders, and genuinely non-Gaussian noise. On Gaussian data the model is not identifiable and the returned order is arbitrary, which the docstring says plainly. It consumes neither a test nor a score (the regression and residual machinery is the algorithm), takes continuous columns only, and reads knowledge through the order: tiers and declared roots gate the root choice, forbidden and required edges act at pruning, and a required edge that contradicts the data-driven order raises instead of silently bending.
 
 ## Time series and panels
 
@@ -306,4 +375,4 @@ And the ingredients compose sideways: a warmed oracle across algorithms, a skele
 
 ## Not built yet
 
-Selection bias end to end (FCI's rules R5 to R7 and undirected PAG edges), RFCI and the conservative and majority variants, the graphical lasso screen, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, knowledge in temporal discovery, and a moving-block bootstrap for the temporal methods.
+The temporal cousins of the iid algorithms (VAR-LiNGAM, tsFCI, LPCMCI), permutation significance behind the same tests, and per-pair test dispatch from the schema.

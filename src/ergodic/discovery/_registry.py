@@ -23,6 +23,7 @@ _BY_METHOD: dict[str, tuple[str, str]] = {
     "pc": ("ergodic.discovery.algorithms._pc", "PC"),
     "pc_stable": ("ergodic.discovery.algorithms._pc", "PC"),
     "fci": ("ergodic.discovery.algorithms._fci", "FCI"),
+    "rfci": ("ergodic.discovery.algorithms._rfci", "RFCI"),
     "mmpc": ("ergodic.discovery.algorithms._mmpc", "MMPC"),
     "astar": ("ergodic.discovery.algorithms._astar", "AStar"),
     "a_star": ("ergodic.discovery.algorithms._astar", "AStar"),

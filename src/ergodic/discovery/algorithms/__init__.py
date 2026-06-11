@@ -14,6 +14,7 @@ from ._lingam import DirectLiNGAM
 from ._mmpc import MMPC
 from ._pc import PC
 from ._pcmci import PCMCI
+from ._rfci import RFCI
 
 __all__ = [
     "BOSS",
@@ -22,6 +23,7 @@ __all__ = [
     "MMPC",
     "PC",
     "PCMCI",
+    "RFCI",
     "AStar",
     "DirectLiNGAM",
     "GRaSP",

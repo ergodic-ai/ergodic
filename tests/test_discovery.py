@@ -143,6 +143,20 @@ def test_discover_routes_to_glasso_as_a_skeleton_screen() -> None:
     assert {frozenset((e.u, e.v)) for e in truth.edges} <= support
 
 
+def test_discover_routes_to_rfci() -> None:
+    rng = np.random.default_rng(0)
+    n = 4000
+    l1, l2 = rng.normal(size=n), rng.normal(size=n)
+    a = l1 + 0.5 * rng.normal(size=n)
+    b = l2 + 0.5 * rng.normal(size=n)
+    c = l1 + l2 + 0.5 * rng.normal(size=n)
+    data = tabular(pd.DataFrame({"A": a, "B": b, "C": c}))
+    result = discover(data, method="rfci", alpha=0.01)
+    assert result.method == "rfci"
+    assert result.graph == discover(data, method="fci", alpha=0.01).graph
+    assert result.diagnostics["pag_valid"] == 1.0
+
+
 def test_no_ingredient_methods_reject_both_ingredients() -> None:
     data = _chain(n=300)
     with pytest.raises(ValueError, match="neither a test nor a score"):
