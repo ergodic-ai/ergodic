@@ -20,6 +20,13 @@ facade, and :func:`bootstrap` reruns any method on resamples and returns edge
 frequencies (:class:`BootstrapResult`), the first soft output. Background
 knowledge (including a skeleton restriction through ``restrict_to``) enters
 through :class:`ergodic.DomainKnowledge`.
+
+Time series and panels get their own methods: :class:`PCMCI` reads a
+:class:`~ergodic.data.TimeSeriesData` or :class:`~ergodic.data.PanelData`
+through a lagged design matrix (:func:`lagged_tabular`) and returns a window
+graph over nodes like ``"X[t-1]"`` (:class:`TimeSeriesDiscoveryResult`), and
+:func:`granger` is the predictive baseline, a pair-level table on purpose
+rather than a graph.
 """
 
 from __future__ import annotations
@@ -27,9 +34,12 @@ from __future__ import annotations
 from ._bootstrap import BootstrapResult, bootstrap
 from ._ci import CIResult, CITest, DSeparationOracle
 from ._discover import discover
+from ._granger import GrangerResult, granger
+from ._lagged import lagged_node, lagged_tabular, parse_lagged
 from ._result import DiscoveryResult
 from ._score import Score
-from .algorithms import FCI, GES, MMPC, PC, AStar, HillClimb
+from ._tsresult import TimeSeriesDiscoveryResult
+from .algorithms import FCI, GES, MMPC, PC, PCMCI, AStar, HillClimb
 from .ci import GCM, Discrete, Linear, Mixed
 from .scores import BIC, BDeu, DiscreteBIC, MixedBIC
 
@@ -40,6 +50,7 @@ __all__ = [
     "GES",
     "MMPC",
     "PC",
+    "PCMCI",
     "AStar",
     "BDeu",
     "BootstrapResult",
@@ -49,11 +60,17 @@ __all__ = [
     "DiscoveryResult",
     "Discrete",
     "DiscreteBIC",
+    "GrangerResult",
     "HillClimb",
     "Linear",
     "Mixed",
     "MixedBIC",
     "Score",
+    "TimeSeriesDiscoveryResult",
     "bootstrap",
     "discover",
+    "granger",
+    "lagged_node",
+    "lagged_tabular",
+    "parse_lagged",
 ]

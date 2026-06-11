@@ -9,5 +9,6 @@ from ._ges import GES
 from ._hc import HillClimb
 from ._mmpc import MMPC
 from ._pc import PC
+from ._pcmci import PCMCI
 
-__all__ = ["FCI", "GES", "MMPC", "PC", "AStar", "HillClimb"]
+__all__ = ["FCI", "GES", "MMPC", "PC", "PCMCI", "AStar", "HillClimb"]

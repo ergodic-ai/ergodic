@@ -198,8 +198,10 @@ mutating the source dataframe or array afterwards doesn't reach the dataset.
 
 ## What's next on the data side
 
-The containers are here, and the first consumers are too: estimation and discovery
-both read a `TabularData` today. The rest land with their pillars: panel estimators
-over a `PanelData`, temporal discovery and reconciliation over the time-series
-shapes, and process mining over an `EventLog`. The event log's projections into the
-grid shapes land with the process pillar too.
+The containers are here, and most of the consumers are too: estimation and
+discovery read a `TabularData`, the quasi-experimental designs read a `PanelData`
+(`did`, `event_study`, `synthetic_control`) and a `TimeSeriesData`
+(`interrupted_time_series`), and temporal discovery reads both time-series shapes
+(`discover(..., method="pcmci")`, `granger`). Still ahead: hierarchical
+reconciliation over `HierarchicalTSData`, and process mining over an `EventLog`,
+whose projections into the grid shapes land with the process pillar.

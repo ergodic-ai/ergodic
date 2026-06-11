@@ -16,10 +16,18 @@ or a slot mapping like ``learner={"outcome": GradientBoostingRegressor()}`` drop
 any sklearn or xgboost model into the slots with no adapter. The result is
 distribution-shaped: a point estimate with an analytic standard error, or
 bootstrap draws when there is no closed form.
+
+The quasi-experimental designs read panels and time series instead of a graph:
+:func:`did` and :func:`event_study` over a :class:`~ergodic.data.PanelData`
+(parallel trends), :func:`synthetic_control` (a convex donor combination), and
+:func:`interrupted_time_series` over a :class:`~ergodic.data.TimeSeriesData`
+(a projected pre-trend). Each states its identification in a :class:`Design`
+record and returns the same :class:`EffectEstimate` surface.
 """
 
 from __future__ import annotations
 
+from ._design import Design
 from ._estimate import estimate, estimate_effect
 from ._estimator import CausalEstimator, Slot, Task
 from ._learner import BayesianLearner, Learner
@@ -31,15 +39,24 @@ from .estimators import (
     DML,
     IPW,
     PLIV,
+    DiDEffect,
     DRLearner,
+    EventTimeEffect,
+    GroupTimeEffect,
+    ITSEffect,
     NullEffect,
     OutcomeRegression,
     RLearner,
     Stratification,
+    SyntheticControlEffect,
     TwoStageLeastSquares,
     TwoStageRegression,
     Wald,
     XLearner,
+    did,
+    event_study,
+    interrupted_time_series,
+    synthetic_control,
 )
 from .learners import (
     OLS,
@@ -59,8 +76,13 @@ __all__ = [
     "BayesianLearner",
     "CausalEstimator",
     "DRLearner",
+    "Design",
+    "DiDEffect",
     "EffectEstimate",
     "EffectTarget",
+    "EventTimeEffect",
+    "GroupTimeEffect",
+    "ITSEffect",
     "KNNClassifier",
     "KNNRegressor",
     "Learner",
@@ -72,12 +94,17 @@ __all__ = [
     "RLearner",
     "Slot",
     "Stratification",
+    "SyntheticControlEffect",
     "Task",
     "TwoStageLeastSquares",
     "TwoStageRegression",
     "Wald",
     "XLearner",
     "candidates",
+    "did",
     "estimate",
     "estimate_effect",
+    "event_study",
+    "interrupted_time_series",
+    "synthetic_control",
 ]

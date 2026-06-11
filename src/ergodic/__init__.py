@@ -30,7 +30,7 @@ from .data import (
     tabular,
     timeseries,
 )
-from .discovery import discover
+from .discovery import discover, granger
 from .graph import (
     Edge,
     GraphKind,
@@ -56,7 +56,16 @@ from .identification import (
     is_valid_adjustment_set,
     minimal_adjustment_set,
 )
-from .inference import EffectEstimate, EffectTarget, estimate, estimate_effect
+from .inference import (
+    EffectEstimate,
+    EffectTarget,
+    did,
+    estimate,
+    estimate_effect,
+    event_study,
+    interrupted_time_series,
+    synthetic_control,
+)
 from .knowledge import DomainKnowledge, InconsistentKnowledgeError
 
 __version__ = "0.0.1"
@@ -89,14 +98,18 @@ __all__ = [
     "cpdag",
     "d_separated",
     "dag",
+    "did",
     "discover",
     "estimate",
     "estimate_effect",
     "event_log",
+    "event_study",
     "frontdoor_set",
+    "granger",
     "hts",
     "identify_effect",
     "instruments",
+    "interrupted_time_series",
     "is_frontdoor_set",
     "is_instrument",
     "is_valid_adjustment_set",
@@ -105,6 +118,7 @@ __all__ = [
     "mixed",
     "pag",
     "panel",
+    "synthetic_control",
     "tabular",
     "timeseries",
 ]

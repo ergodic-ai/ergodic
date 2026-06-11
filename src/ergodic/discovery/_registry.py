@@ -12,13 +12,12 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, cast
 
+from ..data import TabularData
 from ._ci import CITest
 from ._score import Score
 
 if TYPE_CHECKING:
     from typing import Any
-
-    from ..data import TabularData
 
 _BY_METHOD: dict[str, tuple[str, str]] = {
     "pc": ("ergodic.discovery.algorithms._pc", "PC"),
@@ -31,7 +30,22 @@ _BY_METHOD: dict[str, tuple[str, str]] = {
     "ges": ("ergodic.discovery.algorithms._ges", "GES"),
     "hc": ("ergodic.discovery.algorithms._hc", "HillClimb"),
     "hill_climb": ("ergodic.discovery.algorithms._hc", "HillClimb"),
+    "pcmci": ("ergodic.discovery.algorithms._pcmci", "PCMCI"),
 }
+
+# Methods that read temporal data (TimeSeriesData or PanelData) and own their
+# dependence structure. Everything else assumes exchangeable rows.
+TEMPORAL_METHODS: frozenset[str] = frozenset({"pcmci"})
+
+
+def _require_exchangeable(data: Any) -> None:
+    """Reject temporal datasets where an iid method would misread the rows."""
+    if data is not None and not isinstance(data, TabularData):
+        raise TypeError(
+            f"{type(data).__name__} rows are not exchangeable, so an iid method would "
+            "misread them; use method='pcmci' for time series and panels, or rebuild "
+            "with tabular(...) if the rows really are independent"
+        )
 
 
 def algorithm_for(method: str) -> type[Any]:
@@ -84,6 +98,7 @@ def resolve_test(spec: CITest | str, data: TabularData | None) -> CITest:
     Data comes from exactly one place: an unbound spec needs ``data`` at fit,
     a bound test carries its own and must not be handed a different dataset.
     """
+    _require_exchangeable(data)
     if isinstance(spec, CITest):
         if spec.is_bound:
             if data is not None and data is not spec.data:
@@ -147,6 +162,7 @@ def resolve_score(spec: Score | str, data: TabularData | None) -> Score:
     a bound score carries its own and must agree with any dataset it is handed,
     and a string needs data to bind (``"auto"`` reads its schema).
     """
+    _require_exchangeable(data)
     if isinstance(spec, Score):
         if spec.is_bound:
             if data is not None:

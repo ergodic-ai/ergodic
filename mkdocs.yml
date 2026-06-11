@@ -52,6 +52,7 @@ nav:
       - 4. Heterogeneous effects: learn/04-heterogeneous-effects.py
       - 5. Hidden confounding: learn/05-hidden-confounding.py
       - 6. Discovering structure: learn/06-discovering-structure.py
+      - 7. Quasi-experiments: learn/07-quasi-experiments.py
   - Concepts: concepts.md
   - Guides:
       - Causal graphs: graph.md
@@ -61,6 +62,7 @@ nav:
   - Pillars:
       - Causal Discovery: discovery.md
       - Causal Inference: inference.md
+      - Panel designs: panel.md
       - Process Intelligence: process.md
   - API Reference: reference.md
 

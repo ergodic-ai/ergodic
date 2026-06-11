@@ -29,6 +29,9 @@ The guides, in order:
    all. Instruments and the front-door, the two escape routes.
 6. [Discovering structure](06-discovering-structure.py): when you can't draw the graph,
    learn it from the data, and estimate straight off what discovery returns.
+7. [Quasi-experiments](07-quasi-experiments.py): a rollout nobody randomized. Stores
+   compared through time with difference-in-differences and event studies, and a market
+   with no twin gets a synthetic one.
 
 The examples are commercial because money concentrates the mind, but nothing is specific to
 commerce. Swap "discount" for "drug" and "spend" for "blood pressure" and every argument

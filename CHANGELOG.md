@@ -109,6 +109,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dags_of_cpdag` and `mags_of_pag` (deterministic, capped without silent
   truncation). The front-door and instruments raise on a class and point at
   the enumerators (the per-member IDA pattern); mixed graphs raise.
+- Quasi-experimental designs (`ergodic.inference`): estimators that read the
+  panel structure instead of a graph, each stating its identification in a
+  `Design` record and returning the same `EffectEstimate` surface. `did` over
+  a `PanelData` runs the canonical two-period collapse for a single adoption
+  date and Callaway-Sant'Anna group-time ATTs for staggered adoption (with
+  `comparison="never_treated"` or `"not_yet_treated"` and unit-bootstrap
+  inference); static two-way fixed effects ships as an explicit strategy with
+  its staggered-adoption caveat and is never auto-picked. `event_study`
+  reports ATT by event time with leads as the visible pre-trend check.
+  `synthetic_control` fits simplex weights on the pre-period by projected
+  gradient and reports per-period gaps with Abadie's in-space placebo
+  inference (the RMSPE-ratio rank p-value; intervals come from the placebo
+  band on purpose). `interrupted_time_series` over a `TimeSeriesData` is
+  segmented regression with level and slope changes, optional seasonal terms,
+  and Newey-West standard errors. All four re-export at the top level.
+- Temporal causal discovery (`ergodic.discovery`): `discover(data,
+  method="pcmci", max_lag=...)` accepts a `TimeSeriesData` or `PanelData`
+  (panels pool windows within entities) and returns a
+  `TimeSeriesDiscoveryResult` holding a window graph over lagged nodes like
+  `X[t-1]`, per-link p-values, and a variable-level `summary_edges()`. The
+  algorithm is PCMCI-shaped: a PC1 lagged-parent screen, momentary
+  conditional independence tests for lagged links (conditioning sets drawn
+  from a deeper lagged frame), a PC-stable contemporaneous phase conditioned
+  on lagged parents, and collider plus within-slice Meek orientation. It
+  reuses the existing `CITest` stack through `lagged_tabular`, so
+  `test="auto"` and the cache come free. `granger` is the predictive
+  baseline and returns a pair-level table rather than a graph (feedback
+  across lags is normal; the docstring says what Granger does not claim).
+  Shape guards keep the methods honest: iid methods reject temporal data
+  (rows are not exchangeable), `pcmci` rejects tabular data, and `bootstrap`
+  refuses temporal methods until a moving-block variant exists.
 - The learn series: six beginner notebook guides (`docs/learn/`) that teach
   causal inference from zero on commercial examples, confounding and Simpson's
   paradox, good and bad controls, estimation with doubly robust and cross-fit
@@ -120,6 +151,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference gains the discovery section (guide pages no longer inline `:::`
   blocks), stale forward references brought current, and the index routes
   beginners to the series.
+- Learn guide 7, quasi-experiments: a staggered promo rollout recovered with
+  difference-in-differences and an event study, and a flagship market's price
+  change measured against its synthetic control, with the naive comparisons
+  failing first. A new "Panel and time-series designs" guide page documents
+  the design family, and the discovery guide gains its time-series section.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

@@ -19,6 +19,7 @@ import numpy as np
 
 from ..graph import mixed
 from ._discover import discover
+from ._registry import TEMPORAL_METHODS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -126,6 +127,11 @@ def bootstrap(
     """
     if n_bootstrap < 1:
         raise ValueError(f"n_bootstrap must be >= 1, got {n_bootstrap}")
+    if method.lower() in TEMPORAL_METHODS:
+        raise ValueError(
+            f"bootstrap resamples rows, which breaks the dependence {method!r} reads; "
+            "a moving-block bootstrap for temporal methods is future work"
+        )
     rng = np.random.default_rng(seed)
     n = data.n_rows
     edge_counts: dict[frozenset[str], int] = {}

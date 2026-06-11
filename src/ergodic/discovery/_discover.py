@@ -14,13 +14,13 @@ from typing import TYPE_CHECKING, Any
 from ._registry import algorithm_for
 
 if TYPE_CHECKING:
-    from ..data import TabularData
+    from ..data import PanelData, TabularData, TimeSeriesData
     from ..knowledge import DomainKnowledge
     from ._result import DiscoveryResult
 
 
 def discover(
-    data: TabularData,
+    data: TabularData | TimeSeriesData | PanelData,
     method: str = "pc",
     *,
     test: Any = None,
@@ -37,7 +37,12 @@ def discover(
     default to ``"auto"``, picked from the column schema. Each algorithm
     declares which ingredient it consumes. Extra keyword arguments pass to
     the algorithm (``max_cond_size``, ``max_parents``, ``node_limit``,
-    ``max_degree``, ``tabu``).
+    ``max_degree``, ``tabu``, ``max_lag``).
+
+    The iid methods read a :class:`TabularData` and reject temporal shapes
+    (rows are not exchangeable); ``method="pcmci"`` reads a
+    :class:`TimeSeriesData` or :class:`PanelData` and returns a window graph
+    over lagged nodes like ``"X[t-1]"``.
     """
     cls = algorithm_for(method)
     result: DiscoveryResult

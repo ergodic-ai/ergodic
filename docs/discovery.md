@@ -228,6 +228,67 @@ class MyScore(Score):
         return value
 ```
 
+## Time series and panels
+
+Every method above assumes exchangeable rows: shuffle the data and nothing changes. In a time series the row order is the signal, so the temporal shapes get their own method, PCMCI+ (Runge 2020), reached through the same facade. It reads the series through a lagged window: row t of an internal frame holds every variable at lags 0 through `max_lag`, in columns named like `X[t-1]`, and the same CI tests run on that frame unchanged (`test="auto"` reads its schema, and `test="gcm"` works here too).
+
+```python
+import numpy as np
+import pandas as pd
+from ergodic import timeseries, discover
+
+rng = np.random.default_rng(0)
+n = 500
+x, y = np.zeros(n), np.zeros(n)
+for t in range(1, n):
+    x[t] = 0.7 * x[t - 1] + rng.normal()
+    y[t] = 0.8 * x[t - 1] + 0.5 * y[t - 1] + rng.normal()
+ts = timeseries(pd.DataFrame({"t": np.arange(n), "X": x, "Y": y}), time="t")
+
+result = discover(ts, method="pcmci", max_lag=2)
+result        # TimeSeriesDiscoveryResult(pcmci/linear: dag on 6 window nodes, ...)
+result.graph  # the window graph: X[t-1] -> X[t], Y[t-1] -> Y[t], X[t-1] -> Y[t]
+```
+
+The output lives on window nodes, one per variable per lag. Lagged edges point forward in time for free, since a cause precedes its effect; the work is in deciding which lagged links survive conditioning. Contemporaneous edges, lag zero at both ends, have no time order to lean on, so they orient the way PC orients: colliders decide what they can, two within-slice Meek rules propagate, and an edge nothing decides stays undirected, dropping the graph to the mixed face.
+
+The result is a `TimeSeriesDiscoveryResult`, and `links` carries the evidence: a p-value per surviving link, keyed `(source, target, lag)`.
+
+```python
+sorted(result.links)         # [('X', 'X', 1), ('X', 'Y', 1), ('Y', 'Y', 1)]
+result.links[("X", "Y", 1)]  # the p-value of the test that kept X[t-1] -> Y[t]
+result.summary_edges()       # {('X', 'X'), ('X', 'Y'), ('Y', 'Y')}
+```
+
+There is deliberately no summary graph. A stationary process happily runs feedback across lags, X driving Y at lag 1 while Y drives X at lag 2, and a variable-level graph would need two opposed edges between one pair to say so; the one-edge-per-pair graph model isn't bent around that. The window graph is the primary object, and `summary_edges()` gives the flat variable-level pairs when that's all you need.
+
+Panels run through the same call. `discover(panel_data, method="pcmci", max_lag=2)` builds windows within each entity and stacks them, pooling the entities under the assumption that they all follow one process; entities with fewer than `max_lag + 2` rows are skipped with a warning.
+
+Choose `max_lag` from what you know about the process, because the window is the universe: a true effect at lag `max_lag + 1` is invisible, since no test ever sees the column that would carry it. And lags count rows, so irregular sampling earns a warning; a lag of one means the previous row, whatever the calendar gap.
+
+`granger` is the predictive baseline, on a `TimeSeriesData` with continuous variables:
+
+```python
+from ergodic import granger
+
+g = granger(ts, max_lag=2)
+g.pvalues[("X", "Y")]   # tiny: X's lags improve the forecast of Y
+g.pvalues[("Y", "X")]   # ~0.4: Y's lags add nothing to X
+g.significant           # {('X', 'Y')}
+```
+
+Granger answers a forecasting question: do X's lags improve the prediction of Y once Y's own lags and everyone else's are in the regression? That's worth knowing, and it is on purpose that the result is a table of ordered pairs and never a graph. The test is blind to confounding (a common driver makes X "Granger-cause" Y with no causal link between them) and to contemporaneous effects, so drawing it as a graph would claim more than it measures. Treat the table as a screen and use PCMCI for structure.
+
+The shapes refuse to cross, with the reason in the error. An iid method handed temporal data raises, and PCMCI rejects flat tables in the other direction:
+
+```python
+discover(ts, method="pc")
+# TypeError: TimeSeriesData rows are not exchangeable, so an iid method would
+# misread them; use method='pcmci' for time series and panels, ...
+```
+
+The stability `bootstrap` refuses the temporal methods too: resampling rows breaks exactly the dependence PCMCI reads, and the moving-block variant that would respect it is future work. Background knowledge isn't wired into temporal discovery yet either; passing `knowledge=` raises.
+
 ## Putting the pieces together
 
 The pillars compose end to end, and you do not have to pick a member of the class to do it. Identification accepts the CPDAG or PAG directly and answers with the generalized adjustment criterion, so a success holds in every graph the class represents, and `estimate_effect` rides on that:
@@ -245,4 +306,4 @@ And the ingredients compose sideways: a warmed oracle across algorithms, a skele
 
 ## Not built yet
 
-Selection bias end to end (FCI's rules R5 to R7 and undirected PAG edges), RFCI and the conservative and majority variants, the graphical lasso screen, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, and the time-series shapes.
+Selection bias end to end (FCI's rules R5 to R7 and undirected PAG edges), RFCI and the conservative and majority variants, the graphical lasso screen, the order-based searches (GRaSP, BOSS; the score contract is ready for them), permutation significance behind the same tests, per-pair test dispatch from the schema, knowledge in temporal discovery, and a moving-block bootstrap for the temporal methods.
