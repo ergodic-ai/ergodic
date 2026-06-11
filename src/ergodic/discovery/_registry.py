@@ -30,6 +30,11 @@ _BY_METHOD: dict[str, tuple[str, str]] = {
     "ges": ("ergodic.discovery.algorithms._ges", "GES"),
     "hc": ("ergodic.discovery.algorithms._hc", "HillClimb"),
     "hill_climb": ("ergodic.discovery.algorithms._hc", "HillClimb"),
+    "boss": ("ergodic.discovery.algorithms._boss", "BOSS"),
+    "grasp": ("ergodic.discovery.algorithms._grasp", "GRaSP"),
+    "lingam": ("ergodic.discovery.algorithms._lingam", "DirectLiNGAM"),
+    "direct_lingam": ("ergodic.discovery.algorithms._lingam", "DirectLiNGAM"),
+    "glasso": ("ergodic.discovery.algorithms._glasso", "Glasso"),
     "pcmci": ("ergodic.discovery.algorithms._pcmci", "PCMCI"),
 }
 

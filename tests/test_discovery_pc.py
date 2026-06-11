@@ -11,14 +11,15 @@ from __future__ import annotations
 
 import math
 import random
+from itertools import combinations
 from typing import Any, ClassVar
 
 import numpy as np
 import pytest
 
-from ergodic.data import tabular
-from ergodic.discovery import CITest, DSeparationOracle
-from ergodic.discovery.algorithms._pc import PC
+from ergodic.data import TabularData, tabular
+from ergodic.discovery import CIResult, CITest, DSeparationOracle
+from ergodic.discovery.algorithms._pc import PC, _classify_triple, _vote_triples
 from ergodic.graph import GraphKind, InvalidGraphError, MixedGraph, cpdag, dag, mixed
 from ergodic.graph._meek import (
     consistent_extension,
@@ -76,6 +77,30 @@ def test_meek_forbidden_callback_blocks_an_orientation() -> None:
 def test_meek_closure_rejects_non_pdag_marks() -> None:
     with pytest.raises(ValueError, match="needs a PDAG"):
         meek_closure(mixed(["A <-> B"]))
+
+
+def test_meek_ambiguous_triple_gates_r1() -> None:
+    # with (A, B, C) uncertified, B <- C could still be the collider
+    closed = meek_closure(mixed(["A -> B", "B -- C"]), ambiguous=[("A", "B", "C")])
+    assert _undirected(closed, "B", "C")
+
+
+def test_meek_ambiguous_triple_ends_read_unordered() -> None:
+    closed = meek_closure(mixed(["A -> B", "B -- C"]), ambiguous=[("C", "B", "A")])
+    assert _undirected(closed, "B", "C")
+
+
+def test_meek_ambiguous_triple_gates_r3() -> None:
+    # the kite orients A -> B only because (C, A, D) cannot collide at A
+    kite = mixed(["A -- B", "A -- C", "A -- D", "C -> B", "D -> B"])
+    closed = meek_closure(kite, ambiguous=[("C", "A", "D")])
+    assert _undirected(closed, "A", "B")
+
+
+def test_meek_r2_ignores_ambiguous_triples() -> None:
+    # R2 breaks a cycle, no non-collider certificate involved
+    closed = meek_closure(mixed(["A -> B", "B -> C", "A -- C"]), ambiguous=[("A", "B", "C")])
+    assert _directed(closed, "A", "C")
 
 
 # -- cpdag_of_dag on known examples --------------------------------------------
@@ -176,6 +201,7 @@ def test_pc_recovers_the_cpdag_exactly(edges: list[str]) -> None:
     assert result.graph == cpdag_of_dag(truth)
     assert result.graph.kind is GraphKind.CPDAG
     assert result.diagnostics["cpdag_valid"] == 1.0
+    assert result.diagnostics["n_ambiguous_triples"] == 0.0  # always present
     assert result.method == "pc"
     assert result.test == "d_separation"
     assert result.score is None
@@ -349,4 +375,239 @@ def test_pc_recovers_a_sampled_linear_gaussian_chain() -> None:
     assert result.graph == cpdag_of_dag(dag(["X -> M", "M -> Y"]))
     assert result.n == n
     assert result.test == "stub_linear"
+    assert result.diagnostics["cpdag_valid"] == 1.0
+
+
+# -- conservative and majority collider rules --------------------------------------
+
+
+def test_pc_rejects_unknown_colliders_rule() -> None:
+    with pytest.raises(ValueError, match="'standard', 'conservative', or 'majority'"):
+        PC(colliders="bogus")
+
+
+def _random_dag(rng: np.random.Generator, p: int) -> MixedGraph:
+    names = [f"V{i}" for i in range(p)]
+    edges = []
+    for i, j in combinations(range(p), 2):
+        if rng.uniform() < 0.4:
+            edges.append((names[i], names[j]))
+    return dag(edges, nodes=names)
+
+
+@pytest.mark.parametrize("colliders", ["conservative", "majority"])
+def test_collider_variants_equal_standard_under_the_oracle(colliders: str) -> None:
+    # Colombo and Maathuis (2014, theorem 4): with a perfect oracle on a
+    # faithful world every separating set agrees on each middle node, so no
+    # triple is ambiguous and both variants land on the CPDAG of the truth
+    rng = np.random.default_rng(11)
+    for _ in range(20):
+        truth = _random_dag(rng, 7)
+        result = PC(DSeparationOracle(truth), colliders=colliders).fit()
+        assert result.graph == cpdag_of_dag(truth)
+        assert result.graph.kind is GraphKind.CPDAG
+        assert result.diagnostics["cpdag_valid"] == 1.0
+        assert result.diagnostics["n_ambiguous_triples"] == 0.0
+
+
+# the classification helper on synthetic separating-set lists
+
+
+def test_classify_triple_with_no_separating_set_is_ambiguous() -> None:
+    assert _classify_triple("conservative", "Z", []) == "ambiguous"
+    assert _classify_triple("majority", "Z", []) == "ambiguous"
+
+
+def test_classify_triple_majority_tie_is_ambiguous() -> None:
+    split = [frozenset(), frozenset({"Z"})]
+    assert _classify_triple("majority", "Z", split) == "ambiguous"
+    assert _classify_triple("conservative", "Z", split) == "ambiguous"
+    # one more vote breaks the tie either way
+    assert _classify_triple("majority", "Z", [*split, frozenset({"W"})]) == "collider"
+    assert _classify_triple("majority", "Z", [*split, frozenset({"W", "Z"})]) == "noncollider"
+
+
+def test_classify_triple_conservative_needs_unanimity() -> None:
+    assert _classify_triple("conservative", "Z", [frozenset(), frozenset({"W"})]) == "collider"
+    assert _classify_triple("conservative", "Z", [frozenset({"Z"})]) == "noncollider"
+    mostly = [frozenset({"Z"}), frozenset({"W", "Z"}), frozenset()]
+    assert _classify_triple("conservative", "Z", mostly) == "ambiguous"
+    assert _classify_triple("majority", "Z", mostly) == "noncollider"  # two of three
+
+
+# the vote sweep through a canned oracle: X - Z - Y unshielded, plus a leaf W at X
+
+
+class _CannedTest(CITest):
+    """A test answering from a fixed table: p = 1 for listed independences, else 0."""
+
+    name: ClassVar[str] = "canned"
+
+    def __init__(
+        self, variables: tuple[str, ...], independent: set[tuple[str, str, frozenset[str]]]
+    ) -> None:
+        super().__init__(None)
+        self._names = frozenset(variables)
+        self._independent = independent
+
+    @property
+    def is_bound(self) -> bool:
+        return True
+
+    def _require_bound(self) -> None:
+        return
+
+    def _dispatch(self, x: str, y: str, given: frozenset[str]) -> CIResult:
+        p = 1.0 if (x, y, given) in self._independent else 0.0
+        return CIResult(statistic=0.0, p_value=p, dof=None)
+
+
+_CHAIN_NODES = ("W", "X", "Y", "Z")
+_CHAIN_ADJ = {"W": {"X"}, "X": {"W", "Z"}, "Y": {"Z"}, "Z": {"X", "Y"}}
+
+
+def test_vote_triples_majority_decision_updates_the_sepset() -> None:
+    # candidate sets {}, {W}, {Z}, {W, Z}; all but {W} separate, so Z sits in
+    # two of three separating sets: majority says non-collider and rewrites
+    # the recorded sepset to witness it, conservative stays ambiguous
+    independent = {
+        ("X", "Y", frozenset()),
+        ("X", "Y", frozenset({"Z"})),
+        ("X", "Y", frozenset({"W", "Z"})),
+    }
+    oracle = _CannedTest(_CHAIN_NODES, independent)
+    sepsets = {frozenset({"X", "Y"}): frozenset()}
+    colliders, ambiguous = _vote_triples(
+        oracle,
+        sorted(_CHAIN_NODES),
+        _CHAIN_ADJ,
+        sepsets,
+        rule="majority",
+        alpha=0.05,
+        max_cond_size=None,
+    )
+    assert colliders == frozenset()
+    assert ambiguous == frozenset()
+    assert sepsets[frozenset({"X", "Y"})] == frozenset({"Z"})
+    # the two neighbourhoods share {} and {Z}: deduplication queries each set
+    # once, and the sepset-less (W, Z) pair is skipped without a query
+    assert oracle.diagnostics()["n_ci_tests"] == 4.0
+    assert oracle.diagnostics()["cache_hits"] == 0.0
+
+    sepsets = {frozenset({"X", "Y"}): frozenset()}
+    colliders, ambiguous = _vote_triples(
+        oracle,
+        sorted(_CHAIN_NODES),
+        _CHAIN_ADJ,
+        sepsets,
+        rule="conservative",
+        alpha=0.05,
+        max_cond_size=None,
+    )
+    assert colliders == frozenset()
+    assert ambiguous == frozenset({("X", "Z", "Y")})
+    assert sepsets[frozenset({"X", "Y"})] == frozenset()  # ambiguity leaves it alone
+
+
+def test_vote_triples_collider_vote_rewrites_a_sepset_containing_z() -> None:
+    # only {W} separates, so both rules vote collider; the stale skeleton
+    # sepset {Z} would contradict the decision and is replaced
+    oracle = _CannedTest(_CHAIN_NODES, {("X", "Y", frozenset({"W"}))})
+    sepsets = {frozenset({"X", "Y"}): frozenset({"Z"})}
+    colliders, ambiguous = _vote_triples(
+        oracle,
+        sorted(_CHAIN_NODES),
+        _CHAIN_ADJ,
+        sepsets,
+        rule="conservative",
+        alpha=0.05,
+        max_cond_size=None,
+    )
+    assert colliders == frozenset({("X", "Z", "Y")})
+    assert ambiguous == frozenset()
+    assert sepsets[frozenset({"X", "Y"})] == frozenset({"W"})
+
+
+def test_vote_triples_honors_max_cond_size() -> None:
+    # capped at size one the pool loses {W, Z}, the vote drops to one of two
+    # and the majority decision degrades to a tie, hence ambiguous
+    independent = {
+        ("X", "Y", frozenset()),
+        ("X", "Y", frozenset({"Z"})),
+        ("X", "Y", frozenset({"W", "Z"})),
+    }
+    oracle = _CannedTest(_CHAIN_NODES, independent)
+    sepsets = {frozenset({"X", "Y"}): frozenset()}
+    colliders, ambiguous = _vote_triples(
+        oracle,
+        sorted(_CHAIN_NODES),
+        _CHAIN_ADJ,
+        sepsets,
+        rule="majority",
+        alpha=0.05,
+        max_cond_size=1,
+    )
+    assert colliders == frozenset()
+    assert ambiguous == frozenset({("X", "Z", "Y")})
+    assert sepsets[frozenset({"X", "Y"})] == frozenset()
+
+
+# sampled worlds where the vote actually splits
+
+
+def _false_collider_world(seed: int = 16, n: int = 1000) -> TabularData:
+    """A -> B <- C with a weak child D, sized so the A-D and C-D margins vanish.
+
+    At this n the marginal A-D and C-D correlations (about 0.04) sit under
+    the alpha threshold, so the skeleton drops both pairs with the empty
+    sepset and standard PC orients the false v-structure D -> B. The re-test
+    finds {} and {B} both separating, an even split on B, so both variants
+    mark (A, B, D) and (C, B, D) ambiguous instead.
+    """
+    rng = np.random.default_rng(seed)
+    a = rng.normal(size=n)
+    c = rng.normal(size=n)
+    b = 0.35 * a + 0.35 * c + 0.95 * rng.normal(size=n)
+    d = 0.12 * b + rng.normal(size=n)
+    return tabular({"A": a, "B": b, "C": c, "D": d})
+
+
+def test_standard_pc_orients_the_false_v_structure() -> None:
+    result = PC(_StubLinear(), alpha=0.05).fit(data=_false_collider_world())
+    assert _directed(result.graph, "D", "B")  # the finite-sample mistake
+    assert result.diagnostics["cpdag_valid"] == 1.0
+    assert result.diagnostics["n_ambiguous_triples"] == 0.0
+
+
+@pytest.mark.parametrize("colliders", ["conservative", "majority"])
+def test_ambiguous_triples_stay_unoriented_with_an_honest_face(colliders: str) -> None:
+    result = PC(_StubLinear(), alpha=0.05, colliders=colliders).fit(data=_false_collider_world())
+    # the real collider still orients; the split votes refuse the false one
+    assert _directed(result.graph, "A", "B")
+    assert _directed(result.graph, "C", "B")
+    assert _undirected(result.graph, "B", "D")
+    assert result.diagnostics["n_ambiguous_triples"] == 2.0
+    # with R1 gated the PDAG is not closed under Meek, so the face drops
+    assert result.graph.kind is GraphKind.MIXED
+    assert result.diagnostics["cpdag_valid"] == 0.0
+
+
+@pytest.mark.parametrize("colliders", ["conservative", "majority"])
+def test_an_ambiguous_lone_triple_keeps_the_valid_cpdag_face(colliders: str) -> None:
+    # X -> Z <- Y with weak weights: at this n the collider leaks so little
+    # that {Z} also separates X and Y, a split vote on the only triple;
+    # nothing orients and the undirected chain is itself a valid CPDAG
+    rng = np.random.default_rng(22)
+    n = 300
+    x = rng.normal(size=n)
+    y = rng.normal(size=n)
+    z = 0.3 * x + 0.3 * y + rng.normal(size=n)
+    data = tabular({"X": x, "Y": y, "Z": z})
+    standard = PC(_StubLinear(), alpha=0.05).fit(data=data)
+    assert _directed(standard.graph, "X", "Z") and _directed(standard.graph, "Y", "Z")
+    result = PC(_StubLinear(), alpha=0.05, colliders=colliders).fit(data=data)
+    assert _undirected(result.graph, "X", "Z")
+    assert _undirected(result.graph, "Y", "Z")
+    assert result.diagnostics["n_ambiguous_triples"] == 1.0
+    assert result.graph.kind is GraphKind.CPDAG
     assert result.diagnostics["cpdag_valid"] == 1.0

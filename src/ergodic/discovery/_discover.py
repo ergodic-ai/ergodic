@@ -43,9 +43,20 @@ def discover(
     (rows are not exchangeable); ``method="pcmci"`` reads a
     :class:`TimeSeriesData` or :class:`PanelData` and returns a window graph
     over lagged nodes like ``"X[t-1]"``.
+
+    A few methods consume neither ingredient because the machinery is the
+    algorithm: ``"lingam"`` (regression and residual independence) and
+    ``"glasso"`` (a sparse precision estimate). They reject ``test=`` and
+    ``score=``, and ``alpha`` does not apply (their own knobs, like ``lam``
+    or ``prune``, pass through the keyword arguments).
     """
     cls = algorithm_for(method)
     result: DiscoveryResult
+    if cls.ingredient is None:
+        if test is not None or score is not None:
+            raise ValueError(f"method {method!r} consumes neither a test nor a score")
+        result = cls(**kwargs).fit(data, knowledge=knowledge)
+        return result
     if cls.ingredient == "test":
         if score is not None:
             raise ValueError(f"method {method!r} consumes a test, not a score")

@@ -39,12 +39,25 @@ from ._lagged import lagged_node, lagged_tabular, parse_lagged
 from ._result import DiscoveryResult
 from ._score import Score
 from ._tsresult import TimeSeriesDiscoveryResult
-from .algorithms import FCI, GES, MMPC, PC, PCMCI, AStar, HillClimb
+from .algorithms import (
+    BOSS,
+    FCI,
+    GES,
+    MMPC,
+    PC,
+    PCMCI,
+    AStar,
+    DirectLiNGAM,
+    Glasso,
+    GRaSP,
+    HillClimb,
+)
 from .ci import GCM, Discrete, Linear, Mixed
 from .scores import BIC, BDeu, DiscreteBIC, MixedBIC
 
 __all__ = [
     "BIC",
+    "BOSS",
     "FCI",
     "GCM",
     "GES",
@@ -57,9 +70,12 @@ __all__ = [
     "CIResult",
     "CITest",
     "DSeparationOracle",
+    "DirectLiNGAM",
     "DiscoveryResult",
     "Discrete",
     "DiscreteBIC",
+    "GRaSP",
+    "Glasso",
     "GrangerResult",
     "HillClimb",
     "Linear",

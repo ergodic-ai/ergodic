@@ -24,7 +24,7 @@ from ._graph import Edge, GraphKind, MixedGraph
 from ._marks import Mark
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
 _Maps = tuple[dict[str, set[str]], dict[str, set[str]], dict[str, set[str]]]
 
@@ -55,19 +55,25 @@ def _adjacent(x: str, y: str, maps: _Maps) -> bool:
     return y in parents[x] or y in children[x] or y in undirected[x]
 
 
-def _compelled(a: str, b: str, maps: _Maps) -> bool:
-    """Return ``True`` when some Meek rule orients the undirected edge ``a -- b`` as ``a -> b``."""
+def _compelled(a: str, b: str, maps: _Maps, ambiguous: frozenset[tuple[str, str, str]]) -> bool:
+    """Return ``True`` when some Meek rule orients the undirected edge ``a -- b`` as ``a -> b``.
+
+    ``ambiguous`` gates R1 and R3, the two rules whose premise is a definite
+    non-collider; see :func:`meek_closure`.
+    """
     parents, children, undirected = maps
-    # R1: c -> a, a -- b, c and b nonadjacent  =>  a -> b.
+    # R1: c -> a, a -- b, c and b nonadjacent  =>  a -> b,
+    #     unless (c, a, b) is ambiguous: b -> a could then be the collider.
     for c in parents[a]:
-        if not _adjacent(c, b, maps):
+        if not _adjacent(c, b, maps) and (min(c, b), a, max(c, b)) not in ambiguous:
             return True
     # R2: a -> c -> b with a -- b  =>  a -> b (else a cycle).
     if children[a] & parents[b]:
         return True
-    # R3: a -- c, a -- d, c -> b, d -> b, c and d nonadjacent  =>  a -> b.
+    # R3: a -- c, a -- d, c -> b, d -> b, c and d nonadjacent  =>  a -> b,
+    #     unless (c, a, d) is ambiguous: a could then collide its two ends.
     for c, d in combinations(sorted(undirected[a] & parents[b]), 2):
-        if not _adjacent(c, d, maps):
+        if not _adjacent(c, d, maps) and (c, a, d) not in ambiguous:
             return True
     # R4: a -- b, c -> b, a and c adjacent, e -- a, e -> c, e and b nonadjacent
     #     =>  a -> b (b -> a would force either a cycle or a new v-structure at a).
@@ -81,7 +87,10 @@ def _compelled(a: str, b: str, maps: _Maps) -> bool:
 
 
 def meek_closure(
-    pdag: MixedGraph, *, forbidden: Callable[[str, str], bool] | None = None
+    pdag: MixedGraph,
+    *,
+    forbidden: Callable[[str, str], bool] | None = None,
+    ambiguous: Collection[tuple[str, str, str]] | None = None,
 ) -> MixedGraph:
     """Apply Meek's rules R1 to R4 to a PDAG until fixpoint.
 
@@ -91,12 +100,25 @@ def meek_closure(
     orientation ``u -> v``: the rule simply does not fire that way and the
     edge stays undirected unless another rule orients it.
 
+    ``ambiguous`` lists unshielded triples ``(x, z, y)``, ``z`` the middle
+    node and the ends unordered, that the caller cannot certify as definite
+    non-colliders (PC's conservative and majority collider rules leave such
+    triples behind). A definite non-collider is exactly what R1 and R3
+    consume: R1 reads ``c -> a -- b`` with ``c`` and ``b`` nonadjacent as
+    compelling ``a -> b`` only because the collider ``c -> a <- b`` was ruled
+    out, and R3 rests on its two converging parents never colliding at the
+    undirected partner. Both rules skip a gated triple; R2 (a cycle rule)
+    and R4 run unchanged. Default ``None`` gates nothing.
+
     The result is returned with kind ``mixed``; re-face it with
     :meth:`MixedGraph.as_kind` when more is known.
     """
     maps = _pdag_maps(pdag, "meek_closure")
     parents, children, undirected = maps
     blocked: Callable[[str, str], bool] = forbidden if forbidden is not None else lambda u, v: False
+    gated = frozenset(
+        (min(x, y), z, max(x, y)) for x, z, y in (ambiguous if ambiguous is not None else ())
+    )
     graph = pdag
     changed = True
     while changed:
@@ -106,7 +128,7 @@ def meek_closure(
             if v not in undirected[u]:
                 continue  # oriented earlier in this pass
             for a, b in ((u, v), (v, u)):
-                if blocked(a, b) or not _compelled(a, b, maps):
+                if blocked(a, b) or not _compelled(a, b, maps, gated):
                     continue
                 graph = graph.orient(a, b)
                 undirected[a].discard(b)

@@ -103,6 +103,62 @@ def test_discover_auto_picks_the_score_from_the_schema() -> None:
     assert discover(mixed, method="ges").score == "bic_mixed"
 
 
+def test_discover_routes_to_the_order_searches() -> None:
+    data, truth = _five_node()
+    by_boss = discover(data, method="boss")
+    assert by_boss.method == "boss"
+    assert by_boss.score == "bic"  # auto picked the Gaussian score
+    assert by_boss.graph == cpdag_of_dag(truth)
+    by_grasp = discover(data, method="grasp")
+    assert by_grasp.method == "grasp"
+    assert by_grasp.graph == cpdag_of_dag(truth)
+
+
+def test_discover_routes_to_lingam_on_a_non_gaussian_world() -> None:
+    rng = np.random.default_rng(5)
+    n = 3000
+    x = rng.uniform(-1, 1, size=n)
+    m = 0.8 * x + rng.uniform(-1, 1, size=n)
+    y = 0.7 * m + rng.uniform(-1, 1, size=n)
+    data = tabular(pd.DataFrame({"X": x, "M": m, "Y": y}))
+    result = discover(data, method="lingam")
+    assert result.method == "lingam"
+    assert result.graph == dag(["X -> M", "M -> Y"])
+    assert result.test is None and result.score is None
+    assert discover(data, method="direct_lingam").graph == result.graph
+
+
+def test_discover_routes_to_glasso_as_a_skeleton_screen() -> None:
+    # A screen is judged on recall: restrict_to needs every true edge in the
+    # support, extras are what the downstream search prunes. On this world
+    # the 0.6 to 0.9 coefficients push the correlations high enough that the
+    # penalized precision keeps extras at every lambda (sklearn agrees entry
+    # for entry); the exact-recovery worlds live in test_discovery_glasso.
+    data, truth = _five_node()
+    result = discover(data, method="glasso")
+    assert result.method == "glasso"
+    assert result.graph.kind is GraphKind.MIXED
+    assert all(e.is_undirected for e in result.graph.edges)
+    support = {frozenset((e.u, e.v)) for e in result.graph.edges}
+    assert {frozenset((e.u, e.v)) for e in truth.edges} <= support
+
+
+def test_no_ingredient_methods_reject_both_ingredients() -> None:
+    data = _chain(n=300)
+    with pytest.raises(ValueError, match="neither a test nor a score"):
+        discover(data, method="glasso", test="linear")
+    with pytest.raises(ValueError, match="neither a test nor a score"):
+        discover(data, method="lingam", score="bic")
+
+
+def test_collider_variants_flow_through_the_facade() -> None:
+    data = _chain()
+    result = discover(data, method="pc", colliders="majority")
+    assert result.method == "pc"
+    assert result.graph == cpdag_of_dag(dag(["X -> M", "M -> Y"]))
+    assert result.diagnostics["n_ambiguous_triples"] == 0.0
+
+
 def test_discover_resolves_the_gcm_test_by_name() -> None:
     result = discover(_chain(n=500), method="pc", test="gcm")
     assert result.test == "gcm"
