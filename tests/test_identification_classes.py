@@ -241,6 +241,19 @@ def test_identification_rejects_class_faces_with_latent_designations() -> None:
         identify_effect(relabelled, "X", "Y")
 
 
+def test_identification_rejects_selection_marks_on_classes() -> None:
+    # The generalized adjustment criterion assumes no selection bias; a class
+    # whose marks say selection is there raises instead of misreading them.
+    from ergodic.graph import pag
+
+    cycle = pag(["A -- B", "B -- C", "C -- D", "D -- A"])
+    with pytest.raises(ValueError, match="selection bias"):
+        identify_effect(cycle, "A", "C")
+    member = mixed(["X -- Y", "Y -> Z"]).as_kind("mag")
+    with pytest.raises(ValueError, match="selection bias"):
+        identify_effect(member, "X", "Z")
+
+
 # -- the bridge: discover, then estimate ----------------------------------------------
 
 

@@ -113,6 +113,16 @@ def _is_class_kind(graph: MixedGraph) -> bool:
             f"a {graph.kind.value} carries no latent or selection designations; "
             "the class semantics already account for what is unobserved"
         )
+    if graph.kind in (GraphKind.MAG, GraphKind.PAG):
+        for e in graph.edges:
+            marks = {e.u_mark, e.v_mark}
+            if e.is_undirected or marks == {Mark.TAIL, Mark.CIRCLE}:
+                raise ValueError(
+                    f"edge {e.glyph()!r} says the class carries selection bias, "
+                    "and the generalized adjustment criterion assumes there is "
+                    "none; causal effects are generally not identifiable from a "
+                    "selection-biased margin"
+                )
     return True
 
 

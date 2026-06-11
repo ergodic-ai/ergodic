@@ -74,6 +74,77 @@ def test_fci_over_the_oracle_equals_the_canonical_pag_on_latent_dags() -> None:
         assert result.diagnostics["pag_valid"] == 1.0
 
 
+def _random_dag_with_margin(
+    rng: np.random.Generator, p: int, n_latent: int, n_selection: int
+) -> MixedGraph:
+    names = [f"V{i}" for i in range(p)]
+    edges = []
+    for i, j in combinations(range(p), 2):
+        if rng.uniform() < 0.4:
+            edges.append((names[i], names[j]))
+    hidden = list(rng.choice(names, size=n_latent + n_selection, replace=False))
+    return dag(edges, nodes=names, latent=hidden[:n_latent], selection=hidden[n_latent:])
+
+
+def test_fci_over_the_oracle_equals_the_canonical_pag_under_selection() -> None:
+    # The selection is in the world, not the algorithm: the oracle answers
+    # every query given S, and FCI with the full rule closure lands exactly
+    # on the canonical PAG of the selection projection. Random worlds give
+    # selection-heavy MAGs whose invariant marks are usually still circles
+    # (a lone undirected edge is not invariant), so the MAG is what the
+    # richness check reads.
+    rng = np.random.default_rng(29)
+    n_selection_edges = 0
+    for _ in range(30):
+        graph = _random_dag_with_margin(rng, 7, 1, 2)
+        mag = mag_of_dag(graph)
+        truth = pag_of_mag(mag)
+        result = FCI(test=DSeparationOracle(graph)).fit()
+        assert result.graph.edges == truth.edges
+        assert result.graph.kind is GraphKind.PAG
+        assert result.diagnostics["pag_valid"] == 1.0
+        n_selection_edges += any(e.is_undirected for e in mag.edges)
+    assert n_selection_edges >= 8  # the worlds actually carry selection
+
+
+def test_fci_recovers_invariant_selection_marks_through_r5_and_r6() -> None:
+    # Four pair-colliders, each selected: the truth PAG is the undirected
+    # four-cycle (R5), and with B -> E added it also carries B --o E (R6).
+    cycle = [
+        "A -> S1",
+        "B -> S1",
+        "B -> S2",
+        "C -> S2",
+        "C -> S3",
+        "D -> S3",
+        "D -> S4",
+        "A -> S4",
+    ]
+    selection = ["S1", "S2", "S3", "S4"]
+    graph = dag(cycle, selection=selection)
+    result = FCI(test=DSeparationOracle(graph)).fit()
+    assert sorted(e.glyph() for e in result.graph.edges) == [
+        "A --- B",
+        "A --- D",
+        "B --- C",
+        "C --- D",
+    ]
+    richer = dag([*cycle, "B -> E"], selection=selection)
+    result = FCI(test=DSeparationOracle(richer)).fit()
+    assert result.graph.edges == pag_of_mag(mag_of_dag(richer)).edges
+    edge = result.graph.get_edge("B", "E")
+    assert edge is not None and edge.glyph() == "B --o E"
+    assert result.diagnostics["pag_valid"] == 1.0
+
+
+def test_the_oracle_conditions_every_query_on_selection() -> None:
+    graph = dag(["X -> S", "Y -> S"], selection=["S"])
+    oracle = DSeparationOracle(graph)
+    assert oracle.variables == ("X", "Y")
+    # Conditioning on the selected collider couples X and Y unconditionally.
+    assert oracle.test("X", "Y").p_value == 0.0
+
+
 def test_fci_over_the_oracle_equals_the_canonical_pag_on_admgs() -> None:
     for seed in range(30):
         graph = _random_admg(np.random.default_rng(seed), 7)

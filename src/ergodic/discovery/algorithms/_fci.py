@@ -10,8 +10,12 @@ skeleton, then the possible-d-sep phase that PC has no analogue for (with
 latents, two adjacent-looking nodes can be separated only by conditioning
 outside their neighbourhoods, so candidate sets widen to Possible-D-Sep),
 then re-orientation from the final separating sets and Zhang's (2008) rule
-closure, which is complete when selection bias is absent. Selection bias is
-assumed absent throughout.
+closure, all ten rules, which is complete with latent confounders and
+selection bias both. Selection needs nothing from the algorithm: data sampled
+under selection simply answers every test conditional on it, and the
+selection rules R5 to R7 turn what that implies into undirected and
+circle-tail marks. An undirected edge in the output says both endpoints
+cause the selection in every member of the class.
 
 Domain knowledge translates through ancestry, not edge direction. Prune: a
 pair forbidden in both directions (an adjacency ban) is never tested.

@@ -413,17 +413,26 @@ class MixedGraph:
         return cpdag_of_dag(extension).edges == self.edges
 
     def is_mag(self) -> bool:
-        """ADMG rules plus no almost-directed cycle (a bidirected edge between ancestors).
+        """The ancestral rules of Richardson and Spirtes (2002).
 
-        Two gaps remain until the discovery phase: undirected selection edges,
-        which a MAG may carry, are rejected because :meth:`is_admg` does not
-        allow them, and maximality (every non-adjacent pair separable) is not
-        checked.
+        Three edge types (directed, bidirected, undirected), no directed
+        cycle, no almost-directed cycle (a bidirected edge between ancestors),
+        and the endpoints of any undirected edge carry no arrowhead at all (no
+        parents and no spouses), which is how selection bias shows up in a
+        MAG. One gap: maximality (every non-adjacent pair separable) is not
+        checked here; the :meth:`is_pag` round trip is what exercises it.
         """
-        if not self.is_admg():
+        if not all(e.is_directed or e.is_bidirected or e.is_undirected for e in self.edges):
             return False
+        if not self.is_acyclic():
+            return False
+        undirected = {n for e in self.edges if e.is_undirected for n in (e.u, e.v)}
         for e in self.edges:
             if e.is_bidirected and (e.u in self.ancestors(e.v) or e.v in self.ancestors(e.u)):
+                return False
+            if e.u_mark is Mark.ARROW and e.u in undirected:
+                return False
+            if e.v_mark is Mark.ARROW and e.v in undirected:
                 return False
         return True
 
@@ -434,9 +443,10 @@ class MixedGraph:
         CPDAGs: extract one member MAG (``mag_of_pag``), check it satisfies
         the MAG rules, and require the canonical PAG of that member
         (``pag_of_mag``) to be exactly this graph, so every invariant mark is
-        oriented and every varying mark is a circle. Selection bias is out of
-        scope: undirected and circle-tail edges fail. One known gap rides
-        along from :meth:`is_mag`: maximality of the member is not checked.
+        oriented and every varying mark is a circle. Selection bias is in
+        scope: undirected and circle-tail edges are read as Zhang's rules R5
+        to R7 leave them. One known gap rides along from :meth:`is_mag`:
+        maximality of the member is not checked.
         """
         if not self.is_acyclic():
             return False

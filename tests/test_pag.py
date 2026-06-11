@@ -168,16 +168,24 @@ def test_the_projection_preserves_every_separation_over_the_observed() -> None:
                     assert graph.m_separated(x, y, given) == mag.m_separated(x, y, given)
 
 
-def test_mag_of_dag_rejects_selection_and_non_admg_inputs() -> None:
-    with_selection = MixedGraph(
-        nodes=frozenset({"X", "Y", "S"}),
+def test_mag_of_dag_rejects_non_admg_and_bad_selection_inputs() -> None:
+    with pytest.raises(ValueError, match="DAG or ADMG"):
+        mag_of_dag(mixed(["X -- Y"]))
+    stray = MixedGraph(
+        nodes=frozenset({"X", "Y"}),
         edges=dag(["X -> Y"]).edges,
         selection=frozenset({"S"}),
     )
-    with pytest.raises(NotImplementedError, match="selection"):
-        mag_of_dag(with_selection)
-    with pytest.raises(ValueError, match="DAG or ADMG"):
-        mag_of_dag(mixed(["X -- Y"]))
+    with pytest.raises(ValueError, match="selection names"):
+        mag_of_dag(stray)
+    both = MixedGraph(
+        nodes=frozenset({"X", "Y", "S"}),
+        edges=dag(["X -> Y"]).edges,
+        latent=frozenset({"S"}),
+        selection=frozenset({"S"}),
+    )
+    with pytest.raises(ValueError, match="both latent and selection"):
+        mag_of_dag(both)
 
 
 def test_mag_of_dag_accepts_an_admg_with_its_implicit_latents() -> None:
@@ -321,11 +329,15 @@ def test_mag_of_pag_orients_the_circle_component_without_new_colliders() -> None
     assert collider == 0
 
 
-def test_mag_of_pag_rejects_selection_artifacts() -> None:
-    with pytest.raises(InvalidGraphError, match="selection"):
-        mag_of_pag(mixed(["X -- Y"]))
-    with pytest.raises(InvalidGraphError, match="selection"):
-        mag_of_pag(mixed(["X --o Y"]))
+def test_mag_of_pag_resolves_selection_marks() -> None:
+    # Undirected edges are invariant and stay; a circle-tail edge directs out
+    # of its tail (Zhang's arrowhead augmentation).
+    kept = mag_of_pag(mixed(["X -- Y"])).get_edge("X", "Y")
+    assert kept is not None and kept.is_undirected
+    out_of_x = mag_of_pag(mixed(["X --o Y"])).get_edge("X", "Y")
+    assert out_of_x is not None and out_of_x.directed_pair() == ("X", "Y")
+    out_of_y = mag_of_pag(mixed(["X o-- Y"])).get_edge("X", "Y")
+    assert out_of_y is not None and out_of_y.directed_pair() == ("Y", "X")
 
 
 def test_the_round_trip_holds_over_random_latent_projections() -> None:
@@ -359,7 +371,7 @@ def test_definite_separation_on_the_canonical_pag_answers_for_the_class() -> Non
 
 def test_is_pag_rejects_a_graph_not_closed_under_the_rules() -> None:
     assert not mixed(["X o-> Y", "Y o-o Z"]).is_pag()  # R1 would orient Y -> Z
-    assert not mixed(["X -- Y"]).is_pag()  # selection artifact
+    assert not mixed(["X -- Y"]).is_pag()  # a lone tail-tail is not invariant
     assert not dag(["X -> Y"]).is_pag()  # the class leaves both ends as circles
     with pytest.raises(InvalidGraphError):
         mixed(["X o-> Y", "Y o-o Z"]).as_kind(GraphKind.PAG)
@@ -368,6 +380,128 @@ def test_is_pag_rejects_a_graph_not_closed_under_the_rules() -> None:
 def test_the_closure_is_deterministic() -> None:
     mag = mag_of_dag(dag(["Z -> X", "X -> Y", "L -> X", "L -> Y"], latent=["L"]))
     assert pag_of_mag(mag).edges == pag_of_mag(mag).edges
+
+
+# -- selection bias --------------------------------------------------------------
+
+
+def _random_dag_with_margin(
+    rng: np.random.Generator, p: int, n_latent: int, n_selection: int
+) -> MixedGraph:
+    names = [f"V{i}" for i in range(p)]
+    edges = []
+    for i, j in combinations(range(p), 2):
+        if rng.uniform() < 0.4:
+            edges.append((names[i], names[j]))
+    hidden = list(rng.choice(names, size=n_latent + n_selection, replace=False))
+    return dag(edges, nodes=names, latent=hidden[:n_latent], selection=hidden[n_latent:])
+
+
+_CYCLE_WORLD = [
+    "A -> S1",
+    "B -> S1",
+    "B -> S2",
+    "C -> S2",
+    "C -> S3",
+    "D -> S3",
+    "D -> S4",
+    "A -> S4",
+]
+
+
+def test_selection_on_a_collider_projects_to_an_undirected_edge() -> None:
+    graph = dag(["X -> S", "Y -> S"], selection=["S"])
+    mag = mag_of_dag(graph)
+    assert sorted(mag.nodes) == ["X", "Y"]
+    edge = mag.get_edge("X", "Y")
+    assert edge is not None and edge.is_undirected
+    # A lone edge carries no invariant marks, so the class shows circles.
+    canonical = pag_of_mag(mag)
+    pag_edge = canonical.get_edge("X", "Y")
+    assert pag_edge is not None and pag_edge.glyph() == "X o-o Y"
+
+
+def test_an_ancestor_of_selection_keeps_its_tail() -> None:
+    # X -> Y -> S: X is an ancestor of Y and Y is an ancestor of selection,
+    # so both ends are tails and the directed edge projects as undirected.
+    graph = dag(["X -> Y", "Y -> S"], selection=["S"])
+    edge = mag_of_dag(graph).get_edge("X", "Y")
+    assert edge is not None and edge.is_undirected
+
+
+def test_is_mag_reads_the_ancestral_conditions_on_undirected_edges() -> None:
+    assert mixed(["X -- Y"]).is_mag()
+    assert mixed(["X -- Y", "Y -- Z"]).is_mag()
+    assert mixed(["X -- Y", "X -> Z"]).is_mag()  # an arrow out of X is fine
+    assert not mixed(["X -- Y", "Z -> X"]).is_mag()  # a parent at an undirected endpoint
+    assert not mixed(["X -- Y", "Z <-> Y"]).is_mag()  # a spouse at an undirected endpoint
+    assert not mixed(["X o-o Y"]).is_mag()  # circles still fail
+
+
+def test_the_selection_projection_preserves_separation_given_selection() -> None:
+    # Richardson and Spirtes (2002), Theorem 4.18: m-separation in MAG(G) is
+    # d-separation in G given Z union S.
+    rng = np.random.default_rng(11)
+    for _ in range(25):
+        graph = _random_dag_with_margin(rng, 6, 1, 1)
+        mag = mag_of_dag(graph)
+        observed = sorted(mag.nodes)
+        for x, y in combinations(observed, 2):
+            rest = [n for n in observed if n not in (x, y)]
+            for size in range(len(rest) + 1):
+                for given in combinations(rest, size):
+                    expected = graph.m_separated(x, y, frozenset(given) | graph.selection)
+                    assert mag.m_separated(x, y, given) == expected
+
+
+def test_the_round_trip_holds_over_random_selection_projections() -> None:
+    rng = np.random.default_rng(13)
+    n_undirected = 0
+    for _ in range(40):
+        graph = _random_dag_with_margin(rng, 7, 1, 2)
+        mag = mag_of_dag(graph)
+        n_undirected += any(e.is_undirected for e in mag.edges)
+        canonical = pag_of_mag(mag)
+        assert canonical.is_pag()
+        member = mag_of_pag(canonical)
+        assert member.is_mag()
+        assert {frozenset((e.u, e.v)) for e in member.edges} == {
+            frozenset((e.u, e.v)) for e in mag.edges
+        }
+        assert pag_of_mag(member).edges == canonical.edges
+    assert n_undirected >= 10  # the worlds actually exercise selection
+
+
+def test_r5_fires_on_the_chordless_circle_cycle() -> None:
+    # Four pair-colliders, each selected: the MAG is the chordless undirected
+    # four-cycle, and every mark in its PAG is an invariant tail, which only
+    # R5 can conclude.
+    graph = dag(_CYCLE_WORLD, selection=["S1", "S2", "S3", "S4"])
+    mag = mag_of_dag(graph)
+    glyphs = sorted(e.glyph() for e in mag.edges)
+    assert glyphs == ["A --- B", "A --- D", "B --- C", "C --- D"]
+    assert pag_of_mag(mag).edges == mag.edges
+    assert pag(["A -- B", "B -- C", "C -- D", "D -- A"]).is_pag()
+
+
+def test_r6_leaves_a_circle_tail_edge_and_the_round_trip_holds() -> None:
+    # The four-cycle world plus B -> E: B's end of the new edge is a tail in
+    # every member (R6), E's end varies, so the complete PAG carries B --o E.
+    graph = dag([*_CYCLE_WORLD, "B -> E"], selection=["S1", "S2", "S3", "S4"])
+    canonical = pag_of_mag(mag_of_dag(graph))
+    edge = canonical.get_edge("B", "E")
+    assert edge is not None and edge.glyph() == "B --o E"
+    assert canonical.is_pag()
+    member_edge = mag_of_pag(canonical).get_edge("B", "E")
+    assert member_edge is not None and member_edge.directed_pair() == ("B", "E")
+
+
+def test_mags_of_pag_selection_marks_need_the_wider_class() -> None:
+    cycle = pag(["A -- B", "B -- C", "C -- D", "D -- A"])
+    with pytest.raises(ValueError, match="selection=True"):
+        mags_of_pag(cycle)
+    members = mags_of_pag(cycle, selection=True)
+    assert members == (mag_of_pag(cycle),)
 
 
 # -- possible ancestry ----------------------------------------------------------
@@ -501,6 +635,10 @@ def test_mags_of_pag_lists_the_two_node_class() -> None:
     assert glyphs == ["X --> Y", "X <-- Y", "X <-> Y"]
     with pytest.raises(ValueError, match="more than 2 members"):
         mags_of_pag(pag(["X o-o Y"]), max_members=2)
+    # The full Markov class also carries the undirected selection member.
+    widened = mags_of_pag(pag(["X o-o Y"]), selection=True)
+    glyphs = sorted(next(iter(m.edges)).glyph() for m in widened)
+    assert glyphs == ["X --- Y", "X --> Y", "X <-- Y", "X <-> Y"]
 
 
 def test_mags_of_pag_members_round_trip_and_include_the_extracted_one() -> None:

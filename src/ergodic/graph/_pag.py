@@ -15,15 +15,18 @@ class's invariant marks), and :func:`mag_of_pag` extracts one member MAG back
 out of a PAG, which together make ``is_pag`` a real validator by round trip,
 exactly as the Meek machinery does for ``is_cpdag``.
 
-Everything here assumes no selection bias: selection nodes raise, undirected
-and circle-tail edges are rejected as selection artifacts, and rules R5 to R7
-(which only fire under selection) are not implemented.
+Selection bias is in scope: :func:`mag_of_dag` projects selection nodes the
+way it projects latents (an undirected edge says both endpoints are ancestors
+of selection), the closure runs Zhang's full rule set R1 to R10 (R5 to R7 are
+the selection rules), and :func:`mag_of_pag` resolves circle-tail edges per
+his arrowhead augmentation. The completeness of the ten rules is held
+executably by the same round trips that hold the no-selection case.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
-from itertools import combinations, product
+from itertools import combinations, pairwise, product
 from typing import TYPE_CHECKING
 
 from ._graph import Edge, GraphKind, InvalidGraphError, MixedGraph
@@ -40,34 +43,41 @@ _Marks = dict[str, dict[str, Mark]]
 
 
 def mag_of_dag(graph: MixedGraph) -> MixedGraph:
-    """Project a DAG or ADMG with latent nodes onto its MAG over the observed.
+    """Project a DAG or ADMG with latent and selection nodes onto its MAG.
 
     Two observed nodes are adjacent exactly when no observed subset separates
-    them, decided by the one witness set that suffices: the observed ancestors
-    of either endpoint. Marks read ancestry in the full graph: a tail at ``X``
-    on the edge to ``Y`` means ``X`` is an ancestor of ``Y`` there, an
-    arrowhead means it is not. The result preserves every m-separation over
-    the observed margin, which is the defining property of the projection.
+    them given the selection nodes, decided by the one witness set that
+    suffices (Richardson and Spirtes 2002, Theorem 4.2): the observed
+    ancestors of either endpoint or of selection, plus the selection nodes
+    themselves. Marks read ancestry in the full graph: a tail at ``X`` on the
+    edge to ``Y`` means ``X`` is an ancestor of ``Y`` or of selection there,
+    an arrowhead means it is neither; two tails make an undirected edge,
+    which on a DAG means both endpoints are ancestors of selection. The
+    result preserves every m-separation over the observed margin conditional
+    on selection, which is the defining property of the projection.
     """
-    if graph.selection:
-        raise NotImplementedError(
-            "mag_of_dag assumes no selection bias; graphs with selection nodes "
-            "are not supported yet"
-        )
     if not graph.is_admg():
         raise ValueError(
             "mag_of_dag needs a DAG or ADMG (directed and bidirected edges, no "
             "directed cycle); project the graph you have onto one first"
         )
-    observed = sorted(graph.nodes - graph.latent)
+    stray = graph.selection - graph.nodes
+    if stray:
+        raise ValueError(f"selection names not in the graph: {', '.join(sorted(stray))}")
+    overlap = graph.selection & graph.latent
+    if overlap:
+        raise ValueError(f"nodes cannot be both latent and selection: {', '.join(sorted(overlap))}")
+    selection = set(graph.selection)
+    observed = sorted(graph.nodes - graph.latent - graph.selection)
     ancestors = {v: graph.ancestors(v) for v in graph.nodes}
+    sel_closure = selection | {a for s in selection for a in ancestors[s]}
     edges: list[Edge] = []
     for x, y in combinations(observed, 2):
-        witness = ((ancestors[x] | ancestors[y]) & set(observed)) - {x, y}
-        if m_separated(graph, x, y, witness):
+        pool = (ancestors[x] | ancestors[y] | sel_closure) & (set(observed) | selection)
+        if m_separated(graph, x, y, pool - {x, y}):
             continue
-        x_mark = Mark.TAIL if x in ancestors[y] else Mark.ARROW
-        y_mark = Mark.TAIL if y in ancestors[x] else Mark.ARROW
+        x_mark = Mark.TAIL if (x in ancestors[y] or x in sel_closure) else Mark.ARROW
+        y_mark = Mark.TAIL if (y in ancestors[x] or y in sel_closure) else Mark.ARROW
         edges.append(Edge.make(x, x_mark, y, y_mark))
     out = MixedGraph(nodes=frozenset(observed), edges=frozenset(edges), kind=GraphKind.MAG)
     out.validate()
@@ -216,6 +226,12 @@ def _direct(marks: _Marks, b: str, c: str) -> bool:
     return _set(marks, c, b, Mark.ARROW) or changed
 
 
+def _undirect(marks: _Marks, a: str, b: str) -> bool:
+    """Orient ``a --- b`` over circles: a tail at both ends."""
+    changed = _set(marks, a, b, Mark.TAIL)
+    return _set(marks, b, a, Mark.TAIL) or changed
+
+
 def _is_directed(marks: _Marks, a: str, b: str) -> bool:
     """``a -> b``: a tail at a and an arrowhead at b."""
     return marks[a][b] is Mark.TAIL and marks[b][a] is Mark.ARROW
@@ -340,6 +356,94 @@ def _r4(
     return changed
 
 
+def _uncovered_circle_path(
+    marks: _Marks, adj: dict[str, list[str]], a: str, b: str
+) -> list[str] | None:
+    """The first uncovered all-circle path ``<a, c, ..., d, b>`` for R5.
+
+    Every edge on the path is o-o, every consecutive triple is unshielded,
+    the first interior node is not adjacent to ``b``, and the last is not
+    adjacent to ``a``. Depth-first over simple paths in sorted order, the
+    same argument as :func:`_uncovered_pd_reaches`: uncovered-ness belongs to
+    the realized path, so plain reachability would overclaim. Returns the
+    node list including both endpoints, or ``None``.
+    """
+
+    def circle(s: str, t: str) -> bool:
+        return marks[s][t] is Mark.CIRCLE and marks[t][s] is Mark.CIRCLE
+
+    def extend(prev: str, cur: str, used: frozenset[str]) -> list[str] | None:
+        for nxt in adj[cur]:
+            if nxt == b:
+                if b not in marks[prev] and circle(cur, b) and a not in marks[cur]:
+                    return [cur, b]
+                continue
+            if nxt in used or nxt in marks[prev] or not circle(cur, nxt):
+                continue
+            rest = extend(cur, nxt, used | {nxt})
+            if rest is not None:
+                return [cur, *rest]
+        return None
+
+    for c in adj[a]:
+        if c == b or b in marks[c] or not circle(a, c):
+            continue
+        rest = extend(a, c, frozenset({a, c}))
+        if rest is not None:
+            return [a, *rest]
+    return None
+
+
+def _r5(marks: _Marks, adj: dict[str, list[str]]) -> bool:
+    """a o-o b with an uncovered circle path <a, c, ..., d, b>, c not adjacent
+    to b and d not adjacent to a: the a-b edge and the whole path go undirected.
+
+    The first of Zhang's selection rules; it can only fire when the class
+    carries selection, so on a selection-free graph it is a no-op.
+    """
+    changed = False
+    for a in sorted(marks):
+        for b in adj[a]:
+            if a >= b:
+                continue
+            if not (marks[a][b] is Mark.CIRCLE and marks[b][a] is Mark.CIRCLE):
+                continue
+            path = _uncovered_circle_path(marks, adj, a, b)
+            if path is None:
+                continue
+            changed |= _undirect(marks, a, b)
+            for s, t in pairwise(path):
+                changed |= _undirect(marks, s, t)
+    return changed
+
+
+def _r6(marks: _Marks, adj: dict[str, list[str]]) -> bool:
+    """a --- b o-* c: a tail at b on (b, c); a and c may or may not be adjacent."""
+    changed = False
+    for b in sorted(marks):
+        if not any(marks[b][a] is Mark.TAIL and marks[a][b] is Mark.TAIL for a in adj[b]):
+            continue
+        for c in adj[b]:
+            if marks[b][c] is Mark.CIRCLE:
+                changed |= _set(marks, b, c, Mark.TAIL)
+    return changed
+
+
+def _r7(marks: _Marks, adj: dict[str, list[str]]) -> bool:
+    """a -o b o-* c, a and c non-adjacent: a tail at b on (b, c)."""
+    changed = False
+    for b in sorted(marks):
+        for a in adj[b]:
+            if not (marks[a][b] is Mark.TAIL and marks[b][a] is Mark.CIRCLE):
+                continue
+            for c in adj[b]:
+                if c == a or c in marks[a]:
+                    continue
+                if marks[b][c] is Mark.CIRCLE:
+                    changed |= _set(marks, b, c, Mark.TAIL)
+    return changed
+
+
 def _r8(marks: _Marks, adj: dict[str, list[str]]) -> bool:
     """a -> b -> c or a -o b -> c, with a o-> c: a tail at a."""
     changed = False
@@ -439,7 +543,7 @@ def fci_closure(
     *,
     discriminating: Callable[[str, str, str, str], bool | None],
 ) -> MixedGraph:
-    """Close a partially oriented graph under Zhang's rules R1 to R4 and R8 to R10.
+    """Close a partially oriented graph under Zhang's rules R1 to R10.
 
     The input carries its v-structure arrowheads (and any knowledge-seeded
     marks); circles elsewhere. Rules only ever turn a circle into a tail or
@@ -448,8 +552,12 @@ def fci_closure(
     the caller's validation. ``discriminating(d, a, b, c)`` answers R4's
     question, whether b is a collider on the discriminating path; ``None``
     skips that path. Sweeps run in sorted order until a full pass changes
-    nothing, so the closure is deterministic. Rules R5 to R7 only fire under
-    selection bias and are not implemented. Returns kind ``mixed``.
+    nothing, so the closure is deterministic. R5 to R7 are the selection
+    rules and never fire on a selection-free class; Zhang stages the rules
+    (R1 to R4, then R5 once, then R6 to R10) but every rule is individually
+    sound and marks only move circle to definite, so the joint fixpoint is
+    the same closure, which the round-trip tests hold executably. Returns
+    kind ``mixed``.
     """
     marks = _mark_maps(graph)
     adj = {n: sorted(marks[n]) for n in marks}
@@ -460,6 +568,9 @@ def fci_closure(
         changed |= _r2(marks, adj)
         changed |= _r3(marks, adj)
         changed |= _r4(marks, adj, discriminating)
+        changed |= _r5(marks, adj)
+        changed |= _r6(marks, adj)
+        changed |= _r7(marks, adj)
         changed |= _r8(marks, adj)
         changed |= _r9(marks, adj)
         changed |= _r10(marks, adj)
@@ -470,16 +581,18 @@ def fci_closure(
 
 
 def mag_of_pag(p: MixedGraph) -> MixedGraph:
-    """Extract one member MAG from a PAG (Zhang 2008).
+    """Extract one member MAG from a PAG (Zhang 2008, arrowhead augmentation).
 
-    Every ``o->`` edge becomes directed into its arrowhead, and the
+    Every ``o->`` edge becomes directed into its arrowhead, every ``-o``
+    edge becomes directed out of its tail (the circle takes the arrowhead),
+    undirected and bidirected and directed edges stay as they are, and the
     circle-circle component is oriented into a DAG that adds no unshielded
-    collider (the Dor-Tarsi extension of its undirected skeleton; for a valid
-    complete PAG that component is chordal, so the extension exists).
-    Undirected and circle-tail edges are selection artifacts and raise, as
-    does an inextricable circle component or a result that fails the MAG
-    rules. Maximality of the member is not checked here because ``is_mag``
-    does not check it; the ``is_pag`` round trip is what guards it.
+    collider (the Dor-Tarsi extension of its undirected skeleton; for a
+    valid complete PAG that component is chordal, R5 guarantees it, so the
+    extension exists). An inextricable circle component or a result that
+    fails the MAG rules raises. Maximality of the member is not checked here
+    because ``is_mag`` does not check it; the ``is_pag`` round trip is what
+    guards it.
     """
     fixed: list[Edge] = []
     circle_pairs: list[tuple[str, str]] = []
@@ -491,11 +604,10 @@ def mag_of_pag(p: MixedGraph) -> MixedGraph:
             fixed.append(Edge.make(e.u, Mark.TAIL, e.v, Mark.ARROW))
         elif cu is Mark.ARROW and cv is Mark.CIRCLE:
             fixed.append(Edge.make(e.u, Mark.ARROW, e.v, Mark.TAIL))
-        elif e.is_undirected or Mark.CIRCLE in (cu, cv):
-            raise InvalidGraphError(
-                f"edge {e.glyph()!r} only arises under selection bias, which the "
-                "PAG toolkit does not support yet"
-            )
+        elif cu is Mark.TAIL and cv is Mark.CIRCLE:
+            fixed.append(Edge.make(e.u, Mark.TAIL, e.v, Mark.ARROW))
+        elif cu is Mark.CIRCLE and cv is Mark.TAIL:
+            fixed.append(Edge.make(e.u, Mark.ARROW, e.v, Mark.TAIL))
         else:
             fixed.append(e)
     if circle_pairs:
@@ -524,10 +636,10 @@ def pag_of_mag(m: MixedGraph) -> MixedGraph:
     Same skeleton, every mark a circle; unshielded colliders copied from the
     MAG (they are class invariants); then the rule closure, with R4's
     discriminating-path question answered by the MAG's own marks. Zhang
-    (2008) proved this rule set complete without selection bias, so the
-    result carries exactly the invariant marks. The input should be maximal;
-    ``is_mag`` cannot check that, and a non-maximal input gives a PAG for the
-    wrong class.
+    (2008) proved the ten rules complete with latent confounders and
+    selection bias both, so the result carries exactly the invariant marks.
+    The input should be maximal; ``is_mag`` cannot check that, and a
+    non-maximal input gives a PAG for the wrong class.
     """
     if not m.is_mag():
         raise ValueError("pag_of_mag needs a MAG; project or validate the graph first")
@@ -558,18 +670,35 @@ def pag_of_mag(m: MixedGraph) -> MixedGraph:
     return replace(closed, kind=GraphKind.PAG)
 
 
-def mags_of_pag(p: MixedGraph, *, max_members: int | None = None) -> tuple[MixedGraph, ...]:
+def mags_of_pag(
+    p: MixedGraph, *, max_members: int | None = None, selection: bool = False
+) -> tuple[MixedGraph, ...]:
     """Every MAG in the PAG's equivalence class, in a deterministic order.
 
     Each circle mark takes a tail or an arrowhead; an assignment survives
     when it yields a valid MAG whose canonical PAG (:func:`pag_of_mag`) is
-    exactly ``p``. Exponential in the number of circle marks by design,
-    which is fine at the scale the library targets; ``max_members`` raises
-    once the count would pass it (no silent truncation). ``mag_of_pag(p)``
-    is always among the members.
+    exactly ``p``. With ``selection=False`` (the default) only the members
+    without undirected edges count: the reading every consumer that assumes
+    no selection bias quantifies over, identification among them. Pass
+    ``selection=True`` for the full Markov equivalence class, where a
+    circle-circle edge may also resolve to an undirected selection edge. A
+    PAG that itself carries selection marks (undirected or circle-tail
+    edges) has no selection-free members and raises under the default.
+    Exponential in the number of circle marks by design, which is fine at
+    the scale the library targets; ``max_members`` raises once the count
+    would pass it (no silent truncation). ``mag_of_pag(p)`` is always among
+    the members.
     """
     if not p.is_pag():
         raise ValueError("mags_of_pag needs a complete PAG; check is_pag or build with pag()")
+    if not selection:
+        for e in p.edges:
+            if e.is_undirected or {e.u_mark, e.v_mark} == {Mark.TAIL, Mark.CIRCLE}:
+                raise ValueError(
+                    f"edge {e.glyph()!r} is a selection mark, so the class has no "
+                    "selection-free members; pass selection=True to enumerate the "
+                    "full Markov equivalence class"
+                )
     slots: list[tuple[str, str]] = []
     for e in sorted(p.edges, key=lambda e: (e.u, e.v)):
         if e.u_mark is Mark.CIRCLE:
@@ -586,6 +715,8 @@ def mags_of_pag(p: MixedGraph, *, max_members: int | None = None) -> tuple[Mixed
             edges=frozenset(Edge.make(e.u, marks[e.u][e.v], e.v, marks[e.v][e.u]) for e in p.edges),
             kind=GraphKind.MAG,
         )
+        if not selection and any(e.is_undirected for e in candidate.edges):
+            continue
         if not candidate.is_mag() or pag_of_mag(candidate).edges != p.edges:
             continue
         if max_members is not None and len(found) >= max_members:
