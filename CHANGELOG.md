@@ -205,6 +205,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   routing split, conformance separates deviation from structure, the naive
   lane comparison overstates the cost of review by a factor of three, and
   the decision table recovers the planted effect.
+- Learn guide 8, process mining: the descriptive workflow on its own, in
+  three steps on a simulated fulfillment flow, with the process maps drawn
+  as real graphs (traffic-scaled arrows, counts and median gaps on every
+  arc): see the process, measure it (the waiting-versus-service split finds
+  the planted pick queue, eight hours of waiting in front of 26 minutes of
+  work), and drill into the slice that hurts, with `simplify` declaring what
+  it dropped. The process guides renumber to make room: process intelligence
+  is guide 9 and decision points is guide 10.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

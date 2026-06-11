@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Decision points: when the process picks a lane
 #
-# [Guide eight](08-process-intelligence.py) turned an event log into a map and a case
+# [Guide nine](09-process-intelligence.py) turned an event log into a map and a case
 # table. The map is honest about traffic: who hands off to whom, how often, how slow. It
 # says nothing about structure. Stare at one and you can't tell whether triage always
 # runs, whether two lanes exclude each other, or whether a rare arc is the workflow or a
@@ -22,7 +22,7 @@
 # complexity score lands on each claim at intake. Complexity drives the routing, since
 # hard claims go to review, and it drives the settlement work on its own: the hardest
 # claims carry about 24 hours more of it than the easiest. The review itself adds three
-# hours, no more. Timestamps count hours, as in guide eight. And we plant a clerical
+# hours, no more. Timestamps count hours, as in guide nine. And we plant a clerical
 # wrinkle to give the miner something to chew on: in about two percent of claims the
 # lane assignment was keyed into the system before the triage entry, so the log shows
 # those two steps out of order.
@@ -226,7 +226,7 @@ draw_lanes(remaining, reviewed)
 # apart where we planted three. The other 5.8 hours never belonged to the lane. They
 # belong to complexity, which decided the lane and brought the work along: full review
 # collects the office's hardest claims and is then billed for the difficulty it
-# attracted. It's the same arithmetic that inflated guide eight's review step, now read
+# attracted. It's the same arithmetic that inflated guide nine's review step, now read
 # off a mined decision point instead of a hand-named activity.
 #
 # ## The decision table
@@ -345,7 +345,7 @@ print(f"overlap_share: {ps.overlap_share:.2f}   flagged: {ps.flagged}")
 # pipeline prices the lane at its planted three hours where the raw gap said nearly
 # nine.
 #
-# The cautions of guide eight carry over and gain one. Adjustment closes the back doors
+# The cautions of guide nine carry over and gain one. Adjustment closes the back doors
 # the log records; a router acting on something unlogged, a gut read of the claimant,
 # leaves one open, which is [guide five](05-hidden-confounding.py)'s problem with the
 # same escape routes. Queues still entangle cases, so one claim's lane can touch its

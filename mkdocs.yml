@@ -53,8 +53,9 @@ nav:
       - 5. Hidden confounding: learn/05-hidden-confounding.py
       - 6. Discovering structure: learn/06-discovering-structure.py
       - 7. Quasi-experiments: learn/07-quasi-experiments.py
-      - 8. Process intelligence: learn/08-process-intelligence.py
-      - 9. Decision points: learn/09-decision-points.py
+      - 8. Process mining: learn/08-process-mining.py
+      - 9. Process intelligence: learn/09-process-intelligence.py
+      - 10. Decision points: learn/10-decision-points.py
   - Concepts: concepts.md
   - Guides:
       - Causal graphs: graph.md

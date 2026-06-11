@@ -8,7 +8,8 @@
 # day is in those three columns, including a fair amount it doesn't know about itself.
 #
 # Process mining grew up around this data. Its tools draw the workflow as a map, rank the
-# paths cases follow, and point at the slow ones. That pass is honest work, and it's where
+# paths cases follow, and point at the slow ones; [guide eight](08-process-mining.py)
+# walked that workflow end to end. It's honest work, and it's where
 # every process tool stops, because the next question isn't descriptive. The map can say
 # that reviewed tickets run ten hours slower. It can't say whether cutting the review
 # would save ten hours or two, and the difference is an intervention question, the same
