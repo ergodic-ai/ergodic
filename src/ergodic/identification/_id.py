@@ -54,6 +54,11 @@ class Hedge(Exception):
     proves ``P(y | do(x))`` is not a function of the observational distribution.
     The SCM bounds layer reads this object to decide where to return bounds
     instead of a point.
+
+    The witness is the ``(nodes, district)`` summary of the failing subproblem,
+    enough to mark non-identifiability and to seed the bounds. The explicit
+    minimal C-forest pair (the rooted forests of Shpitser-Pearl) is not extracted
+    yet; that is a refinement for later.
     """
 
     nodes: frozenset[str]

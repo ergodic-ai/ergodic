@@ -109,6 +109,14 @@ def latent_projection(graph: MixedGraph, keep: Iterable[str] | None = None) -> M
     ``graph`` agree on ``m_separated(A, B, Z)``. This is the ADMG projection
     the ID algorithm needs, distinct from the MAG ancestral projection
     :func:`mag_of_dag`.
+
+    The result can carry a bow as two parallel edges on one pair (``a -> b`` and
+    ``a <-> b``), which the marks model otherwise forbids. This is correct for an
+    ADMG, and the ID engine reads it through ``parents``, ``spouses``,
+    ``districts``, and ``m_separated``, all of which see both edges. A projected
+    graph is an internal ID input, not a serializable one: ``to_dict``,
+    ``to_adjacency``, and ``to_networkx`` raise on a parallel-edge pair rather
+    than drop or mangle it.
     """
     if not graph.is_admg():
         raise ValueError(

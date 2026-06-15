@@ -47,14 +47,16 @@ def _cut_outgoing(graph: MixedGraph, nodes: str | Iterable[str]) -> MixedGraph:
     The outgoing-edge mutilation, the counterpart to :func:`intervene`'s
     incoming cut. The do-calculus rule-2 condition reads separation in this
     graph; the front-door and instrument criteria use it too.
+
+    Edges are filtered directly rather than removed by pair, so a parallel-edge
+    pair from :func:`latent_projection` (a bow) keeps its bidirected edge when
+    only the directed one is cut.
     """
     cut = _as_set(nodes)
-    out = graph
-    for e in list(graph.edges):
-        pair = e.directed_pair()
-        if pair is not None and pair[0] in cut:
-            out = out.remove_edge(e.u, e.v)
-    return out
+    kept = frozenset(
+        e for e in graph.edges if (pair := e.directed_pair()) is None or pair[0] not in cut
+    )
+    return replace(graph, edges=kept)
 
 
 def induced_subgraph(graph: MixedGraph, nodes: Iterable[str]) -> MixedGraph:

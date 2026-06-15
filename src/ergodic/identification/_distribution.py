@@ -60,7 +60,9 @@ def identify_distribution(
     y = _as_set(outcome)
     x = _as_set(do)
     z = _as_set(given)
-    _validate(graph, x, y, z)
+    # An empty do-set is allowed here: P(y | do(), z) is the observational query
+    # P(y | z), which the ID engine handles (step 1 returns the marginal).
+    _validate(graph, x, y, z, allow_empty_treatment=True)
     if x & z:
         raise ValueError("the do-set and the conditioning set must be disjoint")
     if y & z:

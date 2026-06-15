@@ -329,6 +329,13 @@ def _check_positivity(problem: _Problem, joint: Factor) -> None:
     positivity failure, and the one the evaluator's silent zero-fill would bias.
     A ``given`` cell empty only because its whole covariate slice is empty carries
     no weight and is not flagged. The walk recurses into the subterms.
+
+    The guard is scoped to the treatment-conditioning terms, which covers the
+    adjustment and front-door forms shipped today. A general nested ID functional
+    can in principle divide by a pure-covariate marginal that goes to zero with
+    positive weight; that cell is not flagged here and the evaluator zero-fills
+    it. No such case is reachable in the current forms, so the guard is
+    best-effort overlap, not a proof of it.
     """
     _check_arms(problem, joint)
     _walk_conditionals(problem.functional, problem.treatment, joint)

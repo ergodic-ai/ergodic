@@ -219,7 +219,12 @@ def _p_m_given(
     features = _mediator_features(a, w)
     raw = np.column_stack([_class1_proba(model, features) for model in models])
     total = raw.sum(axis=1, keepdims=True)
-    total[total == 0.0] = 1.0
+    degenerate = (total == 0.0)[:, 0]
+    if degenerate.any():
+        # Every one-vs-rest classifier returned 0 for this cell; fall back to a
+        # uniform mediator distribution rather than an all-zero (non-unit) row.
+        raw[degenerate] = 1.0
+        total[degenerate] = float(raw.shape[1])
     return np.asarray(raw / total, dtype=np.float64)
 
 

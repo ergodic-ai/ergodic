@@ -79,9 +79,16 @@ def _validate(
     x: frozenset[str],
     y: frozenset[str],
     other: frozenset[str] = frozenset(),
+    *,
+    allow_empty_treatment: bool = False,
 ) -> None:
-    """Check treatment and outcome are nonempty and disjoint, and every name is a node."""
-    if not x:
+    """Check treatment and outcome are nonempty and disjoint, and every name is a node.
+
+    ``allow_empty_treatment`` lets the do-set be empty, for ``identify_distribution``:
+    ``P(y | do(), z)`` is the legitimate observational query ``P(y | z)``, which the
+    ID engine handles. The named-criteria callers leave it ``False``.
+    """
+    if not x and not allow_empty_treatment:
         raise ValueError("treatment must name at least one node")
     if not y:
         raise ValueError("outcome must name at least one node")
