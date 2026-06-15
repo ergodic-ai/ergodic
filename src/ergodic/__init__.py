@@ -47,6 +47,7 @@ from .graph import (
     pag,
 )
 from .identification import (
+    IDA,
     Functional,
     Hedge,
     Identification,
@@ -57,6 +58,7 @@ from .identification import (
     Ratio,
     adjustment_set,
     frontdoor_set,
+    ida,
     identify_distribution,
     identify_effect,
     instruments,
@@ -91,6 +93,7 @@ from .process import (
 __version__ = "0.0.1"
 
 __all__ = [
+    "IDA",
     "Dataset",
     "DomainKnowledge",
     "Edge",
@@ -141,6 +144,7 @@ __all__ = [
     "frontdoor_set",
     "granger",
     "hts",
+    "ida",
     "identify_distribution",
     "identify_effect",
     "instruments",

@@ -14,6 +14,7 @@ do-calculus ID algorithm on a single graph.
 The general engine is exposed too: :func:`identify_distribution` runs ID (or
 IDC) for any query and returns an :class:`IDResult` carrying the typed estimand
 :class:`Functional` (or the :class:`Hedge` witness when not identifiable).
+:func:`ida` covers an equivalence class by enumerating members.
 """
 
 from __future__ import annotations
@@ -31,9 +32,11 @@ from ._criteria import (
 from ._distribution import identify_distribution
 from ._functional import Functional, Marginal, Prob, Product, Ratio
 from ._id import Hedge, IDResult
+from ._ida import IDA, ida
 from ._record import Identification
 
 __all__ = [
+    "IDA",
     "Functional",
     "Hedge",
     "IDResult",
@@ -44,6 +47,7 @@ __all__ = [
     "Ratio",
     "adjustment_set",
     "frontdoor_set",
+    "ida",
     "identify_distribution",
     "identify_effect",
     "instruments",
