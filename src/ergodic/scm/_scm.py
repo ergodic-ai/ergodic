@@ -178,9 +178,9 @@ class SCM:
         """Observational draws of every node (read the target with :meth:`marginal`).
 
         Returns the posterior predictive of the generative model over ``n`` units;
-        the result carries the draws of the first node in topological order as a
-        summary. Use :meth:`interventional` or :meth:`counterfactual` for a query
-        on a specific node.
+        the result carries the draws of the last node in topological order (a sink)
+        as a summary. Use :meth:`marginal` to read a specific node, or
+        :meth:`interventional` / :meth:`counterfactual` for a query on one.
         """
         self._require_fit()
         self._require_continuous("sample")
@@ -211,7 +211,7 @@ class SCM:
         distribution. The view shares the fit; it does not refit.
         """
         for node in intervention:
-            self._check_node(node)
+            self._check_observable(node, "do-target")
         return InterventionView(self, dict(intervention))
 
     def interventional(
@@ -225,10 +225,10 @@ class SCM:
         ``idata``.
         """
         self._require_fit()
-        self._check_node(target)
+        self._check_observable(target, "query target")
         intervention = dict(do or {})
         for node in intervention:
-            self._check_node(node)
+            self._check_observable(node, "do-target")
         self._require_continuous("interventional")
         draws = _compose.interventional_draws(
             self._order,
@@ -264,9 +264,9 @@ class SCM:
         :class:`~ergodic.scm.CategoricalResult` (the answer is a distribution).
         """
         self._require_fit()
-        self._check_node(target)
+        self._check_observable(target, "counterfactual target")
         for node in do:
-            self._check_node(node)
+            self._check_observable(node, "do-target")
         factual = self._factual_values(units)
 
         mech = self.mechanisms[target]
@@ -280,7 +280,8 @@ class SCM:
                 parents_of_target=mech.parents,
                 seed=self._seed(5),
             )
-            cats = self.data.categories(target) or tuple(range(mech.n_categories))
+            n_cat = self._fits[target].n_categories or mech.n_categories
+            cats = self.data.categories(target) or tuple(range(n_cat))
             invertible = True
             return CategoricalResult(
                 query="counterfactual",
@@ -293,12 +294,20 @@ class SCM:
 
         if not isinstance(mech, GaussianAdditive):
             raise TypeError(f"no counterfactual for mechanism {type(mech).__name__} on {target!r}")
-        # any non-invertible (probabilistic-only) node on the path makes the
-        # counterfactual a wider posterior; flag it.
-        identified = all(
-            getattr(m, "capability", None) is not None and _is_invertible(m)
-            for m in self.mechanisms.values()
-        )
+        # The twin-network counterfactual abducts the exact structural noise, which
+        # is only valid for invertible mechanisms. A non-invertible (probabilistic-
+        # only) node would need the genuinely wider abduction posterior, which is not
+        # in the MVP; refuse rather than reuse the exact residual and mislabel the
+        # result. Every shipped mechanism is invertible, so this guards a future
+        # mechanism, not today's worlds.
+        non_invertible = sorted(n for n, m in self.mechanisms.items() if not _is_invertible(m))
+        if non_invertible:
+            raise NotImplementedError(
+                f"node(s) {non_invertible} use a non-invertible (probabilistic-only) "
+                "mechanism; non-invertible-mechanism counterfactuals (the genuinely "
+                "wider abduction posterior) are not in the MVP. Every built-in "
+                "mechanism is invertible, so this only arises for a custom mechanism"
+            )
         draws = _compose.counterfactual_continuous(
             self._order,
             self.mechanisms,
@@ -312,7 +321,7 @@ class SCM:
             query="counterfactual",
             target=target,
             kind="posterior",
-            identified=identified,
+            identified=True,
             _draws=draws,
         )
 
@@ -329,12 +338,20 @@ class SCM:
     ) -> SCMResult | Sensitivity:
         """The average treatment effect, routed through identification first.
 
-        ``identify_effect`` decides the return shape. Identified: the SCM posterior
-        plug-in contrast ``E[Y | do(X = high)] - E[Y | do(X = low)]`` (a posterior
+        ``identify_effect`` decides the return shape. Identified *by back-door
+        adjustment* (or the no-path ``"null"`` case): the SCM posterior plug-in
+        contrast ``E[Y | do(X = high)] - E[Y | do(X = low)]`` (a posterior
         :class:`~ergodic.scm.SCMResult`). Not identified: a
         :class:`~ergodic.scm.Sensitivity` (the ``b(c)`` curve over the assumed
-        confounding), so a naked point is impossible. ``engine="dml"`` is the
-        cross-fit reuse path (post-MVP; raises with a pointer for now).
+        confounding), so a naked point is impossible.
+
+        Identified by a *non*-back-door criterion (front-door, instruments, the
+        general ID functional) raises :class:`NotImplementedError`: the posterior
+        engine computes back-door adjustment only, so it would otherwise return a
+        confident wrong number for an effect it does not actually compute. Use
+        :func:`~ergodic.inference.estimate_effect`, which handles those strategies.
+        ``engine="dml"`` is the cross-fit reuse path (post-MVP; raises with a
+        pointer for now).
         """
         self._require_fit()
         self._check_node(treatment)
@@ -351,6 +368,19 @@ class SCM:
             )
         if engine != "posterior":
             raise ValueError(f"unknown engine {engine!r}; use 'posterior' or 'dml'")
+        # The posterior plug-in computes back-door g-computation only (it pm.do's on
+        # a generative model fit on each node's observed parents). For a front-door /
+        # IV / general-ID effect that fit is confounded, so it would return a
+        # confident WRONG point stamped identified=True. Gate on the strategy and
+        # raise rather than mislead; estimate_effect handles those criteria.
+        if ident.strategy not in ("adjustment", "null"):
+            raise NotImplementedError(
+                f"the effect of {treatment!r} on {outcome!r} is identified by the "
+                f"{ident.strategy!r} criterion, but the SCM posterior engine computes "
+                f"back-door adjustment only. Use estimate_effect(graph, data, "
+                f"{treatment!r}, {outcome!r}), which handles {ident.strategy}, or "
+                f"scm.ate(..., engine='dml')"
+            )
         self._require_continuous("ate")
         low, high = levels
         draws = _compose.ate_contrast(
@@ -382,8 +412,10 @@ class SCM:
         """
         x = np.asarray(self.data.matrix([treatment]).reshape(-1), dtype=np.float64)
         y = np.asarray(self.data.matrix([outcome]).reshape(-1), dtype=np.float64)
+        # both at ddof=1 so cov_xy / var_x is the consistent OLS slope (np.cov is
+        # ddof=1 by default; np.var defaults to ddof=0, the bug this fixes).
         cov_xy = float(np.cov(x, y)[0, 1])
-        var_x = float(np.var(x))
+        var_x = float(np.var(x, ddof=1))
         obstruction = (
             f"no adjustment, front-door, or instrument identifies the effect "
             f"({ident.estimand or 'not a function of the observed data alone'})"
@@ -403,6 +435,21 @@ class SCM:
         if node not in self.graph.nodes:
             nodes = sorted(self.graph.nodes)
             raise ValueError(f"unknown node {node!r}; the SCM's nodes are {nodes}")
+
+    def _check_observable(self, node: str, role: str) -> None:
+        """Reject a latent node where a fitted mechanism is required.
+
+        A latent node has no data column and no fitted mechanism (the MVP fits the
+        observed margin), so intervening on it or reading its query would fail with
+        an opaque ``KeyError`` from deep in the compose/PyMC path. Reject up front.
+        """
+        self._check_node(node)
+        if node in self.graph.latent:
+            raise ValueError(
+                f"node {node!r} is latent (no data column, no fitted mechanism), so it "
+                f"cannot be a {role}; the SCM fits the observed margin. The SCM's "
+                f"observed nodes are {list(self.observed)}"
+            )
 
     def _require_continuous(self, what: str) -> None:
         """The PyMC generative/contrast paths build only Gaussian-additive nodes."""

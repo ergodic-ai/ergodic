@@ -17,7 +17,7 @@ import sys
 import numpy as np
 import pytest
 
-from ergodic import SCM, Sensitivity, TabularData, dag, tabular
+from ergodic import SCM, Sensitivity, TabularData, dag, identify_effect, tabular
 from ergodic.scm import (
     BinaryGumbelMax,
     Capability,
@@ -55,9 +55,26 @@ def test_importing_ergodic_does_not_import_pymc() -> None:
 def test_scm_top_level_exports() -> None:
     import ergodic
 
-    for name in ("SCM", "SCMResult", "Sensitivity"):
+    # SCM core + the mechanism builders (n3): from ergodic import GaussianAdditive.
+    for name in (
+        "SCM",
+        "SCMResult",
+        "Sensitivity",
+        "GaussianAdditive",
+        "CategoricalGumbelMax",
+        "BinaryGumbelMax",
+    ):
         assert name in ergodic.__all__
         assert hasattr(ergodic, name)
+
+
+def test_mechanism_builders_importable_from_top_level() -> None:
+    """The plan's "top-level exports: SCM and the mechanism builders" (n3)."""
+    from ergodic import BinaryGumbelMax as B
+    from ergodic import CategoricalGumbelMax as C
+    from ergodic import GaussianAdditive as G
+
+    assert (GaussianAdditive, CategoricalGumbelMax, BinaryGumbelMax) == (G, C, B)
 
 
 # -- mechanism auto-assignment by schema (pure dispatch) ---------------------
@@ -123,13 +140,49 @@ def test_resolve_mechanism_unknown_name_raises() -> None:
         resolve_mechanism("wizardry", g, data, "cont")
 
 
-def test_resolve_mechanism_instance_passthrough_fills_parents() -> None:
+def test_resolve_mechanism_instance_fills_parents_immutably() -> None:
+    """A blank mechanism is filled into a NEW instance; the caller's spec is untouched.
+
+    Mechanisms are frozen value objects (M2): ``resolve_mechanism`` returns a copy
+    with name/parents filled, never mutating the passed spec, so one mechanism can
+    be reused across SCMs without cross-corruption.
+    """
     data = _toy_data()
     g = dag(["cont -> cat"])
     spec = GaussianAdditive(name="", parents=())
     out = resolve_mechanism(spec, g, data, "cont")
-    assert out is spec
+    assert out is not spec  # a copy, not the same object
     assert out.name == "cont"
+    assert spec.name == ""  # the original is unchanged
+    # an already-named, already-parented mechanism passes straight through.
+    ready = GaussianAdditive(name="cont", parents=("a",))
+    assert resolve_mechanism(ready, g, data, "cont") is ready
+
+
+def test_mechanism_is_frozen_and_resolves_independently_across_nodes() -> None:
+    """One mechanism reused under two node names yields two independent results (M2).
+
+    The frozen dataclass refuses in-place mutation, and ``resolve_mechanism``
+    returns a fresh copy per node, so two SCMs sharing one mechanism instance never
+    cross-corrupt.
+    """
+    import dataclasses
+
+    data = _toy_data()
+    g = dag(["cont -> cat", "binc -> cat"])
+    shared = GaussianAdditive(name="", parents=())
+
+    # frozen: a direct in-place mutation is refused.
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        shared.name = "cont"  # type: ignore[misc]
+
+    first = resolve_mechanism(shared, g, data, "cont")
+    second = resolve_mechanism(shared, g, data, "cat")
+    # the original is pristine; the two resolutions are independent objects.
+    assert shared.name == "" and shared.parents == ()
+    assert first.name == "cont" and first.parents == ()
+    assert second.name == "cat" and set(second.parents) == {"cont", "binc"}
+    assert first is not second is not shared
 
 
 def test_observed_parents_drops_latents() -> None:
@@ -337,3 +390,59 @@ def test_ate_dml_engine_is_stubbed_with_pointer() -> None:
     assert scm.fitted
     with pytest.raises(NotImplementedError, match="engine='dml'"):
         scm.ate("X", "Y", engine="dml")
+
+
+def test_ate_raises_on_frontdoor_identified_effect_not_a_wrong_point() -> None:
+    """C1: an effect identified by a NON-back-door criterion raises, never a point.
+
+    The front-door world U->X, U->Y, X->M, M->Y (U latent) has a KNOWN-identified
+    effect (true 1.2), but the SCM posterior plug-in computes back-door
+    g-computation only -- on the U-confounded Y~M fit it would return a confident
+    wrong number (~2.37) stamped identified=True. So the engine must refuse: it is
+    gated on the identification *strategy* and raises with a pointer to
+    estimate_effect. The raise is decidable before any MCMC.
+    """
+    graph = dag(["U -> X", "U -> Y", "X -> M", "M -> Y"], latent=["U"])
+
+    # the effect IS identified -- by front-door, not adjustment. This documents
+    # that the MVP defers a known-identified effect, not a non-identified one.
+    ident = identify_effect(graph, "X", "Y")
+    assert ident.identifiable is True
+    assert ident.strategy == "frontdoor"
+
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular({"X": rng.normal(size=n), "M": rng.normal(size=n), "Y": rng.normal(size=n)})
+    scm = SCM(graph, data)
+    # short-circuit only the fit gate; the strategy gate fires before any sampling.
+    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    assert scm.fitted
+    with pytest.raises(NotImplementedError) as exc:
+        scm.ate("X", "Y")
+    msg = str(exc.value)
+    assert "frontdoor" in msg
+    assert "estimate_effect" in msg
+
+
+def test_latent_node_rejected_as_intervention_target() -> None:
+    """n1: do/interventional/counterfactual on a LATENT node raise clearly, not KeyError.
+
+    A latent node has no column and no fitted mechanism, so it cannot be a do-target
+    or a query target; the guard fires up front instead of an opaque KeyError from
+    deep in PyMC. ``do()`` needs no fit, so this is dep-free.
+    """
+    rng = np.random.default_rng(0)
+    data = tabular({"X": rng.normal(size=20), "Y": rng.normal(size=20)})
+    g = dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"])
+    scm = SCM(g, data)
+    # U is a graph node (so _check_node passes) but latent (so _check_observable fails).
+    assert "U" in g.nodes
+    with pytest.raises(ValueError, match="latent"):
+        scm.do({"U": 1.0})
+    # the fitted-gate guards interventional/counterfactual; the latent guard sits
+    # behind it, so drive it past the gate with a monkeypatched fit.
+    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="latent"):
+        scm.interventional("U")
+    with pytest.raises(ValueError, match="latent"):
+        scm.counterfactual({"X": [0.0], "Y": [0.0]}, {"X": 1.0}, "U")

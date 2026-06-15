@@ -8,12 +8,16 @@ estimators emit (:class:`~ergodic.inference.EffectEstimate`): ``mean``, ``draws`
 ``interval``, with the point as the degenerate one-draw case.
 
 What it adds is the honesty flag. ``identified`` is ``True`` for a query that is a
-function of the data alone (an interventional distribution that the identification
-layer certified, a counterfactual on invertible mechanisms). It is ``False`` for a
-non-invertible counterfactual: the answer is the wider abduction posterior and the
-flag says its width is the message. A *non-identified effect* never lands here at
-all; it returns a :class:`~ergodic.scm.Sensitivity`, so a naked point read is
-impossible by construction.
+function of the data alone: an interventional distribution that the identification
+layer certified, or a counterfactual on invertible mechanisms. In the MVP every
+query that reaches an :class:`SCMResult` is identified -- the back-door effect, the
+interventional distribution, and the exact invertible counterfactual (the MVP
+refuses a non-invertible-mechanism counterfactual rather than return a result). The
+flag is carried for the post-MVP wider-abduction counterfactual, where ``False``
+will mean the answer is the wider posterior and its width is the message. A
+*non-identified effect* never lands here at all; it returns a
+:class:`~ergodic.scm.Sensitivity`, so a naked point read is impossible by
+construction.
 """
 
 from __future__ import annotations
@@ -77,7 +81,7 @@ class SCMResult:
         return (lo, hi)
 
     def __repr__(self) -> str:
-        flag = "identified" if self.identified else "not identified (width is the message)"
+        flag = "identified" if self.identified else "not identified"
         se = self.std_error
         body = f"{self.target}={self.value:.4g}"
         if se is not None:

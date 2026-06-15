@@ -23,16 +23,24 @@ Auto-assignment reads the schema, the same dispatch
 gets :class:`GaussianAdditive` with a Bayesian-linear mean (the default), a binary
 node a :class:`BinaryGumbelMax`, a categorical node a :class:`CategoricalGumbelMax`.
 
-Overrides (increasing in power): a built-in name (``"linear"``, ``"gp"``), a
-:class:`~ergodic.inference.Learner` instance as the mean, a
-:class:`~ergodic.inference.PyMCLearner` subclass, or a raw callable that adds the
-node's RVs to a model. pymc is imported only inside the methods, never at module
-top, so the bare install never imports it (the ``PyMCLearner`` precedent).
+Overrides in the MVP are a built-in name (``"linear"``/``"gaussian"``/``"ols"`` for
+the additive Gaussian, ``"categorical"``/``"softmax"`` for the Gumbel-max
+categorical, ``"binary"``/``"logistic"`` for the binary Gumbel-max) or a
+:class:`Mechanism` instance used as is. Richer mean overrides -- a
+:class:`~ergodic.inference.Learner` instance as the mean, GP/BART built-ins, a
+:class:`~ergodic.inference.PyMCLearner` subclass, and a raw callable that adds the
+node's RVs to a model -- are planned post-MVP. pymc is imported only inside the
+methods, never at module top, so the bare install never imports it (the
+``PyMCLearner`` precedent).
+
+Mechanisms are frozen value objects, matching the repo convention: filling a
+node's name/parents from the graph returns a new instance rather than mutating the
+spec, so one mechanism can be reused across SCMs without cross-corruption.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -74,10 +82,16 @@ class FitResult:
     merged ``idata`` matches by name (the silent-mismatch footgun is avoided by
     keeping one naming scheme). ``param_means`` are the posterior means, used for
     the deterministic structural arithmetic.
+
+    ``n_categories`` carries a categorical node's fit-resolved class count (0 for a
+    continuous node). It lives here, not on the mechanism, so a mechanism stays an
+    immutable spec and ``fit`` does not mutate ``self``; query-time consumers read
+    the resolved count off the fit.
     """
 
     params: Mapping[str, Array]
     param_means: Mapping[str, Array]
+    n_categories: int = 0
 
 
 @runtime_checkable
@@ -86,11 +100,20 @@ class Mechanism(Protocol):
 
     Implementations carry the node name and its parent names and expose the four
     jobs below. The SCM holds one mechanism per node and a :class:`FitResult` per
-    mechanism after fitting.
+    mechanism after fitting. ``name`` and ``parents`` are read-only: mechanisms are
+    frozen value objects, so filling a blank node name returns a new instance
+    (:func:`resolve_mechanism`) rather than mutating in place.
     """
 
-    name: str
-    parents: tuple[str, ...]
+    @property
+    def name(self) -> str:
+        """The node this mechanism is the structural equation for."""
+        ...
+
+    @property
+    def parents(self) -> tuple[str, ...]:
+        """The node's observed parents, in the mechanism's design order."""
+        ...
 
     @property
     def capability(self) -> Capability:
@@ -120,17 +143,16 @@ def _flatten(arr: Any) -> Array:
 # -- Gaussian additive (the continuous default) ------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class GaussianAdditive:
     """Additive-noise Gaussian mechanism, ``X = b0 + w . PA + U``, ``U ~ N(0, sigma)``.
 
     The default continuous mechanism: a Bayesian-linear mean over the parents with
     a half-normal prior on the noise scale. Invertible, so its counterfactual is
-    the exact residual ``U = X - (b0 + w . PA)`` reused under the action. The mean
-    can be overridden by any :class:`~ergodic.inference.Learner`; that path stays
-    probabilistic (a non-Bayesian mean carries no parameter posterior), so it
-    answers observational and interventional queries and abducts via the residual
-    against the fitted mean.
+    the exact residual ``U = X - (b0 + w . PA)`` reused under the action. A
+    :class:`~ergodic.inference.Learner`-as-mean override (carrying no parameter
+    posterior, abducting via the residual against the fitted mean) is planned
+    post-MVP; the MVP fits the Bayesian-linear mean.
     """
 
     name: str
@@ -236,7 +258,7 @@ class GaussianAdditive:
 # -- Gumbel-max categorical / binary -----------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class CategoricalGumbelMax:
     """Categorical mechanism as Gumbel-max over softmax logits.
 
@@ -285,7 +307,6 @@ class CategoricalGumbelMax:
         y_codes = np.asarray(data.codes(self.name), dtype=np.int64)
         cats = data.categories(self.name)
         n_cat = self.n_categories or (len(cats) if cats is not None else int(y_codes.max()) + 1)
-        object.__setattr__(self, "n_categories", n_cat)
         model = self.build(x, y_codes, n_cat)
         with model:
             idata = pm.sample(
@@ -302,7 +323,7 @@ class CategoricalGumbelMax:
         if self.parents:
             params[self.weight_name] = _flatten(post[self.weight_name])
         means = {k: np.asarray(v.mean(axis=0), dtype=np.float64) for k, v in params.items()}
-        return FitResult(params=params, param_means=means)
+        return FitResult(params=params, param_means=means, n_categories=n_cat)
 
     def logits(self, fit: FitResult, parent_values: Array) -> Array:
         """The ``(n, K)`` class logits at the posterior mean."""
@@ -325,7 +346,7 @@ class CategoricalGumbelMax:
         return gumbel_max_decide(logits, gumbel)
 
 
-@dataclass
+@dataclass(frozen=True)
 class BinaryGumbelMax(CategoricalGumbelMax):
     """A binary node as a two-category Gumbel-max (the logistic mechanism).
 
@@ -380,9 +401,13 @@ def resolve_mechanism(spec: Any, graph: MixedGraph, data: Dataset, node: str) ->
     ``spec`` may be:
 
     - ``None``: auto-assign by schema (:func:`auto_mechanism`).
-    - a built-in name (``"linear"``/``"gaussian"`` for the additive Gaussian).
-    - a :class:`Mechanism` instance (used as is, with its name and parents
-      filled from the graph if blank).
+    - a built-in name (``"linear"``/``"gaussian"``/``"ols"`` for the additive
+      Gaussian, ``"categorical"``/``"softmax"`` for the Gumbel-max categorical,
+      ``"binary"``/``"logistic"`` for the binary Gumbel-max).
+    - a :class:`Mechanism` instance. Mechanisms are frozen, so this returns a copy
+      with its name and parents filled from the graph when blank (via
+      :func:`dataclasses.replace`); the caller's instance is never mutated, so one
+      mechanism can be reused across SCMs.
     """
     parents = observed_parents(graph, node)
     if spec is None:
@@ -402,12 +427,24 @@ def resolve_mechanism(spec: Any, graph: MixedGraph, data: Dataset, node: str) ->
             "'categorical', or 'binary', or pass a Mechanism instance"
         )
     if isinstance(spec, Mechanism):
-        # fill name/parents from the graph if the user left them blank
+        # fill name/parents from the graph when blank, returning a NEW instance:
+        # mechanisms are frozen value objects, so reusing one across SCMs must not
+        # cross-corrupt it. dataclasses.replace is the immutable copy-with-changes.
+        changes: dict[str, Any] = {}
         if not getattr(spec, "name", ""):
-            object.__setattr__(spec, "name", node)
+            changes["name"] = node
         if not getattr(spec, "parents", ()):
-            object.__setattr__(spec, "parents", parents)
-        return spec
+            changes["parents"] = parents
+        if not changes:
+            return spec
+        if is_dataclass(spec) and not isinstance(spec, type):
+            return replace(spec, **changes)
+        raise TypeError(
+            f"mechanism for node {node!r} is missing its name/parents and is not a "
+            "dataclass, so it cannot be filled immutably; pass a dataclass Mechanism "
+            "(GaussianAdditive/CategoricalGumbelMax/BinaryGumbelMax) with name and "
+            "parents set, or leave name/parents blank on a dataclass mechanism"
+        )
     raise TypeError(
         f"mechanism for node {node!r} must be None, a built-in name, or a "
         f"Mechanism instance; got {type(spec)!r}"

@@ -16,19 +16,19 @@ What it owns:
   scalar; after ``do(X)`` node X leaves the predictive set, so a downstream node
   is read. Posterior uncertainty rides through the merged ``idata``.
 - **Counterfactuals, the explicit-noise twin network.** Abduct the units' noise on
-  the factual graph, then predict on an action branch that reuses it. For
-  invertible mechanisms the abduction is the exact residual and the prediction is
-  deterministic numpy over the parameter posterior (machine precision, the
-  ``Y_cf = y + b(x' - x)`` anchor). For the categorical Gumbel-max node the
-  abduction is the truncated-Gumbel numpy sampler. A general (non-invertible)
-  node falls back to the batched ``observe`` + ``pm.sample`` abduction over a
-  units axis (the ~50-70x batched route).
+  the factual graph, then predict on an action branch that reuses it. The MVP
+  handles invertible mechanisms only: the additive-Gaussian abduction is the exact
+  residual and the prediction is deterministic numpy over the parameter posterior
+  (machine precision, the ``Y_cf = y + b(x' - x)`` anchor), and the categorical
+  Gumbel-max abduction is the truncated-Gumbel numpy sampler. A general
+  (non-invertible) node's counterfactual would need the genuinely wider abduction
+  posterior; that is post-MVP, so the SCM refuses it upstream rather than reuse the
+  exact-residual route.
 
 The gotchas, all handled here: ``do`` is a length-n vector; the intervened node
 leaves the predictive set; ``sample_posterior_predictive`` matches by name and is
-silent on a mismatch (one naming scheme everywhere); you cannot ``observe`` a
-``Deterministic`` (the structural form puts noise on explicit RVs); ``do`` and
-``observe`` return new models; arviz is v2 (``from_dict``).
+silent on a mismatch (one naming scheme everywhere); ``do`` returns a new model;
+arviz is v2 (``from_dict``).
 """
 
 from __future__ import annotations
@@ -369,6 +369,6 @@ def counterfactual_categorical(
     logits_cf = mech.logits(fits[target], pv_cf)
     cf_codes = mech.decide(logits_cf, gumbel)
 
-    n_cat = mech.n_categories
+    n_cat = fits[target].n_categories or mech.n_categories
     marginal = np.bincount(cf_codes, minlength=n_cat).astype(np.float64) / len(cf_codes)
     return cf_codes, marginal

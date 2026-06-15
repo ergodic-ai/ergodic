@@ -218,7 +218,7 @@ def test_gumbel_max_abduction_reconstructs_observed() -> None:
 
 
 def test_gumbel_max_counterfactual_vs_interventional_tv_small() -> None:
-    """CF and interventional marginals agree in distribution (TV ~0.008)."""
+    """CF and interventional marginals agree in distribution (TV ~0.005, pinned)."""
     scm, data = _categorical_world()
     cf = scm.counterfactual(data, {"Z": 2.0}, "C")
     assert isinstance(cf, CategoricalResult)
@@ -233,7 +233,8 @@ def test_gumbel_max_counterfactual_vs_interventional_tv_small() -> None:
     interv = np.argmax(logits_cf + fresh, axis=1)
     iv_marg = np.bincount(interv, minlength=mech.n_categories) / n
     tv = 0.5 * float(np.abs(cf.probabilities - iv_marg).sum())
-    assert tv == pytest.approx(0.008, abs=0.02)
+    # pinned to the seeded anchor 0.005 (the old abs=0.02 only asserted tv < 0.028).
+    assert tv == pytest.approx(0.005, abs=0.002)
 
 
 # -- ANCHOR: the honesty thesis (bow returns bounds) -------------------------
@@ -271,18 +272,36 @@ def test_bow_returns_sensitivity_not_a_point(bow: tuple[SCM, dict[str, float]]) 
 def test_bow_sensitivity_curve_brackets_the_truth(
     bow: tuple[SCM, dict[str, float]],
 ) -> None:
-    """b(0) is the confounded slope (~1.41); at the true confounding it recovers ~0.7."""
+    """b(0) is the confounded slope (~1.406); the truth lies on the curve, near true_c.
+
+    Two honest claims, neither slack: the no-confounding end is the confounded
+    observational slope; and the curve is the exact line whose value at the *true*
+    structural channel strength is the finite-sample 0.637 (not the population 0.7),
+    while the truth 0.7 itself is hit at the empirical balancing c, which sits right
+    beside true_c. That is what "the data cannot pin it, but the curve carries it"
+    means here.
+    """
     scm, p = bow
     res = scm.ate("X", "Y")
     assert isinstance(res, Sensitivity)
-    # b(0): assume no confounding -> the observational slope, the confounded ~1.41
-    assert res.identified_at_zero == pytest.approx(1.41, abs=0.05)
-    # at the true confounding channel strength, the curve recovers the truth ~0.7
-    assert res.at(p["true_c"]) == pytest.approx(0.7, abs=0.1)
-    # the truth lies inside the swept range; the confounded slope is the other end
+    # b(0): assume no confounding -> the observational slope, the confounded ~1.406.
+    assert res.identified_at_zero == pytest.approx(1.4056, abs=0.005)
+    # at the *true* structural confounding channel, the finite-sample curve gives
+    # 0.637 -- pinned tight, the honest value (the population truth is 0.7).
+    assert res.at(p["true_c"]) == pytest.approx(0.637, abs=0.005)
+    # the curve still passes through the population truth 0.7, at the empirical
+    # balancing channel c* = cov - 0.7 var, which lies right next to true_c=1.43.
+    x = np.asarray(scm.data.matrix(["X"]).reshape(-1))
+    y = np.asarray(scm.data.matrix(["Y"]).reshape(-1))
+    cov = float(np.cov(x, y)[0, 1])
+    var = float(np.var(x, ddof=1))
+    c_star = cov - 0.7 * var
+    assert res.at(c_star) == pytest.approx(0.7, abs=1e-6)  # exact line: hits the truth
+    assert abs(c_star - p["true_c"]) < 0.2  # and c* sits beside the true channel
+    # the truth lies inside the swept range; the confounded slope is the other end.
     lo, hi = res.range()
     assert lo <= 0.7 <= hi
-    assert hi == pytest.approx(1.41, abs=0.05)
+    assert hi == pytest.approx(1.4056, abs=0.005)
 
 
 def test_bow_ate_refuses_dml_and_returns_bounds(bow: tuple[SCM, dict[str, float]]) -> None:
