@@ -145,6 +145,42 @@ estimate_effect(g, data, "A", "Y", strategy="dml", learner="knn")
 estimate_effect(iv, data_iv, "A", "Y", strategy="pliv")    # orthogonal IV, LATE
 ```
 
+## Mediation: the direct and indirect effects
+
+A total effect splits into the part that flows through a mediator and the part that does not. `estimate_mediation` identifies the decomposition (through [`identify_mediation`](identification.md)), then estimates it by g-computation.
+
+```python
+from ergodic import dag, estimate_mediation
+
+g = dag(["X -> M", "M -> Y", "X -> Y", "W -> X", "W -> Y"])
+med = estimate_mediation(g, data, "X", "Y", "M", random_state=0)
+med.nde.value     # the natural direct effect, with a bootstrap SE
+med.nie.value     # the natural indirect effect
+med.total.value   # the total effect, nde + nie
+med.cde           # a dict: each mediator level to its controlled direct effect
+med.proportion_mediated   # nie / total, the share carried by the mediator
+```
+
+NDE, NIE, and the total each come back as a distribution-shaped `EffectEstimate`, the same surface the rest of estimation returns, so `value`, `std_error`, and `interval()` all read the same way. The estimator fits an outcome model `E[Y | x, m, w]` and a mediator model `P(m | x, w)`, plugs them into the mediation formula, and bootstraps the rows for the standard error. It is the MVP: a binary treatment, a discrete mediator, and a continuous or binary outcome. A continuous mediator raises and points at the density path, which is not built.
+
+The result carries a `Design` record naming the assumptions, the same role `Design` plays for the panel designs, because the natural effects rest on a cross-world condition no data can test (see the [identification guide](identification.md)). `proportion_mediated` is `nie / total`, flagged when the total effect is near zero, since a small denominator makes the ratio unstable.
+
+## Discrete ID: the plug-in
+
+When identification falls through to the general do-calculus algorithm (`strategy="id"`, the [identification guide](identification.md) covers when), the estimand is a typed functional with no named estimator. On discrete data it needs none: the functional is a sum-product of conditional frequencies, so the plug-in estimates each term by its empirical count and evaluates the tree. `estimate_effect` routes there automatically.
+
+```python
+from ergodic import admg, estimate_effect
+
+# the Verma graph: identifiable only through general ID
+g = admg(["A -> B", "B -> C", "C -> D", "A <-> C", "B <-> D"])
+est = estimate_effect(g, discrete_data, "A", "D", random_state=0)
+est.estimator   # 'plug_in'
+est.value       # the ATE, with a bootstrap SE
+```
+
+The guards are honest. A continuous variable in the functional raises and points at the SCM path, which does not exist yet, so `strategy="id"` is not estimable on continuous data. A non-binary treatment raises (the ATE is a two-level contrast). A zero-count stratum the formula divides by raises with the offending assignment, the discrete analog of the overlap check, rather than smoothing in silence.
+
 ## Bayesian learners and the posterior
 
 A learner can carry a posterior. A `PyMCLearner` wraps a PyMC model: you write the model, the base samples it and serves the posterior of its mean function. Drop one into a slot and the estimator returns a posterior, through the same `EffectEstimate` and the same accessors, now with `kind="posterior"`.
@@ -212,3 +248,5 @@ The panel and time-series designs have their own page. Difference-in-differences
 ## Not built yet
 
 TMLE and the orthogonal front-door. Multi-level and multi-valued treatment, and dose-response curves. Frequentist per-unit CATE intervals (the Bayesian path above gives them now; the analytic version needs per-unit standard errors). The Bayesian posterior covers the adjustment estimators, so the instrument and front-door posteriors, cross-fit Bayesian nuisances, and the joint PyMC estimators that sample the whole model come next, as does a JAX or NumPyro backend behind the same `predict_draws`. On the panel page, multi-unit synthetic control: today it runs one call per treated unit.
+
+Mediation ships the g-computation estimator for a discrete mediator. The multiply-robust, cross-fit one-step estimator (valid inference under slower nuisance rates, the same orthogonality story as DML) and the continuous-mediator density form come next. The discrete plug-in covers `strategy="id"` on categorical data; the continuous general functional waits for the SCM and its fitted mechanisms, a separate pillar.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Identification: turn a causal graph into an estimand.
+"""The named identification criteria: adjustment, front-door, and instruments.
 
 Given a graph, a treatment, and an outcome, these functions answer two questions.
 Can the interventional distribution P(Y | do(X)) be written in terms of the
@@ -37,27 +37,31 @@ the strategy is ``"null"``. Latent nodes (``graph.latent``) are unobserved, so
 they never appear in adjustment sets, mediator sets, instruments, or
 conditioning sets; class faces carry no latent designations at all.
 
-The full do-calculus ID algorithm (which decides every identifiable case on a
-single graph) is not built yet.
+When the named ladder misses on a single graph, the general do-calculus ID
+algorithm runs as the fallthrough (in :mod:`._distribution`): it decides every
+remaining case, returning the typed functional (``strategy="id"``, or a
+recognized named reduction) or the hedge that proves non-identifiability. The
+raw ID/IDC engine is exposed directly through ``identify_distribution``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .graph import (
+from ..graph import (
     GraphKind,
     Mark,
     possible_ancestors,
     possible_descendants,
     visible_edges,
 )
+from ..graph._surgery import _cut_outgoing
+from ._record import Identification
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .graph import MixedGraph
+    from ..graph import MixedGraph
 
 
 def _as_set(value: str | Iterable[str]) -> frozenset[str]:
@@ -75,9 +79,16 @@ def _validate(
     x: frozenset[str],
     y: frozenset[str],
     other: frozenset[str] = frozenset(),
+    *,
+    allow_empty_treatment: bool = False,
 ) -> None:
-    """Check treatment and outcome are nonempty and disjoint, and every name is a node."""
-    if not x:
+    """Check treatment and outcome are nonempty and disjoint, and every name is a node.
+
+    ``allow_empty_treatment`` lets the do-set be empty, for ``identify_distribution``:
+    ``P(y | do(), z)`` is the legitimate observational query ``P(y | z)``, which the
+    ID engine handles. The named-criteria callers leave it ``False``.
+    """
+    if not x and not allow_empty_treatment:
         raise ValueError("treatment must name at least one node")
     if not y:
         raise ValueError("outcome must name at least one node")
@@ -167,16 +178,6 @@ def _forbidden(graph: MixedGraph, x: frozenset[str], y: frozenset[str]) -> froze
     """Nodes a valid adjustment set must avoid: x, the causal-path nodes, and their descendants."""
     cn = _causal_nodes(graph, x, y)
     return x | cn | _descendants(graph, cn)
-
-
-def _remove_out(graph: MixedGraph, nodes: frozenset[str]) -> MixedGraph:
-    """Drop every directed edge whose source is in ``nodes``."""
-    out = graph
-    for e in list(graph.edges):
-        pair = e.directed_pair()
-        if pair is not None and pair[0] in nodes:
-            out = out.remove_edge(e.u, e.v)
-    return out
 
 
 def _proper_backdoor_graph(graph: MixedGraph, x: frozenset[str], cn: frozenset[str]) -> MixedGraph:
@@ -353,10 +354,10 @@ def is_frontdoor_set(
     if _descendants(without_m, x) & y:
         return False
     # (2) no open back-door path from x to m
-    if not _remove_out(graph, x).m_separated(x, m):
+    if not _cut_outgoing(graph, x).m_separated(x, m):
         return False
     # (3) treatment blocks every back-door path from m to y
-    return _remove_out(graph, m).m_separated(m, y, x)
+    return _cut_outgoing(graph, m).m_separated(m, y, x)
 
 
 def frontdoor_set(
@@ -418,7 +419,7 @@ def is_instrument(
         return False
     if graph.m_separated(i, x, w):  # relevance: must be associated
         return False
-    return _remove_out(graph, x).m_separated(i, y, w)  # exclusion
+    return _cut_outgoing(graph, x).m_separated(i, y, w)  # exclusion
 
 
 def instruments(
@@ -448,29 +449,6 @@ def instruments(
 
 
 # -- orchestration -----------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Identification:
-    """The result of trying to identify an effect from a graph."""
-
-    treatment: frozenset[str]
-    outcome: frozenset[str]
-    identifiable: bool
-    strategy: str  # "null", "adjustment", "frontdoor", "iv", or "none"
-    adjustment_set: frozenset[str] | None = None
-    mediators: frozenset[str] | None = None
-    instruments: tuple[tuple[str, frozenset[str]], ...] = ()
-    estimand: str = ""
-
-    def __bool__(self) -> bool:
-        return self.identifiable
-
-    def __repr__(self) -> str:
-        arrow = f"{sorted(self.treatment)} -> {sorted(self.outcome)}"
-        if not self.identifiable:
-            return f"Identification(not identifiable, {arrow})"
-        return f"Identification({self.strategy}: {self.estimand})"
 
 
 def _adjustment_formula(x: frozenset[str], y: frozenset[str], z: frozenset[str]) -> str:
@@ -585,10 +563,11 @@ def identify_effect(
                 ),
             )
 
-    return Identification(
-        x,
-        y,
-        False,
-        "none",
-        estimand="not identifiable by adjustment, front-door, or an instrument",
-    )
+    # The named ladder missed. On a single graph the general do-calculus ID
+    # algorithm decides every remaining case: it identifies (returning the
+    # functional, or a recognized named reduction) or exhibits the hedge that
+    # proves non-identifiability. The import is function-local to avoid a load
+    # cycle (the ID engine and recognition import this module's criteria).
+    from ._distribution import id_fallthrough
+
+    return id_fallthrough(graph, x, y)

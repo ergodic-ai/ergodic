@@ -18,6 +18,27 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
 
+def _reject_parallel(graph: MixedGraph, op: str) -> None:
+    """Raise if any node pair carries two edges (a bow from latent_projection).
+
+    The marks model holds one edge per pair, so serialization and adjacency
+    cannot represent a bow (a directed and a bidirected edge on one pair). A
+    projected ADMG is an internal ID input; fail loudly here instead of dropping
+    or mangling the bidirected edge. A normal ADMG or MAG with a single ``<->``
+    edge per pair is unaffected.
+    """
+    seen: set[tuple[str, str]] = set()
+    for e in graph.edges:
+        if (e.u, e.v) in seen:
+            raise ValueError(
+                f"{op} cannot represent the parallel-edge pair ({e.u!r}, {e.v!r}): "
+                "this graph carries a bow, which latent_projection can produce. The "
+                "marks model holds one edge per pair, so a projected ADMG is an "
+                "internal ID input, not a serializable graph."
+            )
+        seen.add((e.u, e.v))
+
+
 def to_networkx(graph: MixedGraph) -> Any:
     """Return a ``networkx.MultiDiGraph`` carrying the marks as edge data.
 
@@ -25,6 +46,7 @@ def to_networkx(graph: MixedGraph) -> Any:
     :func:`from_networkx` can round-trip it. Node ``latent`` and ``selection``
     flags are stored as boolean node data.
     """
+    _reject_parallel(graph, "to_networkx")
     import networkx as nx
 
     out = nx.MultiDiGraph()
@@ -74,6 +96,7 @@ def to_adjacency(
     ``matrix[i, j] == 1`` when there is a directed edge from node ``i`` to node
     ``j``. Bidirected, undirected, and circle edges are not represented here.
     """
+    _reject_parallel(graph, "to_adjacency")
     labels = order if order is not None else graph.node_list()
     index = {name: i for i, name in enumerate(labels)}
     matrix = np.zeros((len(labels), len(labels)), dtype=int)
@@ -86,6 +109,7 @@ def to_adjacency(
 
 def to_dict(graph: MixedGraph) -> dict[str, Any]:
     """Return a JSON-ready dict that :func:`from_dict` can read back."""
+    _reject_parallel(graph, "to_dict")
     return {
         "kind": graph.kind.value,
         "nodes": graph.node_list(),

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..identification import identify_effect
 from ._registry import default_target, estimator_for
+from .estimators._plugin import plugin_estimate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -47,6 +48,20 @@ def estimate(
     """
     if not identification.identifiable:
         raise ValueError(f"effect is not identifiable: {identification.estimand}")
+    if identification.strategy == "id":
+        if strategy is not None:
+            raise ValueError(
+                f"a general ID functional has no named estimator to select; got "
+                f"strategy={strategy!r}. The discrete plug-in evaluates it directly"
+            )
+        return plugin_estimate(
+            identification,
+            data,
+            target=target,
+            treated=treated,
+            random_state=random_state,
+            n_boot=n_boot,
+        )
     estimator_cls = estimator_for(identification, strategy)
     estimator = estimator_cls(
         learner, random_state=random_state, n_boot=n_boot, treated=treated, **kwargs
