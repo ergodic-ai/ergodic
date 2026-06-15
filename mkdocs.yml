@@ -56,6 +56,13 @@ nav:
       - 8. Process mining: learn/08-process-mining.py
       - 9. Process intelligence: learn/09-process-intelligence.py
       - 10. Decision points: learn/10-decision-points.py
+  - Case studies:
+      - Start here: case-studies/index.md
+      - Smoking and birthweight: case-studies/01-birthweight.py
+      - Berkeley admissions, 1973: case-studies/02-berkeley.py
+      - 401(k) eligibility and wealth: case-studies/03-pension401k.py
+      - Proposition 99 and synthetic control: case-studies/04-synthetic-control.py
+      - Discovery on a known network: case-studies/05-discovery.py
   - Concepts: concepts.md
   - Guides:
       - Causal graphs: graph.md

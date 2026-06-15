@@ -31,6 +31,7 @@ from ._design import Design
 from ._estimate import estimate, estimate_effect
 from ._estimator import CausalEstimator, Slot, Task
 from ._learner import BayesianLearner, Learner
+from ._refute import Refutation, refute_effect
 from ._registry import candidates
 from ._result import EffectEstimate
 from ._target import EffectTarget
@@ -92,6 +93,7 @@ __all__ = [
     "PyMCClassifier",
     "PyMCLearner",
     "RLearner",
+    "Refutation",
     "Slot",
     "Stratification",
     "SyntheticControlEffect",
@@ -106,5 +108,6 @@ __all__ = [
     "estimate_effect",
     "event_study",
     "interrupted_time_series",
+    "refute_effect",
     "synthetic_control",
 ]

@@ -251,6 +251,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DomainKnowledge` with variables as processes: forbids, tiers, roots, and
   sinks prune at every lag, tiers orient contemporaneous edges, self-memory
   survives, `require` validates after the run, and `confound` raises.
+- Real-world datasets (`ergodic.datasets`), the first set: sklearn-style loaders
+  that return a `Bunch` carrying the typed dataset under `data` plus its causal
+  question (treatment, outcome, confounders or instrument, and the `target` the
+  literature already measured). `load_birthweight` (maternal smoking, backdoor
+  adjustment), `load_berkeley` (the 1973 admissions table, Simpson's paradox),
+  `load_pension401k` (401(k) eligibility, double machine learning), `load_smoking`
+  (Proposition 99, synthetic control) and `load_germany` (reunification), and
+  `load_asia` / `load_earthquake` (small networks written from their papers and
+  sampled, for discovery). The bundled data ships in the wheel; provenance and
+  citations are in the NOTICE. Example scripts in `examples/` run each analysis
+  next to its known answer, and the tests check the recovery (smoking lands within
+  the placebo band at -21 packs, double ML moves the pension gap from $19.5k to
+  about $9k, the Berkeley gap reverses under department).
+- Refutation (`ergodic.inference`): `refute_effect(graph, data, treatment, outcome,
+  method=...)` stress-tests an estimate by re-running it under a perturbation and
+  returns a `Refutation`. The model-agnostic checks: `"placebo_treatment"` scrambles
+  the treatment and the effect should vanish, `"random_common_cause"` adds an
+  irrelevant covariate and the effect should hold, `"data_subset"` re-estimates on a
+  random slice. None proves an estimate right; a failure is a real warning. The
+  sharper confounder-specific sensitivity (partial R-squared, the E-value) comes
+  later. `refute_effect` and `Refutation` re-export at the top level.
+- Case studies (`docs/case-studies/`): five narrative pages that apply the tools to
+  a famous dataset and recover the number the original study published. Smoking and
+  birthweight (backdoor adjustment), the 1973 Berkeley admissions paradox (Simpson's
+  paradox), 401(k) eligibility (double machine learning), Proposition 99 (synthetic
+  control), and structure discovery on a known network. Each opens with a causal
+  balance table, shows the naive answer failing, recovers the published figure, and
+  ends with a refutation check. They execute on every docs build, so the prose and
+  the code stay in step.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments

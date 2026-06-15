@@ -12,6 +12,7 @@ Homepage: https://ergodic.ai
 
 from __future__ import annotations
 
+from . import datasets
 from .data import (
     Dataset,
     EventLog,
@@ -59,11 +60,13 @@ from .identification import (
 from .inference import (
     EffectEstimate,
     EffectTarget,
+    Refutation,
     did,
     estimate,
     estimate_effect,
     event_study,
     interrupted_time_series,
+    refute_effect,
     synthetic_control,
 )
 from .knowledge import DomainKnowledge, InconsistentKnowledgeError
@@ -96,6 +99,7 @@ __all__ = [
     "MixedGraph",
     "Ordinal",
     "PanelData",
+    "Refutation",
     "Schema",
     "SchemaInferenceWarning",
     "TabularData",
@@ -109,6 +113,7 @@ __all__ = [
     "cpdag",
     "d_separated",
     "dag",
+    "datasets",
     "decision_points",
     "decision_table",
     "did",
@@ -134,6 +139,7 @@ __all__ = [
     "pag",
     "panel",
     "process_map",
+    "refute_effect",
     "synthetic_control",
     "tabular",
     "timeseries",

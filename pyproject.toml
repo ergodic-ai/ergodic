@@ -111,9 +111,10 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# The learn notebooks: cells import where the narrative needs them (E402) and end
-# on a bare expression so the rendered notebook displays it (B018).
+# The learn notebooks and case studies: cells import where the narrative needs them
+# (E402) and end on a bare expression so the rendered notebook displays it (B018).
 "docs/learn/*.py" = ["E402", "B018"]
+"docs/case-studies/*.py" = ["E402", "B018"]
 
 [tool.mypy]
 python_version = "3.11"
