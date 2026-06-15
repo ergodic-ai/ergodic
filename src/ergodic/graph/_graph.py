@@ -357,10 +357,13 @@ class MixedGraph:
 
     # -- kind checks ---------------------------------------------------------
 
-    def is_acyclic(self) -> bool:
-        """Return ``True`` if the directed part of the graph has no cycle.
+    def _kahn(self) -> tuple[list[str], bool]:
+        """Kahn's algorithm over the directed edges: a topological order and acyclicity.
 
-        Kahn's algorithm, iterative so deep graphs do not hit the recursion limit.
+        Iterative so deep graphs do not hit the recursion limit. Ties (several
+        ready nodes) break by name, so the order is deterministic. The second
+        element is ``True`` when every node was emitted, i.e. the directed part
+        is acyclic; on a cycle the order is the prefix that could be emitted.
         """
         forward: dict[str, set[str]] = {n: set() for n in self.nodes}
         for e in self.edges:
@@ -372,16 +375,23 @@ class MixedGraph:
         for targets in forward.values():
             for nxt in targets:
                 indegree[nxt] += 1
-        ready = [n for n, degree in indegree.items() if degree == 0]
-        removed = 0
+        ready = sorted(n for n, degree in indegree.items() if degree == 0)
+        order: list[str] = []
         while ready:
-            node = ready.pop()
-            removed += 1
+            node = ready.pop(0)
+            order.append(node)
+            newly: list[str] = []
             for nxt in forward[node]:
                 indegree[nxt] -= 1
                 if indegree[nxt] == 0:
-                    ready.append(nxt)
-        return removed == len(forward)
+                    newly.append(nxt)
+            if newly:
+                ready = sorted(ready + newly)
+        return order, len(order) == len(forward)
+
+    def is_acyclic(self) -> bool:
+        """Return ``True`` if the directed part of the graph has no cycle."""
+        return self._kahn()[1]
 
     def is_dag(self) -> bool:
         """Every edge directed and no directed cycle. This check is complete."""
