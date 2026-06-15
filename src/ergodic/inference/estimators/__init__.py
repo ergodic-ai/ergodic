@@ -11,6 +11,7 @@ from ._its import ITSEffect, interrupted_time_series
 from ._iv import PLIV, TwoStageLeastSquares, Wald
 from ._meta import RLearner, XLearner
 from ._null import NullEffect
+from ._plugin import plugin_estimate
 from ._regression import OutcomeRegression
 from ._synthetic_control import SyntheticControlEffect, synthetic_control
 from ._weighting import IPW, Stratification
@@ -37,5 +38,6 @@ __all__ = [
     "did",
     "event_study",
     "interrupted_time_series",
+    "plugin_estimate",
     "synthetic_control",
 ]
