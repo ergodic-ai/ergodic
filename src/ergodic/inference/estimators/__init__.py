@@ -9,6 +9,7 @@ from ._doubly_robust import AIPW
 from ._frontdoor import TwoStageRegression
 from ._its import ITSEffect, interrupted_time_series
 from ._iv import PLIV, TwoStageLeastSquares, Wald
+from ._mediation import MediationEstimate, estimate_mediation
 from ._meta import RLearner, XLearner
 from ._null import NullEffect
 from ._plugin import plugin_estimate
@@ -26,6 +27,7 @@ __all__ = [
     "EventTimeEffect",
     "GroupTimeEffect",
     "ITSEffect",
+    "MediationEstimate",
     "NullEffect",
     "OutcomeRegression",
     "RLearner",
@@ -36,6 +38,7 @@ __all__ = [
     "Wald",
     "XLearner",
     "did",
+    "estimate_mediation",
     "event_study",
     "interrupted_time_series",
     "plugin_estimate",

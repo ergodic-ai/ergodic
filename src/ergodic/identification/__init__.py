@@ -33,6 +33,7 @@ from ._distribution import identify_distribution
 from ._functional import Functional, Marginal, Prob, Product, Ratio
 from ._id import Hedge, IDResult
 from ._ida import IDA, ida
+from ._mediation import MediationID, identify_mediation
 from ._record import Identification
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     "IDResult",
     "Identification",
     "Marginal",
+    "MediationID",
     "Prob",
     "Product",
     "Ratio",
@@ -50,6 +52,7 @@ __all__ = [
     "ida",
     "identify_distribution",
     "identify_effect",
+    "identify_mediation",
     "instruments",
     "is_frontdoor_set",
     "is_instrument",
