@@ -23,10 +23,18 @@ from ._criteria import (
     is_valid_adjustment_set,
     minimal_adjustment_set,
 )
+from ._functional import Functional, Marginal, Prob, Product, Ratio
+from ._id import Hedge
 from ._record import Identification
 
 __all__ = [
+    "Functional",
+    "Hedge",
     "Identification",
+    "Marginal",
+    "Prob",
+    "Product",
+    "Ratio",
     "adjustment_set",
     "frontdoor_set",
     "identify_effect",
