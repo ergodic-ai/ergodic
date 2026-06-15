@@ -41,6 +41,22 @@ def intervene(graph: MixedGraph, targets: str | Iterable[str]) -> MixedGraph:
     return replace(graph, edges=kept)
 
 
+def _cut_outgoing(graph: MixedGraph, nodes: str | Iterable[str]) -> MixedGraph:
+    """Drop every directed edge whose source is in ``nodes`` (the G-underline-X cut).
+
+    The outgoing-edge mutilation, the counterpart to :func:`intervene`'s
+    incoming cut. The do-calculus rule-2 condition reads separation in this
+    graph; the front-door and instrument criteria use it too.
+    """
+    cut = _as_set(nodes)
+    out = graph
+    for e in list(graph.edges):
+        pair = e.directed_pair()
+        if pair is not None and pair[0] in cut:
+            out = out.remove_edge(e.u, e.v)
+    return out
+
+
 def induced_subgraph(graph: MixedGraph, nodes: Iterable[str]) -> MixedGraph:
     """Keep only ``nodes`` and the edges among them."""
     keep = _as_set(nodes) & graph.nodes
