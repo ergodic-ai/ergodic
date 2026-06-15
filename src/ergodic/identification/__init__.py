@@ -8,7 +8,12 @@ deterministic: no data, no statistics, no estimator choices yet.
 
 The named criteria (adjustment, front-door, instruments) live in
 :mod:`._criteria`; the :class:`Identification` record in :mod:`._record`.
-:func:`identify_effect` tries them in order and reports the result.
+:func:`identify_effect` tries them in order, falling through to the general
+do-calculus ID algorithm on a single graph.
+
+The general engine is exposed too: :func:`identify_distribution` runs ID (or
+IDC) for any query and returns an :class:`IDResult` carrying the typed estimand
+:class:`Functional` (or the :class:`Hedge` witness when not identifiable).
 """
 
 from __future__ import annotations
@@ -23,13 +28,15 @@ from ._criteria import (
     is_valid_adjustment_set,
     minimal_adjustment_set,
 )
+from ._distribution import identify_distribution
 from ._functional import Functional, Marginal, Prob, Product, Ratio
-from ._id import Hedge
+from ._id import Hedge, IDResult
 from ._record import Identification
 
 __all__ = [
     "Functional",
     "Hedge",
+    "IDResult",
     "Identification",
     "Marginal",
     "Prob",
@@ -37,6 +44,7 @@ __all__ = [
     "Ratio",
     "adjustment_set",
     "frontdoor_set",
+    "identify_distribution",
     "identify_effect",
     "instruments",
     "is_frontdoor_set",

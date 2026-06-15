@@ -47,6 +47,15 @@ def estimate(
     """
     if not identification.identifiable:
         raise ValueError(f"effect is not identifiable: {identification.estimand}")
+    if identification.strategy == "id":
+        raise NotImplementedError(
+            "the effect is identified only by the general do-calculus ID algorithm, "
+            f"with the functional {identification.estimand!r}; no named estimator "
+            "consumes a general functional. The estimation paths are the discrete "
+            "plug-in (evaluating the functional over empirical conditionals on "
+            "categorical data) and the SCM's fitted mechanisms (continuous), "
+            "neither wired in yet"
+        )
     estimator_cls = estimator_for(identification, strategy)
     estimator = estimator_cls(
         learner, random_state=random_state, n_boot=n_boot, treated=treated, **kwargs

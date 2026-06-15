@@ -37,8 +37,11 @@ the strategy is ``"null"``. Latent nodes (``graph.latent``) are unobserved, so
 they never appear in adjustment sets, mediator sets, instruments, or
 conditioning sets; class faces carry no latent designations at all.
 
-The full do-calculus ID algorithm (which decides every identifiable case on a
-single graph) is not built yet.
+When the named ladder misses on a single graph, the general do-calculus ID
+algorithm runs as the fallthrough (in :mod:`._distribution`): it decides every
+remaining case, returning the typed functional (``strategy="id"``, or a
+recognized named reduction) or the hedge that proves non-identifiability. The
+raw ID/IDC engine is exposed directly through ``identify_distribution``.
 """
 
 from __future__ import annotations
@@ -553,10 +556,11 @@ def identify_effect(
                 ),
             )
 
-    return Identification(
-        x,
-        y,
-        False,
-        "none",
-        estimand="not identifiable by adjustment, front-door, or an instrument",
-    )
+    # The named ladder missed. On a single graph the general do-calculus ID
+    # algorithm decides every remaining case: it identifies (returning the
+    # functional, or a recognized named reduction) or exhibits the hedge that
+    # proves non-identifiability. The import is function-local to avoid a load
+    # cycle (the ID engine and recognition import this module's criteria).
+    from ._distribution import id_fallthrough
+
+    return id_fallthrough(graph, x, y)
