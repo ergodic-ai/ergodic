@@ -208,21 +208,35 @@ def test_backcompat_null_strategy() -> None:
 # -- A6: estimate_effect coherence -------------------------------------------
 
 
-def test_estimate_effect_raises_on_strategy_id() -> None:
-    """A strategy='id' graph cannot be estimated yet: a clear raise naming the path."""
+def test_estimate_effect_runs_the_plugin_on_strategy_id() -> None:
+    """A strategy='id' graph on discrete data now estimates through the plug-in."""
     g = _double_verma()
     rng = np.random.default_rng(0)
-    n = 200
+    n = 4000
     df = pd.DataFrame({c: rng.integers(0, 2, n) for c in ["A", "B", "C", "D"]})
     data = tabular(df, types=dict.fromkeys(["A", "B", "C", "D"], "categorical"))
+    est = estimate_effect(g, data, "A", "D", random_state=0, n_boot=50)
+    assert est.estimator == "plug_in"
+    assert est.kind == "bootstrap"
+    # independent columns: no effect, the plug-in lands near zero.
+    assert abs(est.value) < 0.1
+
+
+def test_estimate_effect_strategy_id_continuous_raises_with_scm_pointer() -> None:
+    """A strategy='id' functional over a continuous column points at the SCM path."""
+    g = _double_verma()
+    rng = np.random.default_rng(0)
+    n = 500
+    df = pd.DataFrame({c: rng.integers(0, 2, n) for c in ["A", "B", "D"]})
+    df["C"] = rng.normal(size=n)  # the mediator is continuous
+    data = tabular(
+        df, types={"A": "categorical", "B": "categorical", "D": "categorical", "C": "continuous"}
+    )
     with pytest.raises(NotImplementedError) as excinfo:
         estimate_effect(g, data, "A", "D")
     msg = str(excinfo.value)
-    assert "ID algorithm" in msg
-    assert "plug-in" in msg  # names the discrete plug-in path
-    assert "SCM" in msg  # names the SCM path
-    # the functional is named in the message
-    assert "P(" in msg
+    assert "SCM" in msg  # names the SCM path for continuous functionals
+    assert "C" in msg  # names the offending column
 
 
 # -- A5: recognition ---------------------------------------------------------
