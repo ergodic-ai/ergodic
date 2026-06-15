@@ -39,6 +39,9 @@ dependencies = [
 [project.optional-dependencies]
 # Bayesian learners (PyMCLearner). Optional: the core install never imports pymc.
 bayes = ["pymc>=5"]
+# The SCM pillar (ergodic.scm). Same pymc dependency as `bayes`, named so it
+# reads as `pip install ergodic[scm]`. The bare install never imports pymc.
+scm = ["pymc>=5"]
 
 [project.urls]
 Homepage = "https://ergodic.ai"
