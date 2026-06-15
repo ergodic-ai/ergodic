@@ -146,10 +146,142 @@ Because `estimate_effect` runs identification first, the whole bridge composes i
 `Identification` carries the outcome of `identify_effect`:
 
 - `identifiable`: whether any strategy worked (the record is truthy on this).
-- `strategy`: `"null"`, `"adjustment"`, `"frontdoor"`, `"iv"`, or `"none"`.
+- `strategy`: `"null"`, `"adjustment"`, `"frontdoor"`, `"iv"`, `"id"`, or `"none"`.
 - `adjustment_set`, `mediators`, `instruments`: filled in for the matching strategy.
 - `estimand`: a readable formula string.
+- `functional`: the typed estimand, set when `strategy` is `"id"` (the general do-calculus formula, below).
+- `hedge`: the non-identifiability witness, set when a graph is not identifiable by anything.
 
-## Not built yet
+The first four fields cover the named strategies and are unchanged. The last two ride along for the general ID algorithm, which the next section describes.
 
-The full do-calculus ID algorithm decides every identifiable case on a single graph, including ones that adjustment and the front-door miss, and it returns a general formula or a proof that no formula exists. That is the next identification piece. The front-door here is the plain three-condition criterion; the conditional front-door, where the criterion holds only given extra covariates, is a known gap. On classes, only adjustment generalizes for now: class-level front-door and instrument reasoning, and an `ida()` convenience that returns the multiset of member effects, would build on the enumerators. Estimation, turning a named strategy and its sets into a number over real data, is the step after.
+## The general ID algorithm
+
+Adjustment, the front-door, and an instrument are the three patterns people reach for, and they cover most graphs. They do not cover all of them. Some effects are identifiable only through a formula that is none of the three, and some are not identifiable at all. The do-calculus settles every case: given a single graph, it decides whether P(Y | do(X)) is a function of the observational distribution, and when it is, it writes the formula. `identify_distribution` runs that algorithm.
+
+```python
+from ergodic import admg, identify_distribution
+
+# the Verma graph: identifiable, but outside adjustment, front-door, and IV
+g = admg(["A -> B", "B -> C", "C -> D", "A <-> C", "B <-> D"])
+res = identify_distribution(g, "D", "A")
+res.identifiable          # True
+res.functional.render()   # the estimand, a sum-product of conditionals
+```
+
+This is the Shpitser-Pearl ID algorithm, complete for a single DAG or ADMG: if a formula exists, it finds one; if none exists, it proves it. The result is an `IDResult` carrying `identifiable`, the `functional` (the estimand) when it holds, and the `hedge` (the witness) when it does not. The `query` field records what you asked.
+
+An empty `do` set is allowed, and it means the observational query. `P(y | do())` is just the marginal `P(y)`, read off the joint:
+
+```python
+from ergodic import dag
+
+g = dag(["Z -> X", "Z -> Y", "X -> Y"])
+identify_distribution(g, "Y", []).render()   # 'sum_x sum_z P(X, Y, Z)', i.e. P(Y)
+```
+
+When you pass `given`, the algorithm runs IDC, the conditional version, which handles `P(y | do(x), z)`. An empty `do` with a nonempty `given` is the observational conditional `P(y | z)`.
+
+### The functional is a typed object
+
+The estimand is no longer a bare string. `identify_distribution` returns a `Functional`: a small algebra of `Prob` (a conditional term), `Product`, `Marginal` (a sum), and `Ratio`. Each one renders to the readable string you have seen all along (`functional.render()`), and the algebra exposes `free_vars()` (the variables it reads) and `simplify()` (conservative rewrites only, so two runs render the same formula). The plug-in estimator below reads the tree directly, never the string.
+
+The surface is public, so you can inspect or transform an estimand. It is also provisional: the subclasses and their fields may shift while the ID layer settles, so read through `render`, `free_vars`, and `simplify` where you can.
+
+### `identify_effect` falls through to ID
+
+You do not have to call `identify_distribution` by hand. `identify_effect` keeps its fast ladder (null, adjustment, front-door, instruments), and when all four miss on a single graph, it runs general ID as the last step. A graph that is do-calculus identifiable but outside the three named strategies now identifies through the same one call, with `strategy="id"` and the functional in hand:
+
+```python
+from ergodic import admg, identify_effect
+
+g = admg(["A -> B", "B -> C", "C -> D", "A <-> C", "B <-> D"])
+result = identify_effect(g, "A", "D")
+result.strategy             # 'id'
+result.functional is None   # False: the typed estimand is set
+result.estimand             # the same formula as a string
+```
+
+When the fallthrough recognizes a named closed form (an adjustment or front-door formula in disguise), it returns that strategy instead, so the existing estimators still consume it. You get `strategy="id"` only for the formulas that genuinely need the general path.
+
+### The hedge: the honest "not identifiable"
+
+When no formula exists, the algorithm does not shrug. It exhibits a hedge, the structural reason the effect cannot be written from observational data. The classic case is the bow: a treatment with a direct effect on the outcome and unobserved confounding on the same pair. Write it with an explicit latent confounder.
+
+```python
+from ergodic import dag, identify_distribution
+
+bow = dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"])
+res = identify_distribution(bow, "Y", "X")
+res.identifiable     # False
+res.hedge.render()   # 'not identifiable: a hedge formed by [...] and the c-component [...]'
+```
+
+Through `identify_effect`, the same graph returns `strategy="none"` with the hedge attached, so the failure reason is the do-calculus witness, not a generic "adjustment, front-door, and IV all missed":
+
+```python
+result = identify_effect(bow, "X", "Y")
+bool(result)         # False
+result.hedge.render()
+```
+
+The hedge is the object the SCM layer will read to decide where to return bounds instead of a point. That handoff is not built yet; the witness is.
+
+### Identified is not estimable
+
+A subtle point worth stating plainly. ID returning a functional means the effect is a function of the observational distribution, not that a ready estimator exists for it. The named forms (adjustment, front-door) route to today's estimators. A general `strategy="id"` functional is estimated on discrete data by the plug-in (covered in the [inference guide](inference.md)); a continuous one waits for the SCM, which does not exist yet. So do not read `strategy="id"` as "ready to estimate" on continuous data. `estimate_effect` raises a clear pointer there rather than guessing.
+
+## `ida()`: identify across a class
+
+`identify_distribution` runs on a single graph. Discovery hands back a class. `ida` bridges them: it enumerates the members of a CPDAG and runs `identify_effect` on each, returning the multiset of answers.
+
+```python
+from ergodic import dag, ida
+from ergodic.graph import cpdag_of_dag
+
+cp = cpdag_of_dag(dag(["X -> M", "M -> Y"]))   # the chain X - M - Y, nothing compelled
+res = ida(cp, "X", "Y")
+res.n_identifiable    # 3: every member identifies
+res.agree             # False: but they disagree about the effect
+res.strategies        # frozenset({'adjustment', 'null'})
+res.estimands         # the distinct formulas seen across members
+```
+
+This is the IDA pattern (Maathuis-Kalisch-Buhlmann) made first class. The `IDA` record carries `members` (the per-member `Identification`s), `n_identifiable`, `all_identifiable`, `strategies`, `estimands`, and `agree` (true when every member identifies and shares one estimand). When the class agrees, you have a single member-invariant answer; when it does not, the spread is the honest range.
+
+Scope is stated up front. A CPDAG enumerates DAG members, so full ID runs per member. A PAG or MAG member is a MAG, not a DAG, and general per-member ID over one needs a DAG realization that is not built. So on a PAG or MAG, `ida` returns the class-level adjustment answer where it applies and raises a clear "not built" for the rest, rather than pretending coverage.
+
+## Mediation
+
+A total effect splits into the part that flows through a mediator and the part that does not. `identify_mediation` decides whether that split is identifiable, for the natural direct effect (NDE), the natural indirect effect (NIE), and the controlled direct effect (CDE).
+
+```python
+from ergodic import dag, identify_mediation
+
+# X affects Y directly and through M; W confounds X with Y
+g = dag(["X -> M", "M -> Y", "X -> Y", "W -> X", "W -> Y"])
+med = identify_mediation(g, "X", "Y", "M")
+med.identifiable     # True: the natural effects identify
+med.covariates       # frozenset({'W'}): the set that makes the formula valid
+med.nde_estimand     # the NDE formula
+med.nie_estimand     # the NIE formula
+```
+
+The natural effects are identified by the mediation formula (Pearl, 2001) under a covariate set `W` of non-descendants of the treatment that meets three adjustment conditions: `W` blocks the back-doors from `X` to `Y` and from `X` to `M`, and `W` together with `X` blocks the back-doors from `M` to `Y`. `identify_mediation` searches for such a `W`, prefers the canonical one, and minimizes it.
+
+The fourth condition is the catch, and no data can check it. The natural effects are cross-world quantities: they compare a world where the mediator takes the value it would have had under one treatment against an outcome under another. That comparison rests on there being no mediator-outcome confounder that is itself affected by the treatment. `identify_mediation` states this in the result's `assumptions` every time, in words, because it is graphically certified here but untestable from data. When no valid `W` exists, the natural effects are not identifiable, the canonical case being exactly that post-treatment confounder (a recanting witness), and the result says so:
+
+```python
+# L is a mediator-outcome confounder that X itself affects
+g = dag(["X -> M", "M -> Y", "X -> L", "L -> Y", "L -> M"])
+med = identify_mediation(g, "X", "Y", "M")
+med.identifiable        # False: the cross-world obstruction
+med.cde_identifiable    # True: the controlled direct effect survives it
+```
+
+The controlled direct effect is a plainer quantity: the effect of the treatment with the mediator held fixed by intervention, `E[Y | do(x), do(m)]` contrasted across treatment levels. It is a plain interventional contrast on `{X, M}`, so it routes through the general ID engine and needs no cross-world assumption. CDE can identify when NDE and NIE do not, and the other way around, so `MediationID` tracks `cde_identifiable` and `cde_estimand` separately.
+
+To estimate a decomposition, see `estimate_mediation` in the [inference guide](inference.md).
+
+## Still ahead
+
+Path-specific effects, the general mediation case along a chosen subset of paths, identified through the recanting-witness criterion. The conditional front-door, where the criterion holds only given extra covariates, where the plain three-condition criterion misses (general ID already identifies many of these). Class-level front-door and instrument reasoning beyond the per-member `ida` route. The SCM that reads a hedge and returns bounds instead of a point.

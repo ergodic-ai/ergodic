@@ -280,6 +280,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   balance table, shows the naive answer failing, recovers the published figure, and
   ends with a refutation check. They execute on every docs build, so the prose and
   the code stay in step.
+- The general do-calculus ID algorithm (`ergodic.identification`):
+  `identify_distribution(graph, outcome, do, given=...)` runs Shpitser-Pearl ID
+  (and IDC when `given` is set) on a single DAG or ADMG, deciding whether
+  `P(outcome | do(do), given)` is identifiable and returning the estimand as a
+  typed `Functional` (the `Prob` / `Product` / `Marginal` / `Ratio` algebra, with
+  `render`, `free_vars`, and `simplify`; public but marked provisional) or the
+  `Hedge` witness when it is not. An empty `do` is the observational query.
+  `identify_effect` now falls through to general ID after its named ladder misses
+  on a single graph, so a graph that is do-calculus identifiable but outside
+  adjustment, the front-door, and instruments (the Verma graph and its kin)
+  returns `strategy="id"` with the functional set; a non-identifiable graph
+  returns `strategy="none"` with the hedge. The `Identification` record gained
+  `functional` and `hedge` fields. `ida(graph, treatment, outcome)` identifies
+  across an equivalence class: it enumerates the members of a CPDAG and runs
+  `identify_effect` per member, returning an `IDA` record (`members`,
+  `n_identifiable`, `all_identifiable`, `agree`, `strategies`, `estimands`); PAG
+  and MAG members need a DAG realization and raise a clear "not built" for the
+  general case. Held executably to the soundness-against-truth anchor (the
+  functional evaluated on random discrete worlds matches the truth) and the
+  identifiability catalog.
+- The discrete plug-in estimator (`ergodic.inference`): `estimate_effect` on a
+  discrete `strategy="id"` graph estimates the general functional directly,
+  evaluating the empirical sum-product with a bootstrap standard error. Discrete-
+  only and binary-treatment guarded, with a positivity check that raises on an
+  empty stratum the formula divides by (the discrete analog of the overlap check);
+  a continuous variable raises and points at the SCM path (not built).
+- Mediation (`ergodic.identification`, `ergodic.inference`):
+  `identify_mediation(graph, treatment, outcome, mediators)` decides the natural
+  direct and indirect effects (NDE, NIE) via a covariate set that blocks the X-Y,
+  X-M, and M-Y back-doors (the three adjustment conditions), stating the cross-
+  world assumption (no mediator-outcome confounder affected by treatment) in words
+  since no data can test it, and returns a `MediationID`. The controlled direct
+  effect (CDE) routes through the general ID engine as a plain interventional
+  contrast and can identify even when NDE and NIE do not.
+  `estimate_mediation(graph, data, treatment, outcome, mediators, ...)` is the
+  g-computation estimator: NDE, NIE, and the total effect (each a distribution-
+  shaped `EffectEstimate`), the per-level CDE, a `Design` record naming the
+  assumptions, and `proportion_mediated` (flagged when the total effect is near
+  zero). Binary treatment and a discrete mediator; held to a planted linear world
+  where NDE and NIE recover the structural coefficients.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
