@@ -74,6 +74,7 @@ nav:
       - Causal Inference: inference.md
       - Panel designs: panel.md
       - Process Intelligence: process.md
+      - Structural causal models: scm.md
   - API Reference: reference.md
 
 markdown_extensions:
