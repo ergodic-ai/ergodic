@@ -54,6 +54,10 @@ if TYPE_CHECKING:
 
     Array = npt.NDArray[np.float64]
 
+# A do-target's value: a float for a continuous node, an integer category code for a
+# categorical/binary node. Kept loose at the boundary so a caller can write do={"T": 1}.
+DoValue = float | int
+
 
 class SCM:
     """A Markovian Bayesian structural causal model over a DAG.
@@ -174,62 +178,71 @@ class SCM:
 
     # -- observational + interventional --------------------------------------
 
-    def sample(self, n: int = 1000) -> SCMResult:
+    def sample(self, n: int = 1000) -> SCMResult | CategoricalResult:
         """Observational draws of every node (read the target with :meth:`marginal`).
 
         Returns the posterior predictive of the generative model over ``n`` units;
         the result carries the draws of the last node in topological order (a sink)
-        as a summary. Use :meth:`marginal` to read a specific node, or
+        as a summary. A categorical sink returns a :class:`CategoricalResult` (the
+        per-category marginal). Use :meth:`marginal` to read a specific node, or
         :meth:`interventional` / :meth:`counterfactual` for a query on one.
         """
         self._require_fit()
-        self._require_continuous("sample")
         target = self._order[-1]
-        draws = _compose.observational_draws(
-            self._order, self.mechanisms, self._fits, target, n=n, seed=self._seed(1)
-        )
-        return SCMResult(
-            query="sample", target=target, kind="posterior", identified=True, _draws=draws
-        )
+        return self._observational(target, n=n, seed=self._seed(1))
 
-    def marginal(self, target: str, n: int = 1000) -> SCMResult:
-        """Observational posterior-predictive draws of one node."""
+    def marginal(self, target: str, n: int = 1000) -> SCMResult | CategoricalResult:
+        """Observational posterior-predictive draws of one node.
+
+        A continuous node returns an :class:`SCMResult`; a categorical/binary node a
+        :class:`CategoricalResult` (the per-category marginal), exactly as
+        :meth:`counterfactual` does for a categorical target.
+        """
         self._require_fit()
-        self._check_node(target)
-        self._require_continuous("marginal")
+        self._check_observable(target, "query target")
+        return self._observational(target, n=n, seed=self._seed(2))
+
+    def _observational(self, target: str, *, n: int, seed: int) -> SCMResult | CategoricalResult:
+        """The shared observational readout: codes-to-marginal for a categorical target."""
         draws = _compose.observational_draws(
-            self._order, self.mechanisms, self._fits, target, n=n, seed=self._seed(2)
+            self._order, self.mechanisms, self._fits, target, n=n, seed=seed
         )
+        if isinstance(self.mechanisms[target], CategoricalGumbelMax):
+            return self._categorical_result("sample", target, draws)
         return SCMResult(
             query="sample", target=target, kind="posterior", identified=True, _draws=draws
         )
 
-    def do(self, intervention: Mapping[str, float]) -> InterventionView:
+    def do(self, intervention: Mapping[str, DoValue]) -> InterventionView:
         """A lightweight intervened view of the SCM for chaining.
 
         ``scm.do({"X": 1.0}).interventional("Y")`` reads the post-intervention
-        distribution. The view shares the fit; it does not refit.
+        distribution. The view shares the fit; it does not refit. A continuous
+        do-target takes a float; a categorical/binary do-target takes its integer
+        category code.
         """
         for node in intervention:
             self._check_observable(node, "do-target")
         return InterventionView(self, dict(intervention))
 
     def interventional(
-        self, target: str, do: Mapping[str, float] | None = None, *, n: int = 2000
-    ) -> SCMResult:
+        self, target: str, do: Mapping[str, DoValue] | None = None, *, n: int = 2000
+    ) -> SCMResult | CategoricalResult:
         """``E[Y | do(X = x)]`` and its posterior, through ``pm.do``.
 
         ``do`` maps each intervened node to its value (broadcast to a length-n
-        vector internally, the verified shape gotcha). ``target`` must not be an
-        intervened node. Carries parameter-posterior uncertainty via the merged
-        ``idata``.
+        vector internally, the verified shape gotcha; an integer code for a
+        categorical/binary do-target, a float for a continuous one). ``target`` must
+        not be an intervened node. A categorical target returns a
+        :class:`CategoricalResult` (the post-intervention per-category marginal); a
+        continuous target an :class:`SCMResult`. Carries parameter-posterior
+        uncertainty via the merged ``idata``.
         """
         self._require_fit()
         self._check_observable(target, "query target")
         intervention = dict(do or {})
         for node in intervention:
             self._check_observable(node, "do-target")
-        self._require_continuous("interventional")
         draws = _compose.interventional_draws(
             self._order,
             self.mechanisms,
@@ -239,6 +252,8 @@ class SCM:
             n=n,
             seed=self._seed(3),
         )
+        if isinstance(self.mechanisms[target], CategoricalGumbelMax):
+            return self._categorical_result("interventional", target, draws)
         return SCMResult(
             query="interventional", target=target, kind="posterior", identified=True, _draws=draws
         )
@@ -271,7 +286,7 @@ class SCM:
 
         mech = self.mechanisms[target]
         if isinstance(mech, CategoricalGumbelMax):
-            codes, marginal = _compose.counterfactual_categorical(
+            codes, _ = _compose.counterfactual_categorical(
                 self.mechanisms,
                 self._fits,
                 factual,
@@ -280,17 +295,8 @@ class SCM:
                 parents_of_target=mech.parents,
                 seed=self._seed(5),
             )
-            n_cat = self._fits[target].n_categories or mech.n_categories
-            cats = self.data.categories(target) or tuple(range(n_cat))
-            invertible = True
-            return CategoricalResult(
-                query="counterfactual",
-                target=target,
-                categories=tuple(cats),
-                probabilities=marginal,
-                identified=invertible,
-                _per_unit=codes,
-            )
+            # the abducted-noise counterfactual is exact (invertible), so identified.
+            return self._categorical_result("counterfactual", target, codes, per_unit=codes)
 
         if not isinstance(mech, GaussianAdditive):
             raise TypeError(f"no counterfactual for mechanism {type(mech).__name__} on {target!r}")
@@ -316,6 +322,7 @@ class SCM:
             do,
             target,
             use_draws=use_draws,
+            seed=self._seed(6),
         )
         return SCMResult(
             query="counterfactual",
@@ -332,7 +339,7 @@ class SCM:
         treatment: str,
         outcome: str,
         *,
-        levels: tuple[float, float] = (0.0, 1.0),
+        levels: tuple[float, float] | None = None,
         engine: str = "posterior",
         n: int = 2000,
     ) -> SCMResult | Sensitivity:
@@ -345,6 +352,16 @@ class SCM:
         :class:`~ergodic.scm.Sensitivity` (the ``b(c)`` curve over the assumed
         confounding), so a naked point is impossible.
 
+        The treatment may be continuous, binary, or categorical. ``levels`` is the
+        ``(low, high)`` contrast; it defaults to ``(0.0, 1.0)`` (the two codes of a
+        binary treatment, or a unit step for a continuous one). A multi-category
+        treatment has no canonical pair, so it *requires* explicit ``levels`` (the
+        two category codes to contrast), mirroring the inference pillar's ``treated=``
+        pattern. The outcome must be numeric (a categorical outcome has no scalar
+        contrast and raises); confounders and mediators may be any type -- a
+        categorical one is sampled in the generative model, so the back-door
+        g-formula marginalizes over it correctly.
+
         Identified by a *non*-back-door criterion (front-door, instruments, the
         general ID functional) raises :class:`NotImplementedError`: the posterior
         engine computes back-door adjustment only, so it would otherwise return a
@@ -356,6 +373,13 @@ class SCM:
         self._require_fit()
         self._check_node(treatment)
         self._check_node(outcome)
+        # the outcome must be numeric: a categorical contrast is not a scalar.
+        if isinstance(self.mechanisms.get(outcome), CategoricalGumbelMax):
+            raise ValueError(
+                f"ate needs a numeric outcome; {outcome!r} is categorical/binary, which "
+                f"has no scalar contrast. Read its post-intervention distribution with "
+                f"interventional({outcome!r}, do={{{treatment!r}: ...}}) instead"
+            )
         ident = identify_effect(self.graph, treatment, outcome)
         if not ident.identifiable:
             return self._bounds(treatment, outcome, ident)
@@ -381,8 +405,7 @@ class SCM:
                 f"{treatment!r}, {outcome!r}), which handles {ident.strategy}, or "
                 f"scm.ate(..., engine='dml')"
             )
-        self._require_continuous("ate")
-        low, high = levels
+        low, high = self._ate_levels(treatment, levels)
         draws = _compose.ate_contrast(
             self._order,
             self.mechanisms,
@@ -401,6 +424,71 @@ class SCM:
             identified=True,
             diagnostics={"strategy": _strategy_code(ident.strategy)},
             _draws=draws,
+        )
+
+    def _ate_levels(
+        self, treatment: str, levels: tuple[float, float] | None
+    ) -> tuple[float, float]:
+        """Resolve the ``(low, high)`` contrast for the treatment.
+
+        A continuous or binary treatment defaults to ``(0.0, 1.0)`` (a unit step, or
+        the two binary codes). A multi-category treatment has no canonical pair, so
+        explicit ``levels`` are required; the two codes are validated against the
+        treatment's category count.
+        """
+        mech = self.mechanisms[treatment]
+        is_categorical = isinstance(mech, CategoricalGumbelMax)
+        n_cat = self._fits[treatment].n_categories or getattr(mech, "n_categories", 0)
+        multi = is_categorical and n_cat > 2
+        if levels is None:
+            if multi:
+                raise ValueError(
+                    f"treatment {treatment!r} has {n_cat} categories, which has no default "
+                    f"contrast; pass levels=(low_code, high_code) (the two category codes "
+                    f"to contrast), as the inference pillar's treated= picks one level"
+                )
+            return (0.0, 1.0)
+        low, high = levels
+        if is_categorical:
+            for lvl in (low, high):
+                code = round(float(lvl))
+                if code < 0 or code >= n_cat:
+                    raise ValueError(
+                        f"level {lvl!r} is not a category code of {treatment!r}; its codes "
+                        f"are 0..{n_cat - 1}"
+                    )
+        return (float(low), float(high))
+
+    def _categorical_result(
+        self,
+        query: str,
+        target: str,
+        codes: npt.NDArray[Any],
+        *,
+        per_unit: npt.NDArray[Any] | None = None,
+    ) -> CategoricalResult:
+        """Build a :class:`CategoricalResult` from a categorical target's code draws.
+
+        ``codes`` are the integer category draws (pooled over units and posterior
+        draws for an interventional/observational marginal, or per-unit for a
+        counterfactual). The marginal is the normalized bincount over the node's
+        resolved class count, and the category labels come from the data column when
+        named. ``per_unit`` carries genuine per-unit codes (a counterfactual) for the
+        result's ``per_unit()`` accessor; an interventional marginal leaves it ``None``.
+        Every shipped categorical mechanism is invertible, so ``identified=True``.
+        """
+        mech = self.mechanisms[target]
+        n_cat = self._fits[target].n_categories or getattr(mech, "n_categories", 0)
+        marginal = _compose.marginal_from_codes(codes, n_cat)
+        cats = self.data.categories(target) or tuple(range(n_cat))
+        pu = None if per_unit is None else np.asarray(per_unit, dtype=np.int64)
+        return CategoricalResult(
+            query=query,
+            target=target,
+            categories=tuple(cats),
+            probabilities=marginal,
+            identified=True,
+            _per_unit=pu,
         )
 
     def _bounds(self, treatment: str, outcome: str, ident: Any) -> Sensitivity:
@@ -451,16 +539,6 @@ class SCM:
                 f"observed nodes are {list(self.observed)}"
             )
 
-    def _require_continuous(self, what: str) -> None:
-        """The PyMC generative/contrast paths build only Gaussian-additive nodes."""
-        bad = [n for n, m in self.mechanisms.items() if not isinstance(m, GaussianAdditive)]
-        if bad:
-            raise NotImplementedError(
-                f"{what} over a generative model with non-Gaussian nodes "
-                f"({', '.join(sorted(bad))}) is not in the MVP; the categorical "
-                "counterfactual path is supported through counterfactual()"
-            )
-
     def _factual_values(self, units: Dataset | Mapping[str, Any]) -> dict[str, npt.NDArray[Any]]:
         """Per-node factual columns for the queried units, as numpy arrays.
 
@@ -501,18 +579,18 @@ class InterventionView:
     parent's fit. Immutable; ``do`` returns a new view.
     """
 
-    def __init__(self, scm: SCM, intervention: Mapping[str, float]) -> None:
+    def __init__(self, scm: SCM, intervention: Mapping[str, DoValue]) -> None:
         self._scm = scm
         self.intervention = dict(intervention)
 
-    def do(self, more: Mapping[str, float]) -> InterventionView:
+    def do(self, more: Mapping[str, DoValue]) -> InterventionView:
         merged = {**self.intervention, **more}
         return InterventionView(self._scm, merged)
 
-    def interventional(self, target: str, *, n: int = 2000) -> SCMResult:
+    def interventional(self, target: str, *, n: int = 2000) -> SCMResult | CategoricalResult:
         return self._scm.interventional(target, self.intervention, n=n)
 
-    def sample(self, target: str, *, n: int = 2000) -> SCMResult:
+    def sample(self, target: str, *, n: int = 2000) -> SCMResult | CategoricalResult:
         """Alias for the interventional distribution of ``target`` under the view."""
         return self._scm.interventional(target, self.intervention, n=n)
 

@@ -26,7 +26,15 @@ from ergodic.scm import (
     SCMResult,
 )
 from ergodic.scm._bounds import linear_sensitivity_curve
-from ergodic.scm._mechanism import auto_mechanism, observed_parents, resolve_mechanism
+from ergodic.scm._mechanism import (
+    FitResult,
+    auto_mechanism,
+    encode_parent_design,
+    encoded_width,
+    observed_parents,
+    parent_cardinalities,
+    resolve_mechanism,
+)
 from ergodic.scm._noise import gaussian_residual, gumbel_max_abduct, gumbel_max_decide
 
 # -- the guarded-import boundary ---------------------------------------------
@@ -446,3 +454,202 @@ def test_latent_node_rejected_as_intervention_target() -> None:
         scm.interventional("U")
     with pytest.raises(ValueError, match="latent"):
         scm.counterfactual({"X": [0.0], "Y": [0.0]}, {"X": 1.0}, "U")
+
+
+# -- mixed-parent encoding (the inference _covariate_matrix convention) -------
+
+
+def test_parent_cardinalities_reads_schema() -> None:
+    """A continuous parent is None; a discrete parent carries its category count."""
+    data = _toy_data()
+    cards = parent_cardinalities(data, ["cont", "binc", "cat"])
+    assert cards == (None, 2, 4)
+
+
+def test_encoded_width_is_drop_first_one_hot() -> None:
+    """Continuous -> 1 column, k-category -> k-1 columns (drop first), binary -> 1."""
+    # cont(None)=1, binc(2)=1, cat(4)=3  => 5
+    assert encoded_width((None, 2, 4)) == 5
+    assert encoded_width(()) == 0
+    assert encoded_width((None, None)) == 2
+
+
+def test_encode_parent_design_matches_covariate_matrix_convention() -> None:
+    """The SCM parent encoder reproduces the inference pillar's ``_covariate_matrix``.
+
+    Same drop-first one-hot for a discrete parent, continuous passes through. This
+    is the single encoding convention the fit view and the generative view share.
+    """
+    from ergodic.inference._estimator import _covariate_matrix
+
+    rng = np.random.default_rng(0)
+    n = 40
+    data = tabular(
+        {
+            "cont": rng.normal(size=n),
+            "cat": rng.integers(0, 4, size=n),
+        },
+        types={"cat": "categorical"},
+    )
+    # the SCM raw parent matrix (codes for the discrete column), then encode.
+    raw = data.matrix(["cat", "cont"])
+    cards = parent_cardinalities(data, ["cat", "cont"])
+    scm_design = encode_parent_design(raw, cards)
+    # the inference design over the same columns: cat one-hot drop-first (3 cols) +
+    # cont (1 col), in sorted-name order ("cat" then "cont").
+    inf_design = _covariate_matrix(data, ["cat", "cont"])
+    assert scm_design.shape == inf_design.shape == (n, 4)
+    assert np.allclose(scm_design, inf_design)
+
+
+def test_encode_parent_design_binary_parent_is_single_column() -> None:
+    """A binary parent is one 0/1 column (the code==1 indicator), not two."""
+    raw = np.array([[0.0], [1.0], [1.0], [0.0]])
+    enc = encode_parent_design(raw, (2,))
+    assert enc.shape == (4, 1)
+    assert enc.reshape(-1).tolist() == [0.0, 1.0, 1.0, 0.0]
+
+
+def test_mechanism_design_width_expands_for_categorical_parents() -> None:
+    """A node with a 4-category parent sizes its coefficient at the encoded width."""
+    data = _toy_data()
+    g = dag(["cont -> y", "binc -> y", "cat -> y"])
+    # add a continuous child y
+    rng = np.random.default_rng(1)
+    data2 = tabular(
+        {
+            "cont": data.column("cont"),
+            "binc": data.codes("binc"),
+            "cat": data.codes("cat"),
+            "y": rng.normal(size=data.n_rows),
+        },
+        types={"binc": "categorical", "cat": "categorical"},
+    )
+    mech = auto_mechanism(g, data2, "y")
+    assert isinstance(mech, GaussianAdditive)
+    assert mech.parent_cards == (2, 4, None)  # binc, cat, cont (sorted)
+    assert mech._design_width == 5  # 1 + 3 + 1
+
+
+# -- ATE level resolution + numeric-outcome gate (pre-MCMC, dep-free) ---------
+
+
+def _binary_treatment_scm() -> SCM:
+    """A built (unfitted) SCM with a binary treatment, fits monkeypatched."""
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular(
+        {"Z": rng.normal(size=n), "T": rng.integers(0, 2, size=n), "Y": rng.normal(size=n)},
+        types={"T": "categorical"},
+    )
+    scm = SCM(dag(["Z -> T", "Z -> Y", "T -> Y"]), data)
+    return scm
+
+
+def test_ate_categorical_outcome_raises_before_any_mcmc() -> None:
+    """ate() requires a numeric outcome; a categorical outcome raises with a pointer.
+
+    The gate fires before identification/MCMC, so it is decidable dep-free.
+    """
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular(
+        {"X": rng.normal(size=n), "Y": rng.integers(0, 3, size=n)},
+        types={"Y": "categorical"},
+    )
+    scm = SCM(dag(["X -> Y"]), data)
+    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="numeric outcome"):
+        scm.ate("X", "Y")
+
+
+def test_ate_levels_default_binary_treatment_is_zero_one() -> None:
+    """A binary treatment defaults to the (0, 1) contrast (no explicit levels needed)."""
+    scm = _binary_treatment_scm()
+    scm._fits = {n: _fake_fit(2 if n == "T" else 0) for n in scm.mechanisms}
+    assert scm._ate_levels("T", None) == (0.0, 1.0)
+
+
+def test_ate_levels_multicategory_treatment_requires_explicit_levels() -> None:
+    """A k>2 treatment has no canonical pair; levels=None raises (the treated= pattern)."""
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular(
+        {"T": rng.integers(0, 4, size=n), "Y": rng.normal(size=n)},
+        types={"T": "categorical"},
+    )
+    scm = SCM(dag(["T -> Y"]), data)
+    scm._fits = {n: _fake_fit(4 if n == "T" else 0) for n in scm.mechanisms}
+    with pytest.raises(ValueError, match="no default contrast"):
+        scm._ate_levels("T", None)
+    # an explicit valid pair resolves
+    assert scm._ate_levels("T", (1, 3)) == (1.0, 3.0)
+    # an out-of-range code raises
+    with pytest.raises(ValueError, match="not a category code"):
+        scm._ate_levels("T", (0, 9))
+
+
+def test_ate_levels_continuous_treatment_defaults_to_unit_step() -> None:
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular({"T": rng.normal(size=n), "Y": rng.normal(size=n)})
+    scm = SCM(dag(["T -> Y"]), data)
+    scm._fits = {n: _fake_fit(0) for n in scm.mechanisms}
+    assert scm._ate_levels("T", None) == (0.0, 1.0)
+    assert scm._ate_levels("T", (-2.0, 2.0)) == (-2.0, 2.0)
+
+
+def _fake_fit(n_categories: int) -> FitResult:
+    """A parameter-free FitResult carrying only a class count, for the level-resolution
+    tests that need ``_fits[node].n_categories`` without running MCMC."""
+    return FitResult(params={}, param_means={}, n_categories=n_categories)
+
+
+def test_intervention_vector_dtypes_by_node_kind() -> None:
+    """A categorical do-target pins as an int code; a continuous one as a float.
+
+    The Categorical RV is integer-valued, so a float pin would corrupt it; the
+    compose helper dtypes the do-vector to the node's kind. Dep-free (pure numpy).
+    """
+    from ergodic.scm._compose import _intervention_vector
+    from ergodic.scm._mechanism import BinaryGumbelMax, GaussianAdditive
+
+    cat = BinaryGumbelMax(name="T", parents=())
+    cont = GaussianAdditive(name="Y", parents=())
+    vt = _intervention_vector(cat, 1.0, 5)
+    vy = _intervention_vector(cont, 2.5, 5)
+    assert vt.dtype == np.int64 and vt.tolist() == [1, 1, 1, 1, 1]
+    assert vy.dtype == np.float64 and vy.tolist() == [2.5] * 5
+
+
+def test_marginal_from_codes_is_normalized_bincount() -> None:
+    from ergodic.scm._compose import marginal_from_codes
+
+    codes = np.array([0, 0, 1, 2, 2, 2])
+    marg = marginal_from_codes(codes, 3)
+    assert marg.tolist() == [2 / 6, 1 / 6, 3 / 6]
+    # empty draws -> all-zero marginal of the right length
+    assert marginal_from_codes(np.array([], dtype=np.int64), 4).tolist() == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_c1_frontdoor_gate_holds_for_a_binary_treatment() -> None:
+    """C1 is type-agnostic: a binary-treatment front-door effect still raises a pointer.
+
+    The strategy gate fires before any MCMC, so a known-identified-by-front-door
+    effect raises NotImplementedError (never a confident wrong point) even when the
+    treatment is binary. Dep-free: the raise is pre-sampler.
+    """
+    graph = dag(["U -> X", "U -> Y", "X -> M", "M -> Y"], latent=["U"])
+    assert identify_effect(graph, "X", "Y").strategy == "frontdoor"
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular(
+        {"X": rng.integers(0, 2, size=n), "M": rng.normal(size=n), "Y": rng.normal(size=n)},
+        types={"X": "categorical"},
+    )
+    scm = SCM(graph, data)
+    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    with pytest.raises(NotImplementedError) as exc:
+        scm.ate("X", "Y")
+    assert "frontdoor" in str(exc.value)
+    assert "estimate_effect" in str(exc.value)

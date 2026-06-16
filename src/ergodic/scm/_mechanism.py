@@ -124,12 +124,106 @@ class Mechanism(Protocol):
         """Fit the node on its observed parents; return the posterior."""
         ...
 
+    def generative_rv(self, nodes: Mapping[str, Any], n: int) -> Any:
+        """Add this node's RV to the active generative PyMC model, return the RV.
+
+        ``nodes`` maps each already-built parent name to its RV; the structural
+        equation reads the parents from it. Names every parameter RV with the same
+        scheme :meth:`fit` used, so the merged posterior matches by name. Called
+        inside a ``pm.Model()`` context by the compose helper.
+        """
+        ...
+
 
 def _parent_matrix(data: Dataset, parents: Sequence[str]) -> Array:
-    """The ``(n, p)`` observed parent design (codes for discrete parents)."""
+    """The ``(n, p)`` observed parent design (codes for discrete parents).
+
+    One column per parent: a continuous parent's value, a discrete parent's
+    integer code. The Gumbel-max/Gaussian mean turns this into the encoded design
+    via :func:`encode_parent_design` (one-hot for a discrete parent); this is the
+    raw, pre-encoding matrix both views start from.
+    """
     if not parents:
         return np.empty((data.n_rows, 0), dtype=np.float64)
     return np.asarray(data.matrix(list(parents)), dtype=np.float64)
+
+
+def parent_cardinalities(data: Dataset, parents: Sequence[str]) -> tuple[int | None, ...]:
+    """The per-parent category count: ``None`` for a continuous/datetime parent, ``k``
+    for a discrete one. Drives the one-hot encoding so the design is reproducible
+    from the mechanism spec alone (no dataset needed at query time)."""
+    cards: list[int | None] = []
+    for p in parents:
+        col = data.schema[p]
+        cards.append(col.cardinality if col.is_discrete else None)
+    return tuple(cards)
+
+
+def encoded_width(parent_cards: Sequence[int | None]) -> int:
+    """The encoded-design column count: 1 per continuous parent, ``k-1`` per discrete
+    parent (drop-first dummy, the :func:`~ergodic.inference._estimator._covariate_matrix`
+    convention). A binary parent contributes a single 0/1 column."""
+    width = 0
+    for card in parent_cards:
+        width += 1 if card is None else max(card - 1, 0)
+    return width
+
+
+def encode_parent_design(raw: Array, parent_cards: Sequence[int | None]) -> Array:
+    """Encode the ``(n, p)`` raw parent matrix into the ``(n, P)`` model design.
+
+    A continuous parent's column passes through; a discrete parent's integer-code
+    column expands to a drop-first one-hot block (dummies for codes ``1..k-1``).
+    This is the single encoding convention shared by every view -- the per-node
+    fit, the generative model, and the counterfactual arithmetic -- so a coefficient
+    means the same thing everywhere. Matches the estimation pillar's
+    ``_covariate_matrix`` exactly (continuous as is, discrete one-hot drop-first).
+    """
+    arr = np.asarray(raw, dtype=np.float64)
+    n = arr.shape[0]
+    if not parent_cards:
+        return np.empty((n, 0), dtype=np.float64)
+    blocks: list[Array] = []
+    for j, card in enumerate(parent_cards):
+        col = arr[:, j]
+        if card is None:
+            blocks.append(col[:, None])
+        elif card > 1:
+            codes = col.astype(np.int64)
+            onehot = (codes[:, None] == np.arange(card)[None, :]).astype(np.float64)
+            blocks.append(onehot[:, 1:])  # drop first (the reference category)
+    if not blocks:
+        return np.empty((n, 0), dtype=np.float64)
+    return np.asarray(np.hstack(blocks), dtype=np.float64)
+
+
+def encode_parents_pt(parent_rvs: Sequence[Any], parent_cards: Sequence[int | None]) -> Any:
+    """The pytensor twin of :func:`encode_parent_design`, for the generative model.
+
+    ``parent_rvs`` is the list of parent node RVs (each shape ``(n,)``) in design
+    order; returns a ``(n, P)`` pytensor design with the *identical* drop-first
+    one-hot layout. Single-sourcing the layout (this and the numpy encoder run off
+    the same ``parent_cards``) is what keeps the fit view and the generative view in
+    lockstep, so ``sample_posterior_predictive`` never matches a coefficient to a
+    differently shaped design.
+    """
+    # pm.math re-exports the pytensor ops and is the typed-Any surface the rest of
+    # the SCM uses (pytensor.tensor's own ops trip mypy's no-untyped-call); this
+    # function only runs inside a generative-model build, so pymc is already in play.
+    import pymc as pm
+
+    blocks: list[Any] = []
+    for rv, card in zip(parent_rvs, parent_cards, strict=True):
+        if card is None:
+            blocks.append(rv[:, None])
+        elif card > 1:
+            dummies = [pm.math.eq(rv, k) for k in range(1, card)]  # drop-first one-hot
+            blocks.append(pm.math.stack(dummies, axis=1).astype("float64"))
+    if not blocks:
+        # an empty (n, 0) design; n is inferred from the first parent if any exist.
+        n = parent_rvs[0].shape[0] if parent_rvs else 0
+        return pm.math.zeros((n, 0))
+    return pm.math.concatenate(blocks, axis=1)
 
 
 def _flatten(arr: Any) -> Array:
@@ -157,6 +251,7 @@ class GaussianAdditive:
 
     name: str
     parents: tuple[str, ...]
+    parent_cards: tuple[int | None, ...] = ()
     coef_prior_sd: float = 5.0
     sigma_prior_sd: float = 2.0
 
@@ -176,13 +271,28 @@ class GaussianAdditive:
     def sigma_name(self) -> str:
         return f"{self.name}__sigma"
 
+    @property
+    def _design_width(self) -> int:
+        """The encoded coefficient count, ``len(parents)`` when every parent is
+        continuous (no ``parent_cards``), else the one-hot-expanded width."""
+        if not self.parents:
+            return 0
+        if not self.parent_cards:
+            return len(self.parents)
+        return encoded_width(self.parent_cards)
+
     def build(self, x: Array, y: Array) -> Any:
-        """The per-node PyMC model: ``y ~ Normal(b0 + x . w, sigma)``."""
+        """The per-node PyMC model: ``y ~ Normal(b0 + x_encoded . w, sigma)``.
+
+        ``x`` is the raw parent matrix (codes for discrete parents); it is encoded
+        to the one-hot design here, the same encoding the generative model uses.
+        """
         import pymc as pm
 
-        _, p = x.shape
+        x_enc = encode_parent_design(x, self.parent_cards) if self.parents else x
+        _, p = x_enc.shape
         with pm.Model() as model:
-            x_data = pm.Data("__parents", x) if p else None
+            x_data = pm.Data("__parents", x_enc) if p else None
             intercept = pm.Normal(self.intercept_name, 0.0, self.coef_prior_sd)
             mean = intercept
             if p:
@@ -191,6 +301,26 @@ class GaussianAdditive:
             sigma = pm.HalfNormal(self.sigma_name, self.sigma_prior_sd)
             pm.Normal(self.name, mu=mean, sigma=sigma, observed=y)
         return model
+
+    def generative_rv(self, nodes: Mapping[str, Any], n: int) -> Any:
+        """Add this node's RV to the active generative model: ``Normal(b0 + PA . w, sigma)``.
+
+        ``nodes`` maps each (already-built) parent name to its RV. Parents are
+        encoded by the shared pytensor encoder, so the design matches the fit view
+        column for column; the RV names match the merged posterior exactly, so
+        ``sample_posterior_predictive`` reads the fitted draws.
+        """
+        import pymc as pm
+        import pytensor.tensor as pt
+
+        intercept = pm.Normal(self.intercept_name, 0.0, self.coef_prior_sd)
+        mean: Any = intercept * pt.ones((n,))
+        if self.parents:
+            design = encode_parents_pt([nodes[p] for p in self.parents], self.parent_cards)
+            coef = pm.Normal(self.coef_name, 0.0, self.coef_prior_sd, shape=self._design_width)
+            mean = mean + pm.math.dot(design, coef)
+        sigma = pm.HalfNormal(self.sigma_name, self.sigma_prior_sd)
+        return pm.Normal(self.name, mu=mean, sigma=sigma, shape=(n,))
 
     def fit(self, data: Dataset, *, draws: int, tune: int, chains: int, seed: int) -> FitResult:
         import pymc as pm
@@ -216,20 +346,28 @@ class GaussianAdditive:
         return FitResult(params=params, param_means=means)
 
     def structural_mean(self, fit: FitResult, parent_values: Array) -> Array:
-        """The mean ``b0 + w . PA`` at the posterior mean. ``(n, p)`` in, ``(n,)`` out."""
+        """The mean ``b0 + w . encode(PA)`` at the posterior mean.
+
+        ``parent_values`` is the ``(n, p)`` *raw* parent matrix (codes for discrete
+        parents); it is one-hot encoded internally, so the coefficients line up with
+        the fit. ``(n, p)`` in, ``(n,)`` out.
+        """
         intercept = float(np.asarray(fit.param_means[self.intercept_name]))
         pv = np.asarray(parent_values, dtype=np.float64)
         if not self.parents:
             return np.full(pv.shape[0], intercept)
+        design = encode_parent_design(pv, self.parent_cards)
         coef = np.asarray(fit.param_means[self.coef_name], dtype=np.float64)
-        return intercept + pv @ coef
+        return intercept + design @ coef
 
     def mean_per_draw(self, fit: FitResult, parent_values: Array) -> Array:
         """The mean per parameter-posterior draw.
 
-        ``parent_values`` is ``(S, n, p)`` (per-draw parent designs, so a
-        non-intervened parent carries its own counterfactual posterior). Returns
-        ``(S, n)``. With no parents the result is the broadcast intercept draws.
+        ``parent_values`` is the ``(S, n, p)`` *raw* per-draw parent matrix (a
+        non-intervened parent carries its own counterfactual posterior; codes for a
+        discrete parent). It is one-hot encoded per draw, so the encoded design
+        matches the ``(S, P)`` coefficient draws. Returns ``(S, n)``. With no parents
+        the result is the broadcast intercept draws.
         """
         intercept = np.asarray(fit.params[self.intercept_name], dtype=np.float64)  # (S,)
         pv = np.asarray(parent_values, dtype=np.float64)
@@ -237,12 +375,16 @@ class GaussianAdditive:
         n = pv.shape[1] if pv.ndim == 3 else pv.shape[0]
         if not self.parents:
             return np.repeat(intercept[:, None], n, axis=1)
-        coef = np.asarray(fit.params[self.coef_name], dtype=np.float64)  # (S, p)
-        # broadcast an intervened parent's singleton draw axis up to S.
+        coef = np.asarray(fit.params[self.coef_name], dtype=np.float64)  # (S, P)
+        # broadcast an intervened parent's singleton draw axis up to S, then encode
+        # each draw's raw (n, p) slice to its (n, P) one-hot design.
         if pv.shape[0] != s:
             pv = np.broadcast_to(pv, (s, n, pv.shape[2]))
-        # (S, n, p) * (S, p) summed over p -> (S, n)
-        contrib = np.einsum("snp,sp->sn", pv, coef)
+        design = np.stack(
+            [encode_parent_design(pv[d], self.parent_cards) for d in range(s)], axis=0
+        )
+        # (S, n, P) * (S, P) summed over P -> (S, n)
+        contrib = np.einsum("snp,sp->sn", design, coef)
         return np.asarray(intercept[:, None] + contrib, dtype=np.float64)
 
     def sigma(self, fit: FitResult, *, use_draws: bool) -> Array:
@@ -272,6 +414,7 @@ class CategoricalGumbelMax:
 
     name: str
     parents: tuple[str, ...]
+    parent_cards: tuple[int | None, ...] = ()
     n_categories: int = 0
     coef_prior_sd: float = 3.0
 
@@ -287,18 +430,60 @@ class CategoricalGumbelMax:
     def bias_name(self) -> str:
         return f"{self.name}__logit_b"
 
+    @property
+    def _design_width(self) -> int:
+        """The encoded weight rows: ``len(parents)`` for all-continuous parents (no
+        ``parent_cards``), else the one-hot-expanded width."""
+        if not self.parents:
+            return 0
+        if not self.parent_cards:
+            return len(self.parents)
+        return encoded_width(self.parent_cards)
+
     def build(self, x: Array, y_codes: IntArray, n_cat: int) -> Any:
         import pymc as pm
 
-        n, p = x.shape
+        x_enc = encode_parent_design(x, self.parent_cards) if self.parents else x
+        n, p = x_enc.shape
         with pm.Model() as model:
             bias = pm.Normal(self.bias_name, 0.0, self.coef_prior_sd, shape=n_cat)
             logits = bias[None, :] * np.ones((n, 1))
             if p:
                 weight = pm.Normal(self.weight_name, 0.0, self.coef_prior_sd, shape=(p, n_cat))
-                logits = logits + pm.math.dot(x, weight)
+                logits = logits + pm.math.dot(x_enc, weight)
             pm.Categorical(self.name, logit_p=logits, observed=y_codes)
         return model
+
+    def generative_rv(self, nodes: Mapping[str, Any], n: int) -> Any:
+        """Add this node's categorical RV to the active generative model.
+
+        ``logits = bias + encode(PA) . weight`` (same per-class linear form and same
+        one-hot parent encoding the fit uses), then ``pm.Categorical`` samples the
+        node forward (the Gumbel-max marginal). The RV names match the merged
+        posterior, so ``sample_posterior_predictive`` reads the fitted logits. The
+        node's resolved class count must be passed in (it lives on the fit, not the
+        spec).
+        """
+        import pymc as pm
+        import pytensor.tensor as pt
+
+        if self.n_categories <= 0:
+            raise ValueError(
+                f"categorical node {self.name!r} has an unresolved class count; the "
+                "generative model needs n_categories (read it off the fit)"
+            )
+        bias = pm.Normal(self.bias_name, 0.0, self.coef_prior_sd, shape=self.n_categories)
+        logits: Any = bias[None, :] * pt.ones((n, 1))
+        if self.parents:
+            design = encode_parents_pt([nodes[p] for p in self.parents], self.parent_cards)
+            weight = pm.Normal(
+                self.weight_name,
+                0.0,
+                self.coef_prior_sd,
+                shape=(self._design_width, self.n_categories),
+            )
+            logits = logits + pm.math.dot(design, weight)
+        return pm.Categorical(self.name, logit_p=logits, shape=(n,))
 
     def fit(self, data: Dataset, *, draws: int, tune: int, chains: int, seed: int) -> FitResult:
         import pymc as pm
@@ -326,13 +511,18 @@ class CategoricalGumbelMax:
         return FitResult(params=params, param_means=means, n_categories=n_cat)
 
     def logits(self, fit: FitResult, parent_values: Array) -> Array:
-        """The ``(n, K)`` class logits at the posterior mean."""
+        """The ``(n, K)`` class logits at the posterior mean.
+
+        ``parent_values`` is the ``(n, p)`` *raw* parent matrix (codes for discrete
+        parents); it is one-hot encoded internally so the weight rows line up.
+        """
         bias = np.asarray(fit.param_means[self.bias_name], dtype=np.float64)
         pv = np.asarray(parent_values, dtype=np.float64)
         out = np.repeat(bias[None, :], pv.shape[0], axis=0)
         if self.parents:
+            design = encode_parent_design(pv, self.parent_cards)
             weight = np.asarray(fit.param_means[self.weight_name], dtype=np.float64)
-            out = out + pv @ weight
+            out = out + design @ weight
         return np.asarray(out, dtype=np.float64)
 
     def abduct(
@@ -380,15 +570,18 @@ def auto_mechanism(graph: MixedGraph, data: Dataset, node: str) -> Mechanism:
     mechanism is consistent with how the rest of the package reads its column.
     """
     parents = observed_parents(graph, node)
+    cards = parent_cardinalities(data, parents)
     col = data.schema[node]
     if col.is_continuous:
-        return GaussianAdditive(name=node, parents=parents)
+        return GaussianAdditive(name=node, parents=parents, parent_cards=cards)
     if col.is_binary:
-        return BinaryGumbelMax(name=node, parents=parents)
+        return BinaryGumbelMax(name=node, parents=parents, parent_cards=cards)
     if col.is_discrete:
         cats = data.categories(node)
         n_cat = len(cats) if cats is not None else 0
-        return CategoricalGumbelMax(name=node, parents=parents, n_categories=n_cat)
+        return CategoricalGumbelMax(
+            name=node, parents=parents, parent_cards=cards, n_categories=n_cat
+        )
     raise ValueError(
         f"node {node!r} is {col.kind.value}; the MVP fits continuous, binary, and "
         "categorical nodes (datetime and excluded columns have no mechanism)"
@@ -410,18 +603,21 @@ def resolve_mechanism(spec: Any, graph: MixedGraph, data: Dataset, node: str) ->
       mechanism can be reused across SCMs.
     """
     parents = observed_parents(graph, node)
+    cards = parent_cardinalities(data, parents)
     if spec is None:
         return auto_mechanism(graph, data, node)
     if isinstance(spec, str):
         key = spec.lower()
         if key in ("linear", "gaussian", "gaussian_additive", "ols"):
-            return GaussianAdditive(name=node, parents=parents)
+            return GaussianAdditive(name=node, parents=parents, parent_cards=cards)
         if key in ("categorical", "softmax", "gumbel_max"):
             cats = data.categories(node)
             n_cat = len(cats) if cats is not None else 0
-            return CategoricalGumbelMax(name=node, parents=parents, n_categories=n_cat)
+            return CategoricalGumbelMax(
+                name=node, parents=parents, parent_cards=cards, n_categories=n_cat
+            )
         if key in ("binary", "logistic", "bernoulli"):
-            return BinaryGumbelMax(name=node, parents=parents)
+            return BinaryGumbelMax(name=node, parents=parents, parent_cards=cards)
         raise ValueError(
             f"unknown mechanism {spec!r} for node {node!r}; use 'linear', "
             "'categorical', or 'binary', or pass a Mechanism instance"
@@ -430,11 +626,15 @@ def resolve_mechanism(spec: Any, graph: MixedGraph, data: Dataset, node: str) ->
         # fill name/parents from the graph when blank, returning a NEW instance:
         # mechanisms are frozen value objects, so reusing one across SCMs must not
         # cross-corrupt it. dataclasses.replace is the immutable copy-with-changes.
+        # Filling parents also fills parent_cards, so the one-hot encoding stays
+        # consistent for an instance mechanism left blank.
         changes: dict[str, Any] = {}
         if not getattr(spec, "name", ""):
             changes["name"] = node
         if not getattr(spec, "parents", ()):
             changes["parents"] = parents
+            if not getattr(spec, "parent_cards", ()):
+                changes["parent_cards"] = cards
         if not changes:
             return spec
         if is_dataclass(spec) and not isinstance(spec, type):

@@ -76,41 +76,103 @@ def _merged_idata(fits: Mapping[str, FitResult]) -> Any:
     return az.from_dict({"posterior": posterior})
 
 
+def _resolved_mechanisms(
+    mechanisms: Mapping[str, Mechanism],
+    fits: Mapping[str, FitResult],
+) -> dict[str, Mechanism]:
+    """A copy of the mechanisms with each categorical node's class count filled in.
+
+    A categorical mechanism's ``n_categories`` may be unresolved on the spec (0); the
+    fit resolves it. The generative model needs it on the mechanism to size the
+    logits, so we pour the fit-resolved count back onto a copy. Single-sourcing it
+    here keeps the generative-build helper a pure function of (mechanisms, fits).
+    """
+    from dataclasses import replace
+
+    out: dict[str, Mechanism] = {}
+    for name, mech in mechanisms.items():
+        if isinstance(mech, CategoricalGumbelMax):
+            resolved = fits[name].n_categories or mech.n_categories
+            out[name] = replace(mech, n_categories=resolved)
+        else:
+            out[name] = mech
+    return out
+
+
 def _build_generative(
     order: Sequence[str],
     mechanisms: Mapping[str, Mechanism],
     n: int,
 ) -> Any:
-    """One PyMC generative model: each node ``f(parent RVs) + noise``, vector-shaped.
+    """One PyMC generative model: each node built by its own mechanism, vector-shaped.
 
-    Parameters enter as named RVs whose names match the merged posterior exactly,
-    so ``sample_posterior_predictive`` reads the fitted draws (not the prior). Only
-    the Gaussian-additive nodes contribute to this model; a categorical node's
-    interventional query goes through the numpy Gumbel-max path instead, so this
-    model is built for the continuous interventional readout.
+    Every node delegates to ``mechanism.generative_rv``: a Gaussian-additive node is
+    ``Normal(b0 + encode(PA) . w, sigma)``, a categorical/binary node is the
+    Gumbel-max ``Categorical(logit=bias + encode(PA) . w)``. Parameters enter as
+    named RVs whose names match the merged posterior exactly (the mechanism's own
+    name properties single-source them), so ``sample_posterior_predictive`` reads the
+    fitted draws, not the prior. ``pm.do`` can pin any node -- continuous to a float,
+    categorical to an integer code -- and downstream propagates through the mixed
+    graph. Categorical mechanisms must arrive with their class count resolved (see
+    :func:`_resolved_mechanisms`).
     """
     import pymc as pm
-    import pytensor.tensor as pt
 
     with pm.Model() as model:
         nodes: dict[str, Any] = {}
         for name in order:
-            mech = mechanisms[name]
-            if not isinstance(mech, GaussianAdditive):
-                raise TypeError(
-                    f"the generative interventional model handles Gaussian-additive "
-                    f"nodes; node {name!r} is {type(mech).__name__}. Use the "
-                    "counterfactual or categorical query path"
-                )
-            intercept = pm.Normal(mech.intercept_name, 0.0, mech.coef_prior_sd)
-            mean: Any = intercept * pt.ones((n,))
-            if mech.parents:
-                coef = pm.Normal(mech.coef_name, 0.0, mech.coef_prior_sd, shape=len(mech.parents))
-                for j, parent in enumerate(mech.parents):
-                    mean = mean + coef[j] * nodes[parent]
-            sigma = pm.HalfNormal(mech.sigma_name, mech.sigma_prior_sd)
-            nodes[name] = pm.Normal(name, mu=mean, sigma=sigma, shape=(n,))
+            nodes[name] = mechanisms[name].generative_rv(nodes, n)
     return model
+
+
+def _is_categorical(mech: Mechanism) -> bool:
+    return isinstance(mech, CategoricalGumbelMax)
+
+
+def _intervention_vector(mech: Mechanism, value: float, n: int) -> AnyArray:
+    """The length-n ``pm.do`` value for one node, dtyped to the node's kind.
+
+    A categorical/binary node is pinned with an integer code (the Categorical RV is
+    integer-valued, so a float pin corrupts it); a continuous node with a float. The
+    verified shape gotcha: ``pm.do`` wants a length-n vector, not a scalar.
+    """
+    if _is_categorical(mech):
+        return np.full(n, round(float(value)), dtype=np.int64)
+    return np.full(n, float(value), dtype=np.float64)
+
+
+def _read_target(ppc_predictions: Any, mech: Mechanism) -> AnyArray:
+    """Flatten a target node's PPC draws, preserving integer codes for a categorical.
+
+    A categorical target reads as integer category codes (the caller bincounts them
+    into a marginal); a continuous target as floats. The dtype is the node's, so the
+    return is an ``AnyArray`` -- the caller dispatches on the mechanism kind.
+    """
+    raw = ppc_predictions.to_numpy()
+    if _is_categorical(mech):
+        return np.asarray(raw, dtype=np.int64).reshape(-1)
+    return np.asarray(raw, dtype=np.float64).reshape(-1)
+
+
+def _ppc_target(
+    model: Any,
+    idata: Any,
+    target: str,
+    *,
+    seed: int,
+) -> Any:
+    """Run ``sample_posterior_predictive`` for ``target`` over the merged posterior."""
+    import pymc as pm
+
+    with model:
+        ppc = pm.sample_posterior_predictive(
+            idata,
+            var_names=[target],
+            predictions=True,
+            progressbar=False,
+            random_seed=seed,
+        )
+    return ppc.predictions[target]
 
 
 def interventional_draws(
@@ -122,16 +184,17 @@ def interventional_draws(
     *,
     n: int,
     seed: int,
-) -> Array:
+) -> AnyArray:
     """Draws of ``target`` under ``do``, through ``pm.do`` on the generative model.
 
     Builds the generative model, applies ``pm.do`` (each value broadcast to a
-    length-n vector, the verified shape gotcha), and reads ``target`` via
+    length-n vector, dtyped to the node's kind: an integer code for a categorical
+    do-target, a float otherwise), and reads ``target`` via
     ``sample_posterior_predictive`` over the merged posterior, so the draws carry
     parameter uncertainty. ``target`` must not be an intervened node (it leaves the
-    predictive set). Returns the flattened ``(n * S,)`` draws.
+    predictive set). A categorical target's draws are returned as integer codes (the
+    caller forms the marginal); a continuous target's as floats.
     """
-    import pymc as pm
     from pymc.model.transform.conditioning import do as pm_do
 
     if target in do:
@@ -139,20 +202,13 @@ def interventional_draws(
             f"target {target!r} is intervened on; after do() it is a constant and "
             "leaves the predictive set. Read a downstream node instead"
         )
-    model = _build_generative(order, mechanisms, n)
+    mechs = _resolved_mechanisms(mechanisms, fits)
+    model = _build_generative(order, mechs, n)
     idata = _merged_idata(fits)
-    intervention = {k: np.full(n, float(v), dtype=np.float64) for k, v in do.items()}
+    intervention = {k: _intervention_vector(mechs[k], v, n) for k, v in do.items()}
     model_do = pm_do(model, intervention)
-    with model_do:
-        ppc = pm.sample_posterior_predictive(
-            idata,
-            var_names=[target],
-            predictions=True,
-            progressbar=False,
-            random_seed=seed,
-        )
-    arr = np.asarray(ppc.predictions[target].to_numpy(), dtype=np.float64)
-    return arr.reshape(-1)
+    preds = _ppc_target(model_do, idata, target, seed=seed)
+    return _read_target(preds, mechs[target])
 
 
 def ate_contrast(
@@ -174,25 +230,21 @@ def ate_contrast(
     differences, so the contrast is a posterior whose spread is the parameter
     uncertainty (the draws line up because both interventions read the same
     ``idata`` with the same seed). This is the SCM plug-in ATE, internally
-    consistent with the simulator (one fitted object).
+    consistent with the simulator (one fitted object). The treatment may be any node
+    type (a binary/categorical level is pinned as its integer code); the outcome
+    must be a numeric (Gaussian-additive) node -- a categorical contrast has no
+    scalar difference, and the caller gates that.
     """
-    import pymc as pm
     from pymc.model.transform.conditioning import do as pm_do
 
+    mechs = _resolved_mechanisms(mechanisms, fits)
     idata = _merged_idata(fits)
 
     def per_draw_mean(level: float) -> Array:
-        model = _build_generative(order, mechanisms, n)
-        model_do = pm_do(model, {treatment: np.full(n, float(level), dtype=np.float64)})
-        with model_do:
-            ppc = pm.sample_posterior_predictive(
-                idata,
-                var_names=[outcome],
-                predictions=True,
-                progressbar=False,
-                random_seed=seed,
-            )
-        arr = np.asarray(ppc.predictions[outcome].to_numpy(), dtype=np.float64)
+        model = _build_generative(order, mechs, n)
+        model_do = pm_do(model, {treatment: _intervention_vector(mechs[treatment], level, n)})
+        preds = _ppc_target(model_do, idata, outcome, seed=seed)
+        arr = np.asarray(preds.to_numpy(), dtype=np.float64)
         # (chain, draw, n) -> mean over the unit axis, flattened over chain*draw.
         return np.asarray(arr.mean(axis=-1).reshape(-1), dtype=np.float64)
 
@@ -207,22 +259,16 @@ def observational_draws(
     *,
     n: int,
     seed: int,
-) -> Array:
-    """Posterior-predictive draws of ``target`` from the generative model (no do)."""
-    import pymc as pm
+) -> AnyArray:
+    """Posterior-predictive draws of ``target`` from the generative model (no do).
 
-    model = _build_generative(order, mechanisms, n)
+    A categorical target returns integer codes; a continuous target floats.
+    """
+    mechs = _resolved_mechanisms(mechanisms, fits)
+    model = _build_generative(order, mechs, n)
     idata = _merged_idata(fits)
-    with model:
-        ppc = pm.sample_posterior_predictive(
-            idata,
-            var_names=[target],
-            predictions=True,
-            progressbar=False,
-            random_seed=seed,
-        )
-    arr = np.asarray(ppc.predictions[target].to_numpy(), dtype=np.float64)
-    return arr.reshape(-1)
+    preds = _ppc_target(model, idata, target, seed=seed)
+    return _read_target(preds, mechs[target])
 
 
 # -- counterfactuals: the explicit-noise twin network ------------------------
@@ -237,47 +283,78 @@ def counterfactual_continuous(
     target: str,
     *,
     use_draws: bool,
+    seed: int = 0,
 ) -> Array:
-    """Exact twin-network counterfactual for invertible Gaussian-additive nodes.
+    """Twin-network counterfactual for a Gaussian-additive ``target`` over a mixed graph.
 
-    Abduct each node's residual ``U = X - f(PA)`` on the factual values, then
-    predict on the action branch (``do`` pins the intervened nodes, every other
-    node recomputes ``f(PA_cf) + U`` reusing the abducted ``U``). This is the
-    machine-precision route (the pressure-test's WAY C): no eps, no MCMC floor.
+    Abduct each node's noise on the factual values, then predict on the action
+    branch (``do`` pins the intervened nodes, every other node recomputes its
+    structural equation reusing its noise). A Gaussian node reuses the exact residual
+    ``U = X - f(PA)`` -- the machine-precision route (the pressure-test's WAY C): no
+    eps, no MCMC floor. A categorical *ancestor* reuses its abducted Gumbel and
+    re-decides ``argmax`` under shifted parent logits (so it responds to an upstream
+    intervention), at the posterior mean; the ``target`` itself must be Gaussian (a
+    categorical target uses :func:`counterfactual_categorical`).
 
-    With ``use_draws`` the prediction runs per parameter-posterior draw, so the
-    counterfactual is a distribution whose spread is ``|x' - x| * sd(b)``; the
-    factual residual is abducted at the posterior mean (the unit's exact residual
-    given the fitted mechanism). Returns the flattened draws of ``target``.
+    With ``use_draws`` the Gaussian prediction runs per parameter-posterior draw, so
+    the counterfactual is a distribution whose spread is the structural uncertainty
+    of the continuous hops; the residual is abducted at the posterior mean (the
+    unit's exact residual given the fitted mechanism). Returns the flattened draws of
+    ``target``.
     """
     factual_arr = {k: np.asarray(v, dtype=np.float64).reshape(-1) for k, v in factual.items()}
     n_units = len(next(iter(factual_arr.values())))
 
-    # abduction on the factual graph: the exact residual at the posterior mean.
-    noise: dict[str, Array] = {}
-    for name in order:
-        mech = mechanisms[name]
-        if not isinstance(mech, GaussianAdditive):
-            raise TypeError(
-                f"counterfactual_continuous handles Gaussian-additive nodes; node "
-                f"{name!r} is {type(mech).__name__}"
-            )
-        pv = _factual_parents(mech, factual_arr)
-        noise[name] = mech.abduct(fits[name], factual_arr[name], pv)
+    # The twin network over a MIXED graph: every node is abducted on the factual
+    # world, then recomputed on the action branch reusing its noise. A Gaussian node
+    # is exact (the residual reused per parameter draw). A categorical ANCESTOR (a
+    # confounder/mediator upstream of a continuous target) carries its abducted
+    # Gumbel and re-decides argmax under shifted parent logits, at the posterior mean
+    # -- so it responds correctly to an upstream do() but does not spread the
+    # categorical's own parameter uncertainty per draw (an honest MVP simplification;
+    # the continuous hop still carries full parameter uncertainty). A categorical
+    # TARGET takes the dedicated counterfactual_categorical path, not this one.
+    target_mech = mechanisms[target]
+    if not isinstance(target_mech, GaussianAdditive):
+        raise TypeError(
+            f"counterfactual_continuous needs a Gaussian-additive target; node "
+            f"{target!r} is {type(target_mech).__name__}. A categorical target uses "
+            "counterfactual_categorical"
+        )
 
-    # prediction on the action branch, reusing the abducted noise. With draws,
-    # every node is (S, n) and propagation is honestly per parameter-posterior
-    # draw, so the spread is the full structural uncertainty, not just sd(b)
-    # on the last hop. Without draws every node is (n,) at the posterior mean.
+    # abduction on the factual graph, by mechanism kind (all at the posterior mean).
+    # A categorical ancestor's Gumbel uses a deterministic per-node seed (base seed +
+    # its topological index), so the counterfactual is reproducible.
+    gauss_noise: dict[str, Array] = {}
+    gumbel_noise: dict[str, Array] = {}
+    for idx, name in enumerate(order):
+        mech = mechanisms[name]
+        pv = _factual_parents(mech, factual_arr)
+        if isinstance(mech, CategoricalGumbelMax):
+            obs_codes = np.asarray(factual_arr[name], dtype=np.int64)
+            gumbel_noise[name] = mech.abduct(fits[name], obs_codes, pv, seed=seed + idx)
+        elif isinstance(mech, GaussianAdditive):
+            gauss_noise[name] = mech.abduct(fits[name], factual_arr[name], pv)
+        else:  # pragma: no cover - every built-in mechanism is one of the two.
+            raise TypeError(f"counterfactual over node {name!r} of {type(mech).__name__}")
+
+    # prediction on the action branch. A categorical node is stored as (n,) codes
+    # (broadcast over the draw axis when use_draws); a Gaussian node as (n,) or (S, n).
     cf: dict[str, Array] = {}
     for name in order:
         mech = mechanisms[name]
-        assert isinstance(mech, GaussianAdditive)
         if name in do:
             value = float(do[name])
             cf[name] = np.full((1, n_units), value) if use_draws else np.full(n_units, value)
             continue
-        u = noise[name]
+        if isinstance(mech, CategoricalGumbelMax):
+            # re-decide at the posterior-mean logits over the counterfactual parents.
+            pv = _cf_parents(mech, cf, n_units)
+            codes = mech.decide(mech.logits(fits[name], pv), gumbel_noise[name])
+            cf[name] = codes.astype(np.float64)[None, :] if use_draws else codes.astype(np.float64)
+            continue
+        assert isinstance(mech, GaussianAdditive)
+        u = gauss_noise[name]
         if use_draws:
             pv_draws = _cf_parents_per_draw(mech, cf, n_units)
             mean = mech.mean_per_draw(fits[name], pv_draws)
@@ -296,10 +373,21 @@ def _factual_parents(mech: Mechanism, factual: Mapping[str, Array]) -> Array:
 
 
 def _cf_parents(mech: Mechanism, cf: Mapping[str, Array], n_units: int) -> Array:
-    """The ``(n, p)`` counterfactual parent design at the posterior mean."""
+    """The ``(n, p)`` counterfactual parent design at the posterior mean.
+
+    A parent stored per-draw as ``(S, n)`` (e.g. a Gaussian ancestor under
+    ``use_draws``) collapses to its per-unit mean over the draw axis -- the right
+    value to feed a downstream node evaluated at the posterior mean (a categorical
+    node's logits, or the non-draws Gaussian path). A ``(1, n)`` pinned/categorical
+    parent collapses identically to ``(n,)``.
+    """
     if not mech.parents:
         return np.empty((n_units, 0), dtype=np.float64)
-    cols = [np.asarray(cf[p], dtype=np.float64).reshape(-1) for p in mech.parents]
+    cols = []
+    for p in mech.parents:
+        val = np.asarray(cf[p], dtype=np.float64)
+        col = val.mean(axis=0) if val.ndim == 2 else val.reshape(-1)
+        cols.append(col)
     return np.column_stack(cols)
 
 
@@ -372,3 +460,15 @@ def counterfactual_categorical(
     n_cat = fits[target].n_categories or mech.n_categories
     marginal = np.bincount(cf_codes, minlength=n_cat).astype(np.float64) / len(cf_codes)
     return cf_codes, marginal
+
+
+def marginal_from_codes(codes: AnyArray, n_categories: int) -> Array:
+    """The per-category marginal from integer code draws (``bincount`` normalized).
+
+    Used to turn a categorical node's interventional/observational code draws into a
+    distribution over its ``n_categories`` classes.
+    """
+    c = np.asarray(codes, dtype=np.int64).reshape(-1)
+    if c.size == 0:
+        return np.zeros(n_categories, dtype=np.float64)
+    return np.bincount(c, minlength=n_categories).astype(np.float64) / c.size
