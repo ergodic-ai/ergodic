@@ -1,5 +1,7 @@
 # Process intelligence
 
+Your systems already record every step of every case: the ticket, the order, the claim. Process intelligence turns that record into two things a dashboard can't give you, a faithful picture of what the process actually does, and an answer to what changing it would do to the cycle time.
+
 An event log is the native record of an operational process: one row per event, with a case id (the ticket, the order), an activity name, and a timestamp. Whatever else the system wrote rides along as attributes. An attribute that is constant within a case (the team, the product line) describes the case; one that varies (the resource on each step) describes the event. `event_log(df, case=..., activity=..., timestamp=...)` builds the typed container, with rows grouped by case and sorted in time; the [data guide](data.md) covers its accessors.
 
 `ergodic.process` reads that log on three layers. The descriptive layer recovers what process-mining tools do daily: the map, the timing, the variants, the filters. The model layer mines an executable process model from the log and checks the log against it. The causal layer asks the question those tools can't: what would happen to the cycle time if we changed the process.

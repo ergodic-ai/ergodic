@@ -240,6 +240,7 @@ ref = refute_effect(
 print(ref)
 print(f"\nreal estimate:     {ref.estimand_value:+.3f}")
 print(f"scrambled label:   {ref.refuted_value:+.3f}")
+print(f"permutation p:     {ref.p_value:.3f}")
 
 # %% [markdown]
 # The placebo effect lands near zero, a small fraction of the real one, and the permutation

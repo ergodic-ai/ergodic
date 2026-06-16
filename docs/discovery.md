@@ -1,6 +1,8 @@
 # Causal discovery
 
-Discovery learns causal structure from data. Two ingredients drive every search: a conditional independence test for the constraint algorithms (PC, FCI, MMPC), and a decomposable score for the score-based ones (GES, hill climbing, exact A*). Algorithms are thin consumers; the ingredients are objects you instantiate, configure, share, and replace.
+You have data, and a question the data alone won't answer: which variables cause which? Discovery learns that structure, the graph itself, from the data.
+
+Two ingredients drive every search: a conditional independence test for the constraint-based algorithms (PC, FCI, MMPC), and a decomposable score for the score-based ones (GES, hill climbing, exact A*). The algorithms are thin consumers; the ingredients are objects you instantiate, configure, share, and replace.
 
 ## One call
 
@@ -204,6 +206,7 @@ One run returns one graph and no sense of how fragile it is. The bootstrap wrapp
 ```python
 from ergodic.discovery import bootstrap
 
+# `data` is any dataset from above; the FCI example's A, B, C is in scope here
 stability = bootstrap(data, method="pc", n_bootstrap=100, seed=0)
 stability.frequency("A", "C")      # adjacency frequency in [0, 1]
 stability.marks                    # frequency per oriented glyph

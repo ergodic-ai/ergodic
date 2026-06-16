@@ -1,6 +1,6 @@
 # Identification
 
-Identification is the step between a graph and an estimate. Given a graph, a treatment, and an outcome, it answers whether the effect P(Y | do(X)) can be written from observational data, and how. The work is graph-only: no data and no estimator yet, just the structure.
+Before you can estimate an effect, one question has to be settled: can the data you have answer it at all? That is identification. Given a graph, a treatment, and an outcome, it decides whether the effect of *setting* the treatment (written `do(X)`, an intervention, rather than merely observing it) can be recovered from data you only watched, and if it can, writes the formula. The work is graph-only: no data and no estimator yet, just the structure.
 
 ## One call
 

@@ -285,9 +285,9 @@ pd.DataFrame(
 ).T.round(0)
 
 # %% [markdown]
-# Targeting by predicted value loses about 5,800 dollars, no better than spending the budget at
-# random, because the budget lands on valuable customers who would not have moved. Targeting by
-# estimated effect, the same perk and the same 30 percent of the base, makes about 198,000 dollars.
+# Targeting by predicted value still loses money, about 5,800 dollars, because the budget lands on
+# valuable customers who would not have moved. Targeting by estimated effect, the same perk and the
+# same 30 percent of the base, makes about 198,000 dollars.
 # The program the average effect said to kill is a clear winner once the budget follows the effect
 # instead of the value.
 #
@@ -342,9 +342,10 @@ print(f"real effect    : ${ref.estimand_value:.2f}")
 print(f"placebo (mean) : ${ref.refuted_value:.2f}   p = {ref.p_value:.3f}   passed: {ref.passed}")
 
 # %% [markdown]
-# Scrambled, the effect collapses to a few dollars and the placebo runs almost never match the real
-# estimate. That rules out a leak firing on noise. It says nothing about an unmeasured trait, some
-# loyalty the columns don't capture, that pushes a customer toward both the perk and a fat balance.
+# Scrambled, the effect collapses to roughly zero, far from the real 23.65, and the placebo runs
+# almost never reach it. That rules out a leak firing on noise. It says nothing about an unmeasured
+# trait, some loyalty the columns don't capture, that pushes a customer toward both the perk and a
+# fat balance.
 # If that exists, the back door is not fully closed and the adjusted effect drifts back toward the
 # naive 120. The graph is an assumption, and the placebo tests the machinery, not the assumption.
 #

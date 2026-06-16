@@ -189,7 +189,7 @@ print(f"truth            : {true_effect:+.3f}")
 # The sign flips. The naive plus 22 points becomes minus 11, interval minus 12.4 to minus 10.2,
 # straddling the planted minus 12.2. Once the comparison holds risk fixed, the offer cuts churn by
 # about 11 points, close to the truth. The program the quarterly numbers condemned is preventing
-# roughly one in nine of its targets from leaving. The naive table had it exactly backwards.
+# real departures, not causing them. The naive table had it exactly backwards.
 #
 # ## Where the data runs out
 #
@@ -321,10 +321,10 @@ print(f"churn prevented, targeting the riskiest: {(-true_save[riskiest]).sum():,
 # %% [markdown]
 # Spend the same budget, enough for 30 percent of the base, two ways. Target the customers the
 # offer can move and it prevents about 1,380 departures. Target the highest-risk customers, the
-# current playbook, and it prevents about 1,040. A third more retention from the same spend, by
-# aiming at savability instead of risk. Per-customer churn effects are noisy, more so than a
-# lifetime-value number, so this is a ranking to validate on a holdout before betting the budget,
-# not a guarantee.
+# current playbook, and it prevents about 1,090. About a quarter more retention from the same
+# spend, by aiming at savability instead of risk. Per-customer churn effects are noisy, more so
+# than a lifetime-value number, so this is a ranking to validate on a holdout before betting the
+# budget, not a guarantee.
 #
 # ## The placebo
 #
@@ -351,7 +351,7 @@ print(f"real effect    : {ref.estimand_value:+.3f}")
 print(f"placebo (mean) : {ref.refuted_value:+.3f}   p = {ref.p_value:.3f}   passed: {ref.passed}")
 
 # %% [markdown]
-# Scrambled, the effect lands near zero and the placebo runs almost never reproduce the real one,
+# Scrambled, the effect lands near zero and the placebo runs rarely reproduce the real one,
 # so the machinery isn't inventing the save. That doesn't rule out an unmeasured driver, some
 # intent to quit the columns never saw, that steered both the offer and the churn. If it exists the
 # adjusted effect drifts back toward the naive plus 22. The graph is an assumption, and the placebo

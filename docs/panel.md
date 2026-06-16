@@ -108,7 +108,8 @@ One treated unit, and no single comparison is good enough: a region runs a campa
 ```python
 from ergodic import synthetic_control
 
-# 25 markets over 40 months; austin starts a campaign in month 30 worth 4.0
+# illustrative: `markets` is a PanelData of 25 markets over 40 months;
+# austin starts a campaign in month 30 worth 4.0
 sc = synthetic_control(markets, "revenue", treated="austin", at=30)
 sc.value        # ~4.0: the mean post-period gap
 sc.weights      # {'m01': 0.44, 'm12': 0.20, 'm19': 0.11, ...}
@@ -130,7 +131,8 @@ One series and one break you can date: a redesign ships, a policy starts. Segmen
 ```python
 from ergodic import timeseries, interrupted_time_series
 
-# 104 weeks of site visits with a quarterly cycle; a redesign ships in week 60
+# illustrative: `visits_frame` is 104 weeks of site visits with a quarterly cycle,
+# a redesign shipping in week 60
 ts = timeseries(visits_frame, time="week")
 est = interrupted_time_series(ts, "visits", at=60, seasonality=13)
 est.level_change    # ~7.8: the jump at the break (planted: 8.0)

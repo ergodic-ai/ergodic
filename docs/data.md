@@ -22,6 +22,7 @@ categorical as ordinal, datetimes as datetime. A tz-aware datetime column
 converts to UTC and drops the zone, so it types as datetime like a naive one.
 
 ```python
+import pandas as pd
 from ergodic import tabular, Ordinal
 
 df = pd.DataFrame({
@@ -79,8 +80,9 @@ against a graph directly.
 ```python
 from ergodic import dag
 
-ds.aligns_with(dag(["age -> city", "stage -> city"]))   # True
-ds.alignment(graph)   # [] when they match, else what differs
+g = dag(["age -> city", "stage -> city"])
+ds.aligns_with(g)   # True
+ds.alignment(g)     # [] when they match, else what differs
 ```
 
 Datasets are immutable. Retyping a column, selecting columns, dropping rows, or

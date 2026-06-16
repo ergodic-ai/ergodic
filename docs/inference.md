@@ -1,6 +1,8 @@
 # Causal inference
 
-Estimation turns an identified effect into a number. Give `estimate_effect` a graph, a dataset, a treatment, and an outcome. It identifies the effect, picks an estimator for the family, fills the estimator's nuisance slots with a learner, fits, and returns an `EffectEstimate`.
+How much does the treatment actually change the outcome? That is what estimation answers, as a number with a confidence interval around it.
+
+Give `estimate_effect` a graph, a dataset, a treatment, and an outcome. It works out whether the effect can be identified, picks the estimator that fits, fills that estimator's helper models (its nuisance slots) with a learner, fits, and returns an `EffectEstimate`.
 
 ## One call
 
@@ -104,6 +106,7 @@ Same call, a different graph. When a confounder is unobserved, a mediator or an 
 ```python
 from ergodic import admg, dag
 
+# illustrative: data_fd and data_iv are datasets generated to fit each graph
 # front-door: binary treatment A, binary mediator M, unobserved A-Y confounding
 fd = admg(["A -> M", "M -> Y", "A <-> Y"])
 estimate_effect(fd, data_fd, "A", "Y")   # two_stage_regression, target ATE
@@ -134,7 +137,7 @@ from ergodic.inference import DRLearner
 
 model = DRLearner(random_state=0).fit(identify_effect(g, "A", "Y"), data)
 model.cate()         # the per-unit effect, in-sample
-model.cate(other)    # predicted on another aligned dataset
+model.cate(other)    # other: another aligned dataset (illustrative)
 estimate_effect(g, data, "A", "Y", strategy="dr_learner").value  # the average, with its SE
 ```
 
@@ -172,7 +175,7 @@ When identification falls through to the general do-calculus algorithm (`strateg
 ```python
 from ergodic import admg, estimate_effect
 
-# the Verma graph: identifiable only through general ID
+# illustrative: discrete_data is a categorical dataset matching the Verma graph
 g = admg(["A -> B", "B -> C", "C -> D", "A <-> C", "B <-> D"])
 est = estimate_effect(g, discrete_data, "A", "D", random_state=0)
 est.estimator   # 'plug_in'
@@ -224,6 +227,27 @@ lo, hi = model.cate_interval(level=0.9)   # the per-unit 90% credible band
 ```
 
 A mix of one Bayesian and one point learner does not form a joint posterior, so the estimator falls back to its point or analytic result. An estimator with no posterior path returns a single point rather than refit the sampler in a bootstrap loop.
+
+## Checking an estimate
+
+A single number says nothing about how fragile it is. `refute_effect` reruns the whole identify-then-estimate path under a deliberate perturbation and checks the answer behaves the way a trustworthy estimate should. Pass the same `strategy`, `learner`, and `treated` you gave `estimate_effect`.
+
+```python
+from ergodic import refute_effect
+
+ref = refute_effect(g, data, "A", "Y", strategy="aipw", random_state=0)
+ref            # Refutation(placebo_treatment: estimate=1.997, under perturbation=-0.003, p=0.0099, passed, n=100)
+ref.passed     # True: with the treatment scrambled, the effect collapses to about zero
+ref.p_value    # ~0.01: almost no scrambled run reaches the real effect in size
+```
+
+The default is the placebo treatment: shuffle the treatment column so it points at nothing, re-estimate, and a real effect should fall to near zero. Two more checks come from `method=`:
+
+- `"placebo_treatment"` (the default) breaks the treatment's link to everything. It passes when the mean placebo effect is under 20 percent of the real one, and `p_value` is the share of placebo runs whose effect matches or beats the real one in size.
+- `"random_common_cause"` adds an irrelevant random parent of both treatment and outcome. The effect should not move; it passes when the mean stays within 10 percent of the original. `p_value` is `None` here.
+- `"data_subset"` re-estimates on a random 80 percent of the rows (set by `subset_fraction`). The effect should hold; it passes when the original sits within two standard deviations of the subset spread.
+
+None of these proves the estimate is right, since nothing on observational data can, but a failure is a real warning, and they cost only the refitting. Read the numbers, not just `passed`. These are the cheap, model-agnostic checks; sensitivity to a specific named confounder is a sharper, separate tool that comes later. Every case study ends with this placebo check.
 
 ## The gates
 
