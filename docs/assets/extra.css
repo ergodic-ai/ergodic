@@ -1,0 +1,128 @@
+/* Ergodic docs: a clean academic/technical look.
+   Serif typeset content inside a sans app shell, restrained color, and a
+   single brand-yellow accent. Chrome (tabs, sidebar) stays in Inter, set via
+   theme.font.text; the article content below switches to a reading serif. */
+
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap');
+
+:root {
+  --ergodic-ink: #1a1a1a;
+  --ergodic-paper: #fcfbf7;
+  --ergodic-yellow: #f5c518;          /* brand accent: swap for the exact hex */
+  --ergodic-yellow-soft: #f5c51861;   /* the highlighter, ~38% alpha */
+  --ergodic-rule: #e7e3d8;            /* warm hairline */
+
+  /* Interactive accent Material reads in both schemes. */
+  --md-accent-fg-color: #9a7d0a;
+}
+
+/* ---- Typography -------------------------------------------------------- */
+
+.md-typeset {
+  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  font-size: 0.85rem;
+  line-height: 1.72;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  color: var(--ergodic-ink);
+}
+
+/* A comfortable measure for long-form reading. */
+.md-grid {
+  max-width: 58rem;
+}
+
+/* ---- Color: the paper (light) scheme ----------------------------------- */
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: var(--ergodic-paper);
+  --md-typeset-color: var(--ergodic-ink);
+}
+
+/* Ink links with a thin underline, the textbook convention. Underline
+   structure applies in both schemes; the ink color is light-scheme only. */
+.md-typeset a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  text-decoration-color: var(--ergodic-rule);
+  transition: text-decoration-color 120ms ease, text-decoration-thickness 120ms ease;
+}
+.md-typeset a:hover {
+  text-decoration-color: var(--ergodic-yellow);
+  text-decoration-thickness: 2px;
+}
+[data-md-color-scheme="default"] .md-typeset a,
+[data-md-color-scheme="default"] .md-typeset a:hover {
+  color: var(--ergodic-ink);
+}
+
+/* Yellow as a literal highlighter behind ==marked== key terms. */
+.md-typeset mark {
+  background: var(--ergodic-yellow-soft);
+  color: inherit;
+  padding: 0 0.1em;
+}
+
+/* The lone yellow marker on the active tab and the active sidebar item. */
+.md-tabs__link--active {
+  box-shadow: inset 0 -2px 0 var(--ergodic-yellow);
+  opacity: 1;
+}
+.md-nav__item .md-nav__link--active {
+  font-weight: 700;
+}
+
+/* ---- Components -------------------------------------------------------- */
+
+/* Quieter, more bookish tables. */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--ergodic-rule);
+  font-size: 0.78rem;
+}
+.md-typeset table:not([class]) th {
+  background: color-mix(in srgb, var(--ergodic-yellow) 9%, transparent);
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 600;
+}
+
+/* Blockquote as a margin note. */
+.md-typeset blockquote {
+  border-left: 2px solid var(--ergodic-yellow);
+}
+
+/* The pointillist logomark needs a little room to read in the header. */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.7rem;
+  width: auto;
+}
+
+/* Inline code, a touch smaller against the serif body. */
+.md-typeset code {
+  font-size: 0.82em;
+}
+
+/* Grid cards: a hairline border that warms on hover, no heavy shadow. */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > :is(ul, ol) > li {
+  border: 1px solid var(--ergodic-rule);
+  border-radius: 2px;
+  box-shadow: none;
+  transition: border-color 120ms ease;
+}
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid.cards > :is(ul, ol) > li:hover {
+  border-color: var(--ergodic-yellow);
+}

@@ -5,28 +5,93 @@ Causal AI: causal discovery, causal inference, and process intelligence.
 !!! warning "Pre-alpha"
     This project is early scaffolding. The public API is not settled and will change.
 
-New to causal inference itself? Start with the [learn series](learn/index.md): ten notebook guides that teach the ideas on commercial examples, no background assumed. Know the field and want the API? Walk through the [tutorial](tutorial.md), then read the [concepts](concepts.md).
+New to causal inference itself? Start with the [learn series](learn/index.md): ten notebook
+guides that teach the ideas on commercial examples, no background assumed. Know the field and
+want the API? Walk through the [getting started](tutorial.md) page, then read the
+[concepts](concepts.md).
 
-The work is organized around three pillars:
+## Three pillars
 
-- [Causal discovery](discovery.md): learn causal structure from data, including time series.
-- [Causal inference](inference.md): estimate causal effects from data and a causal model, or from a [panel design](panel.md) when the rollout is the experiment.
-- [Process intelligence](process.md): discover and analyze processes from event logs.
+<div class="grid cards" markdown>
 
-All three sit on shared objects, which are built first:
+-   :material-sitemap-outline:{ .lg .middle } __Causal discovery__
 
-- [Causal graphs](graph.md): one mixed-graph object covering DAG, ADMG, CPDAG, MAG, and PAG.
-- [Domain knowledge](knowledge.md): prior constraints that discovery and inference read.
-- [Data](data.md): typed datasets (tabular, time series, panel, hierarchical, event log).
-- [Identification](identification.md): graph to estimand, on a single graph or a whole equivalence class.
+    ---
+
+    Learn causal structure from data, including time series.
+
+    [:octicons-arrow-right-24: Discovery](discovery.md)
+
+-   :material-scale-balance:{ .lg .middle } __Causal inference__
+
+    ---
+
+    Estimate causal effects from data and a causal model, or from a [panel design](panel.md)
+    when the rollout is the experiment.
+
+    [:octicons-arrow-right-24: Inference](inference.md)
+
+-   :material-cog-outline:{ .lg .middle } __Process intelligence__
+
+    ---
+
+    Discover and analyze processes from event logs.
+
+    [:octicons-arrow-right-24: Process](process.md)
+
+</div>
+
+## Built on shared foundations
+
+<div class="grid cards" markdown>
+
+-   __Causal graphs__
+
+    ---
+
+    One mixed-graph object covering DAG, ADMG, CPDAG, MAG, and PAG.
+
+    [:octicons-arrow-right-24: Graphs](graph.md)
+
+-   __Domain knowledge__
+
+    ---
+
+    Prior constraints that discovery and inference read.
+
+    [:octicons-arrow-right-24: Knowledge](knowledge.md)
+
+-   __Data__
+
+    ---
+
+    Typed datasets: tabular, time series, panel, hierarchical, event log.
+
+    [:octicons-arrow-right-24: Data](data.md)
+
+-   __Identification__
+
+    ---
+
+    Graph to estimand, on a single graph or a whole equivalence class.
+
+    [:octicons-arrow-right-24: Identification](identification.md)
+
+</div>
 
 ## Installation
 
-```bash
-pip install ergodic
-# or
-uv add ergodic
-```
+=== "pip"
+
+    ```bash
+    pip install ergodic
+    ```
+
+=== "uv"
+
+    ```bash
+    uv add ergodic
+    ```
 
 ## Quick start
 
