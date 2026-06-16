@@ -93,11 +93,22 @@ from .process import (
     kpi_panel,
     process_map,
 )
+from .scm import (
+    SCM,
+    BinaryGumbelMax,
+    CategoricalGumbelMax,
+    GaussianAdditive,
+    SCMResult,
+    Sensitivity,
+)
 
 __version__ = "0.0.1"
 
 __all__ = [
     "IDA",
+    "SCM",
+    "BinaryGumbelMax",
+    "CategoricalGumbelMax",
     "Dataset",
     "DomainKnowledge",
     "Edge",
@@ -105,6 +116,7 @@ __all__ = [
     "EffectTarget",
     "EventLog",
     "Functional",
+    "GaussianAdditive",
     "GraphKind",
     "Hedge",
     "HierarchicalTSData",
@@ -124,8 +136,10 @@ __all__ = [
     "Product",
     "Ratio",
     "Refutation",
+    "SCMResult",
     "Schema",
     "SchemaInferenceWarning",
+    "Sensitivity",
     "TabularData",
     "TimeSeriesData",
     "VariableType",
