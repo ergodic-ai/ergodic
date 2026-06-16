@@ -201,30 +201,28 @@ sens.range()              # (0.0, 2.47): the effect over the swept confounding g
 
 `identified_at_zero` is the value under the assumption that none of the association is confounding, which is the observational slope and the number a naive analysis would report. The true effect in this world is 1.5, and it sits inside the band, at the confounding strength the data cannot pin. There is no `value` on a `Sensitivity` and no scalar accessor: a non-identified effect is a range, and the type makes a naked read impossible by construction. The prior is the answer, so the type forces you to state it.
 
-The third case is the subtle one. An effect can be identified and still not be a back-door adjustment: front-door, instruments, or the general do-calculus functional. The SCM posterior engine computes back-door g-computation only, fitting each node on its observed parents. For a front-door or instrument effect that fit is confounded, so returning its contrast would hand back a confident wrong number stamped as identified. Rather than mislead, `ate` raises and points you at the estimator that does handle the criterion.
+The third case is where the latent machinery earns its place. An effect can be identified and still not be a plain back-door adjustment: front-door, instruments, or the general do-calculus functional. Hand the SCM a latent-confounded graph (a `<->` edge, or a `latent=` confounder) and it fits the confounded district jointly, with one explicit latent variable per bidirected edge standing in for the shared cause. The latent absorbs the confounding, so the mechanism on the causal path fits clean and `do` on the fitted model recovers the identified effect. A front-door world computes.
 
 ```python
 rng = np.random.default_rng(3)
 u = rng.normal(0.0, 1.0, size=3000)
 a = u + rng.normal(0.0, 1.0, size=3000)
 m = 1.2 * a + rng.normal(0.0, 1.0, size=3000)
-y = 0.9 * m + 2.0 * u + rng.normal(0.0, 1.0, size=3000)
+y = 0.9 * m + 2.0 * u + rng.normal(0.0, 1.0, size=3000)   # the effect of A on Y is 1.2 * 0.9 = 1.08
 fdata = tabular(pd.DataFrame({"A": a, "M": m, "Y": y}))
 
 fd = dag(["A -> M", "M -> Y", "U -> A", "U -> Y"], latent=["U"])   # front-door, U latent
 fdscm = SCM(fd, fdata, draws=200, tune=200, chains=2, random_state=0).fit()
 fdscm.ate("A", "Y")
-# NotImplementedError: the effect of 'A' on 'Y' is identified by the 'frontdoor'
-#   criterion, but the SCM posterior engine computes back-door adjustment only.
-#   Use estimate_effect(graph, data, 'A', 'Y'), which handles frontdoor, ...
+# SCMResult(ate, identified: Y=1.1, sd=0.039, 95% CrI [1.02, 1.18])
 ```
 
-[`estimate_effect`](inference.md) runs the front-door and instrument estimators and the general-ID plug-in. The SCM gives you the back-door posterior; the rest of the identification ladder lives there. The `engine="dml"` path, which would reuse the cross-fit DML estimator from a fitted SCM, is a stub for now and raises with the same pointer.
+Without the latent, the SCM would have read a confounded `Y` on `M` slope and handed back a confident wrong number; the explicit latent is what makes the contrast right. Two criteria still raise. An instrument needs the exclusion restriction, which the latent fit does not impose, so an instrument effect points you at [`estimate_effect`](inference.md) and its two-stage estimator. The general do-calculus functional is the same story: identified, but not computed from the SCM this phase, so it raises with the pointer. The `engine="dml"` path, which would reuse the cross-fit DML estimator from a fitted SCM, is a stub for now.
 
-So `ate` has exactly three outcomes, and they map onto what the data can support. Identified by back door, you get a number with an interval. Not identified, you get the curve and have to name your assumption. Identified some other way, you get sent to the tool that computes it. Reading the return type tells you which world you are in.
+So `ate` reads the graph and the return type tells you which world you are in. Identified, whether by back door or by a front-door path the latent district fits, you get a number with an interval. Not identified, you get the `Sensitivity` curve and have to name your assumption. Identified by an instrument or the general functional, you get sent to the tool that computes it. The honesty never bends: the latent machinery widens what the SCM can compute, never what it will claim.
 
 ## What is here, and what is next
 
-The MVP fits a Markovian DAG: continuous nodes as Bayesian-linear Gaussian-additive equations, binary and categorical nodes as Gumbel-max. It answers observational sampling, `pm.do` interventions, and the explicit-noise counterfactual on any node type, all carrying a posterior, with non-invertible-mechanism counterfactuals deferred. And it gates every effect on identification, returning a posterior, a `Sensitivity`, or a pointer.
+The SCM fits a DAG or a latent-confounded ADMG: continuous nodes as Bayesian-linear Gaussian-additive equations, binary and categorical nodes as Gumbel-max, and one explicit latent per bidirected edge for a confounded district. It answers observational sampling, `pm.do` interventions, and the explicit-noise counterfactual on any node type, all carrying a posterior, with non-invertible-mechanism counterfactuals deferred. And it gates every effect on identification, returning a posterior, a `Sensitivity`, or a pointer.
 
-The next pieces are sketched in the source. Latent-district fitting comes first: an explicit latent variable per bidirected component, so an ADMG with confounding fits where the identification algorithm says the effect is recoverable and bounds it otherwise. Then policy search and off-policy evaluation on the fitted model, which ties the SCM to the process pillar and turns a fitted causal model into a decision. The richer mechanism overrides, knowledge as priors, and the equivalence-class ensemble follow. The [API reference](reference.md) covers the surface that ships today.
+The next pieces are sketched in the source. Policy search and off-policy evaluation on the fitted model come next, tying the SCM to the process pillar and turning a fitted causal model into a decision. Then the instrument and general-functional estimands computed from the SCM, the richer mechanism overrides, knowledge as priors, and the equivalence-class ensemble. The [API reference](reference.md) covers the surface that ships today.
