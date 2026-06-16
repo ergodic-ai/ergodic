@@ -35,11 +35,11 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..graph import GraphKind
-from ..graph._primitives import topological_order
+from ..graph._primitives import latent_projection, topological_order
 from ..identification import identify_effect
 from . import _compose
-from ._bounds import Sensitivity, linear_sensitivity_curve
+from ._bounds import Sensitivity, latent_prior_sweep, linear_sensitivity_curve
+from ._district import latent_structure
 from ._mechanism import CategoricalGumbelMax, GaussianAdditive, resolve_mechanism
 from ._result import CategoricalResult, SCMResult
 
@@ -59,18 +59,25 @@ if TYPE_CHECKING:
 DoValue = float | int
 
 
+DISTRICT_SIZE_CAP = 8
+
+
 class SCM:
-    """A Markovian Bayesian structural causal model over a DAG.
+    """A Bayesian structural causal model over a DAG or a latent-confounded ADMG.
 
     Build with ``SCM(graph, data)`` (mechanisms auto-assigned by schema) or pass
     ``mechanisms={node: spec}`` to override. ``spec`` is a built-in name
     (``"linear"``, ``"categorical"``, ``"binary"``) or a
     :class:`~ergodic.scm.Mechanism` instance. Call :meth:`fit`, then query.
 
-    The graph must be a DAG: the MVP is Markovian (no latent confounding in the
-    fit). A latent-confounded effect is still answered honestly through
-    :meth:`ate`, which reads identification and returns bounds when the effect is
-    not a function of the data alone.
+    The graph may be a Markovian DAG, or an ADMG (``<->`` edges) / a DAG with
+    ``latent=`` confounders. A bidirected edge is realized as one explicit per-unit
+    latent common cause: the confounded district fits jointly (the latent absorbs the
+    confounding) so an effect identified despite the confounding (front-door, the
+    general criterion with the latent modeled) computes correctly. A genuinely
+    non-identified effect still returns a :class:`~ergodic.scm.Sensitivity` through
+    :meth:`ate`, never a naked point -- identification, not the fit, decides.
+    Selection bias stays out of scope (identification raises on selection marks).
     """
 
     def __init__(
@@ -83,17 +90,19 @@ class SCM:
         tune: int = 1000,
         chains: int = 2,
         random_state: int | None = None,
+        district_size_cap: int = DISTRICT_SIZE_CAP,
     ) -> None:
-        if graph.kind is not GraphKind.DAG:
+        if not graph.is_admg():
             raise ValueError(
-                f"SCM fits a DAG; got kind={graph.kind.value}. The MVP is Markovian "
-                "(latent-district fitting is post-MVP); for a latent-confounded effect "
-                "pass the DAG with the latent confounder marked latent= and read "
-                "ate(), which returns bounds when the effect is not identified"
+                f"SCM fits a DAG or an ADMG (latent-confounded); got kind="
+                f"{graph.kind.value}, which is not acyclic-directed-plus-bidirected. "
+                "A CPDAG/MAG/PAG is an equivalence class, not a single SCM; pick a "
+                "member (dags_of_cpdag / mags_of_pag) or pass a DAG/ADMG"
             )
-        # Latent nodes (graph.latent) carry no data and are not fitted: the MVP
-        # fits the observed margin. They still shape identification, so a
-        # latent-confounded effect (a bow) is detected and answered with bounds.
+        # The observed margin: nodes carrying data. A ``latent=`` node has no column
+        # and is realized as a ``<->`` over the projection; an ADMG's nodes are all
+        # observed. The latent projection turns either into an ADMG over the observed
+        # margin, which is what the fit and identification read.
         self.observed: tuple[str, ...] = tuple(sorted(graph.nodes - graph.latent))
         missing = set(self.observed) - set(data.variables)
         if missing:
@@ -107,17 +116,68 @@ class SCM:
         self.tune = tune
         self.chains = chains
         self.random_state = random_state
-        full_order = topological_order(graph)
-        # Fit the observed nodes only, in topological order; a latent node has no
-        # column. A latent parent is dropped from each mechanism (observed_parents),
-        # so its influence falls into the noise -- which is exactly why a
-        # latent-confounded effect is non-identified, surfaced by ate().
-        self._order: tuple[str, ...] = tuple(n for n in full_order if n not in graph.latent)
+        self.district_size_cap = district_size_cap
+
+        # The projected ADMG over the observed margin: ``latent=`` nodes become
+        # ``<->`` edges; an ADMG that already has them passes through. Parents,
+        # districts, and latents are all read off this single object, so a DAG with a
+        # latent confounder and the equivalent ADMG fit identically.
+        self._projection = latent_projection(graph)
+        self._latent = latent_structure(self._projection)
+        full_order = topological_order(self._projection)
+        self._order: tuple[str, ...] = tuple(n for n in full_order if n in set(self.observed))
         specs = dict(mechanisms or {})
         self.mechanisms: dict[str, Mechanism] = {
-            node: resolve_mechanism(specs.get(node), graph, data, node) for node in self._order
+            node: self._build_mechanism(specs.get(node), node) for node in self._order
         }
+        self._warn_large_districts()
         self._fits: dict[str, FitResult] = {}
+
+    def _build_mechanism(self, spec: Any, node: str) -> Mechanism:
+        """Resolve ``node``'s mechanism over the projection, carrying its latents.
+
+        The parents come from the projected ADMG (so a projection-introduced edge is
+        honored), and the mechanism is given its incident latents and the subset it
+        anchors the sign gauge for. A Markovian node lists no latents and reduces to
+        the MVP mechanism exactly.
+        """
+        from dataclasses import replace
+
+        mech = resolve_mechanism(spec, self._projection, self.data, node)
+        lats = self._latent.latents_of(node)
+        if lats:
+            # only the two built-in mechanisms carry the latent-loading fields; a custom
+            # mechanism in a confounded district has no place to put the loadings.
+            if not isinstance(mech, GaussianAdditive | CategoricalGumbelMax):
+                raise TypeError(
+                    f"node {node!r} sits in a confounded district (incident latents "
+                    f"{list(lats)}) but its mechanism {type(mech).__name__} is not a "
+                    "built-in Gaussian/categorical, so it cannot carry latent loadings; "
+                    "a custom mechanism in a bidirected district is post-MVP"
+                )
+            mech = replace(
+                mech,
+                latents=lats,
+                gauged_latents=self._latent.gauged_of(node),
+            )
+        return mech
+
+    def _warn_large_districts(self) -> None:
+        """Warn (not raise) when a confounded district exceeds the sampling-cost cap.
+
+        Decision 5: a big district samples slower, not wrong, so the cap is advisory.
+        """
+        import warnings
+
+        for nodes in self._latent.confounded_districts:
+            if len(nodes) > self.district_size_cap:
+                warnings.warn(
+                    f"confounded district {list(nodes)} has {len(nodes)} nodes, over "
+                    f"the cap {self.district_size_cap}; the joint fit will sample but "
+                    "may be slow. Raise district_size_cap to silence, or screen the "
+                    "graph (e.g. a discovery restrict_to) to shrink the district",
+                    stacklevel=3,
+                )
 
     # -- fit -----------------------------------------------------------------
 
@@ -126,30 +186,97 @@ class SCM:
         return len(self._fits) == len(self.mechanisms)
 
     def fit(self, *, parallel: bool = False) -> SCM:
-        """Fit every node's mechanism on its observed parents.
+        """Fit every node's mechanism, per node for singletons, jointly per district.
 
-        Sequential by default (robust, CI-safe). ``parallel=True`` spreads nodes
-        over a process pool with the BLAS/OMP threads pinned in the workers.
-        Returns ``self``.
+        A Markovian singleton district fits per node (cheap, exact, the MVP path); a
+        confounded district (nodes sharing a ``<->``) does not factorize -- the latent
+        couples it -- so it fits as one joint NUTS block with the explicit latents,
+        the gauge, a non-centered parameterization, and a high ``target_accept`` (the
+        Track-D recipe). The composed posterior merges the two the same way it merges
+        per-node fits.
+
+        Sequential by default (robust, CI-safe). ``parallel=True`` spreads the
+        *singleton* nodes over a process pool with the BLAS/OMP threads pinned in the
+        workers; a confounded district's joint fit stays in the main process (its
+        chains already parallelize and its model is one block). Returns ``self``.
         """
         seed = 0 if self.random_state is None else self.random_state
+        singletons = set(self._latent.singletons)
+        single_mechs = {n: m for n, m in self.mechanisms.items() if n in singletons}
         if parallel:
-            self._fits = self._fit_parallel(seed)
+            fits = self._fit_parallel(single_mechs, seed)
         else:
-            self._fits = {
+            fits = {
                 node: mech.fit(
                     self.data, draws=self.draws, tune=self.tune, chains=self.chains, seed=seed
                 )
-                for node, mech in self.mechanisms.items()
+                for node, mech in single_mechs.items()
             }
+        for offset, nodes in enumerate(self._latent.confounded_districts):
+            fits.update(self._fit_district(nodes, seed + offset))
+        self._fits = fits
         return self
 
-    def _fit_parallel(self, seed: int) -> dict[str, FitResult]:
+    def _fit_district(self, nodes: tuple[str, ...], seed: int) -> dict[str, FitResult]:
+        """Joint fit of one confounded district (its nodes + their incident latents).
+
+        Assembles the observed columns for every district node and every external
+        parent (a parent outside the district, e.g. the front-door mediator that is
+        its own singleton), names the district's latents, and runs the joint NUTS fit.
+        """
+        order = tuple(n for n in self._order if n in set(nodes))
+        latents = self._district_latents(nodes)
+        observed = self._district_observed(order)
+        return _compose.fit_district(
+            order,
+            {n: self.mechanisms[n] for n in order},
+            latents,
+            observed,
+            draws=self.draws,
+            tune=self.tune,
+            chains=self.chains,
+            seed=seed,
+        )
+
+    def _district_latents(self, nodes: tuple[str, ...]) -> tuple[str, ...]:
+        """The latents incident to a district's nodes, deduplicated and sorted."""
+        seen: set[str] = set()
+        for node in nodes:
+            seen.update(self._latent.latents_of(node))
+        return tuple(sorted(seen))
+
+    def _district_observed(self, order: tuple[str, ...]) -> dict[str, Any]:
+        """Observed columns for the district fit: each node plus every external parent.
+
+        A node's parents may sit outside the district (the canonical case is the
+        front-door mediator, a singleton parent of an in-district node). The joint
+        fit conditions on those observed parent columns, so the structural
+        coefficient on a clean path is recovered while the latent soaks up the
+        confounding on the bidirected one.
+        """
+        names: set[str] = set(order)
+        for node in order:
+            names.update(self.mechanisms[node].parents)
+        out: dict[str, Any] = {}
+        for name in names:
+            mech = self.mechanisms.get(name)
+            if mech is not None and isinstance(mech, CategoricalGumbelMax):
+                # a categorical district node is observed as integer codes (its
+                # likelihood is Categorical); the raw float code column also serves
+                # as a discrete parent's design (the encoder one-hots it).
+                out[name] = np.asarray(self.data.codes(name), dtype=np.int64)
+            else:
+                out[name] = np.asarray(self.data.matrix([name]).reshape(-1), dtype=np.float64)
+        return out
+
+    def _fit_parallel(self, mechanisms: Mapping[str, Mechanism], seed: int) -> dict[str, FitResult]:
         import concurrent.futures
         import multiprocessing as mp
 
         ctx = mp.get_context("spawn")
         out: dict[str, FitResult] = {}
+        if not mechanisms:
+            return out
         with concurrent.futures.ProcessPoolExecutor(
             mp_context=ctx, initializer=_pin_threads
         ) as pool:
@@ -163,7 +290,7 @@ class SCM:
                     self.chains,
                     seed,
                 ): node
-                for node, mech in self.mechanisms.items()
+                for node, mech in mechanisms.items()
             }
             for fut in concurrent.futures.as_completed(futures):
                 out[futures[fut]] = fut.result()
@@ -205,7 +332,13 @@ class SCM:
     def _observational(self, target: str, *, n: int, seed: int) -> SCMResult | CategoricalResult:
         """The shared observational readout: codes-to-marginal for a categorical target."""
         draws = _compose.observational_draws(
-            self._order, self.mechanisms, self._fits, target, n=n, seed=seed
+            self._order,
+            self.mechanisms,
+            self._fits,
+            target,
+            n=n,
+            seed=seed,
+            latents=self._latent.latents,
         )
         if isinstance(self.mechanisms[target], CategoricalGumbelMax):
             return self._categorical_result("sample", target, draws)
@@ -257,6 +390,7 @@ class SCM:
             target,
             n=n,
             seed=self._seed(3),
+            latents=self._latent.latents,
         )
         if isinstance(self.mechanisms[target], CategoricalGumbelMax):
             return self._categorical_result("interventional", target, draws)
@@ -369,13 +503,19 @@ class SCM:
         categorical one is sampled in the generative model, so the back-door
         g-formula marginalizes over it correctly.
 
-        Identified by a *non*-back-door criterion (front-door, instruments, the
-        general ID functional) raises :class:`NotImplementedError`: the posterior
-        engine computes back-door adjustment only, so it would otherwise return a
-        confident wrong number for an effect it does not actually compute. Use
-        :func:`~ergodic.inference.estimate_effect`, which handles those strategies.
-        ``engine="dml"`` is the cross-fit reuse path (post-MVP; raises with a
-        pointer for now).
+        Identified by back-door adjustment, the no-path ``"null"`` case, or
+        **front-door** computes the latent-aware do-contrast: a confounded district
+        fits its explicit latent, so the structural mechanism on the causal path fits
+        clean and ``do`` severs the treatment from the district latent, leaving the
+        identified value (the front-door mediated effect, the C1 world's 1.2). The
+        **instrument** strategy still raises with a pointer to
+        :func:`~ergodic.inference.estimate_effect`: IV identification is linear and
+        rests on the instrument's exclusion restriction, which the latent-district fit
+        does not impose, so its treatment->outcome coefficient stays on the same
+        non-identified ridge as the bow. The **general ID functional** likewise
+        raises for now (verify-then-widen: its latent-fit do-contrast was not held to
+        ``estimate_effect`` to tolerance in this phase). ``engine="dml"`` is the
+        cross-fit reuse path (post-MVP; raises with a pointer for now).
         """
         self._require_fit()
         self._check_node(treatment)
@@ -399,18 +539,21 @@ class SCM:
             )
         if engine != "posterior":
             raise ValueError(f"unknown engine {engine!r}; use 'posterior' or 'dml'")
-        # The posterior plug-in computes back-door g-computation only (it pm.do's on
-        # a generative model fit on each node's observed parents). For a front-door /
-        # IV / general-ID effect that fit is confounded, so it would return a
-        # confident WRONG point stamped identified=True. Gate on the strategy and
-        # raise rather than mislead; estimate_effect handles those criteria.
-        if ident.strategy not in ("adjustment", "null"):
+        # The latent-aware do-contrast computes back-door adjustment, the null case,
+        # and front-door (the latent absorbs the X-Y confounding, so do() on the
+        # treatment severs it from the district latent and the identified value
+        # survives). Instruments and the general ID functional are NOT computed by
+        # this contrast (decision 3, verify-then-widen): IV rests on an exclusion
+        # restriction the latent fit does not impose, and the general functional was
+        # not validated to tolerance here, so both raise with a pointer rather than
+        # return a confident wrong number.
+        if ident.strategy not in ("adjustment", "null", "frontdoor"):
             raise NotImplementedError(
                 f"the effect of {treatment!r} on {outcome!r} is identified by the "
-                f"{ident.strategy!r} criterion, but the SCM posterior engine computes "
-                f"back-door adjustment only. Use estimate_effect(graph, data, "
-                f"{treatment!r}, {outcome!r}), which handles {ident.strategy}, or "
-                f"scm.ate(..., engine='dml')"
+                f"{ident.strategy!r} criterion, which the SCM latent-fit do-contrast "
+                f"does not yet compute (front-door, adjustment, and the null case do). "
+                f"Use estimate_effect(graph, data, {treatment!r}, {outcome!r}), which "
+                f"handles {ident.strategy}, or scm.ate(..., engine='dml')"
             )
         low, high = self._ate_levels(treatment, levels)
         draws = _compose.ate_contrast(
@@ -423,6 +566,7 @@ class SCM:
             high=high,
             n=n,
             seed=self._seed(7),
+            latents=self._latent.latents,
         )
         return SCMResult(
             query="ate",
@@ -508,27 +652,76 @@ class SCM:
     def _bounds(self, treatment: str, outcome: str, ident: Any) -> Sensitivity:
         """The honest-bounds return for a non-identified effect.
 
-        Reads the observed ``cov(X, Y)`` and ``var(X)`` and builds the analytic
-        ``b(c) = (cov - c) / var(X)`` sensitivity curve. The obstruction string
-        carries the hedge witness when the ID engine produced one.
+        A linear-Gaussian treatment-outcome pair gets the exact analytic
+        ``b(c) = (cov - c) / var(X)`` curve. A non-linear / non-Gaussian district (a
+        categorical/binary treatment or outcome) gets the *latent-prior sweep*: the
+        confounded district refits under a grid of confounding-strength priors and the
+        range of the resulting do-contrasts is the bound (decision 2). Either way the
+        result is a :class:`Sensitivity`, so a naked point read is impossible.
         """
-        x = np.asarray(self.data.matrix([treatment]).reshape(-1), dtype=np.float64)
-        y = np.asarray(self.data.matrix([outcome]).reshape(-1), dtype=np.float64)
-        # both at ddof=1 so cov_xy / var_x is the consistent OLS slope (np.cov is
-        # ddof=1 by default; np.var defaults to ddof=0, the bug this fixes).
-        cov_xy = float(np.cov(x, y)[0, 1])
-        var_x = float(np.var(x, ddof=1))
         obstruction = (
             f"no adjustment, front-door, or instrument identifies the effect "
             f"({ident.estimand or 'not a function of the observed data alone'})"
         )
-        return linear_sensitivity_curve(
+        if self._is_linear_gaussian_pair(treatment, outcome):
+            x = np.asarray(self.data.matrix([treatment]).reshape(-1), dtype=np.float64)
+            y = np.asarray(self.data.matrix([outcome]).reshape(-1), dtype=np.float64)
+            # both at ddof=1 so cov_xy / var_x is the consistent OLS slope (np.cov is
+            # ddof=1 by default; np.var defaults to ddof=0, the bug this fixes).
+            cov_xy = float(np.cov(x, y)[0, 1])
+            var_x = float(np.var(x, ddof=1))
+            return linear_sensitivity_curve(
+                treatment=treatment,
+                outcome=outcome,
+                cov_xy=cov_xy,
+                var_x=var_x,
+                obstruction=obstruction,
+                diagnostics={"observational_slope": cov_xy / var_x},
+            )
+        return self._latent_prior_sweep_bounds(treatment, outcome, obstruction)
+
+    def _is_linear_gaussian_pair(self, treatment: str, outcome: str) -> bool:
+        """Whether the analytic ``b(c)`` curve applies: both endpoints Gaussian-additive.
+
+        The closed-form Gaussian-moment derivation of ``b(c)`` needs a continuous
+        treatment and outcome. A categorical/binary endpoint breaks it, so that case
+        routes to the latent-prior sweep instead.
+        """
+        return isinstance(self.mechanisms.get(treatment), GaussianAdditive) and isinstance(
+            self.mechanisms.get(outcome), GaussianAdditive
+        )
+
+    def _latent_prior_sweep_bounds(
+        self, treatment: str, outcome: str, obstruction: str
+    ) -> Sensitivity:
+        """The non-linear non-identified bound: refit the district over a prior grid.
+
+        Refits the confounded district holding everything fixed but the latent loading
+        prior sd, and reads the do-contrast at each. The across-prior spread is the
+        partial-identification interval (the pressure-test's prior-dependence: the
+        answer is whatever the confounding prior says). The treatment must be a
+        district endpoint for this to bite; a level pair defaults the same way
+        :meth:`ate` does.
+        """
+        low, high = self._ate_levels(treatment, None)
+        nodes = self._latent.node_district.get(treatment, (treatment,))
+        order = tuple(n for n in self._order if n in set(nodes))
+        latents = self._district_latents(tuple(nodes))
+        observed = self._district_observed(order)
+        return latent_prior_sweep(
+            order,
+            {n: self.mechanisms[n] for n in order},
+            latents,
+            observed,
             treatment=treatment,
             outcome=outcome,
-            cov_xy=cov_xy,
-            var_x=var_x,
+            low=low,
+            high=high,
+            draws=self.draws,
+            tune=self.tune,
+            chains=self.chains,
+            seed=self._seed(8),
             obstruction=obstruction,
-            diagnostics={"observational_slope": cov_xy / var_x},
         )
 
     # -- helpers -------------------------------------------------------------
@@ -588,12 +781,16 @@ class SCM:
         """Per-node factual columns for the queried units, as numpy arrays.
 
         A categorical node is read as integer codes (the Gumbel-max abduction
-        needs codes); a continuous node as floats.
+        needs codes); a continuous node as floats. Only the *observed* nodes (those
+        carrying a fitted mechanism) are read: a latent node has no column and is
+        abducted implicitly into its district children's residuals (the district
+        counterfactual pins the latent at its factual value, the Track-D semantics),
+        so iterating ``self.graph.nodes`` would ``KeyError`` on the latent.
         """
         from ..data import Dataset as _Dataset
 
         out: dict[str, npt.NDArray[Any]] = {}
-        for node in self.graph.nodes:
+        for node in self._order:
             mech = self.mechanisms[node]
             if isinstance(units, _Dataset):
                 col = self._column_from_dataset(units, node)

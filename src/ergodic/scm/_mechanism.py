@@ -116,6 +116,16 @@ class Mechanism(Protocol):
         ...
 
     @property
+    def latents(self) -> tuple[str, ...]:
+        """Incident latent RV names from confounded-district loadings; () for a Markovian node."""
+        ...
+
+    @property
+    def gauged_latents(self) -> tuple[str, ...]:
+        """The subset of ``latents`` whose loading is pinned positive for the sign gauge."""
+        ...
+
+    @property
     def capability(self) -> Capability:
         """``INVERTIBLE`` if counterfactuals are exact, else ``PROBABILISTIC``."""
         ...
@@ -247,6 +257,13 @@ class GaussianAdditive:
     :class:`~ergodic.inference.Learner`-as-mean override (carrying no parameter
     posterior, abducting via the residual against the fitted mean) is planned
     post-MVP; the MVP fits the Bayesian-linear mean.
+
+    In a confounded district the node may also carry incident *latents*: one
+    per-unit ``L ~ Normal(0, 1)`` per bidirected edge the node touches, entering
+    the mean as ``+ loading_L * L``. ``latents`` lists those latent RV names (in a
+    deterministic order); ``gauged_latents`` is the subset whose loading is pinned
+    positive (a ``HalfNormal``) to kill the ``L -> -L`` reflection. A Markovian node
+    leaves both empty and reduces to the MVP exactly.
     """
 
     name: str
@@ -254,6 +271,9 @@ class GaussianAdditive:
     parent_cards: tuple[int | None, ...] = ()
     coef_prior_sd: float = 5.0
     sigma_prior_sd: float = 2.0
+    latents: tuple[str, ...] = ()
+    gauged_latents: tuple[str, ...] = ()
+    loading_prior_sd: float = 2.0
 
     @property
     def capability(self) -> Capability:
@@ -270,6 +290,10 @@ class GaussianAdditive:
     @property
     def sigma_name(self) -> str:
         return f"{self.name}__sigma"
+
+    def loading_name(self, latent: str) -> str:
+        """The parameter name for this node's loading on latent ``L`` (district fit)."""
+        return f"{self.name}__loading__{latent}"
 
     @property
     def _design_width(self) -> int:
@@ -308,7 +332,11 @@ class GaussianAdditive:
         ``nodes`` maps each (already-built) parent name to its RV. Parents are
         encoded by the shared pytensor encoder, so the design matches the fit view
         column for column; the RV names match the merged posterior exactly, so
-        ``sample_posterior_predictive`` reads the fitted draws.
+        ``sample_posterior_predictive`` reads the fitted draws. An incident latent
+        ``L`` (a per-unit ``Normal(0, 1)`` the compose helper builds first, found in
+        ``nodes``) adds ``loading_L * L`` to the mean, so ``pm.do`` on this node
+        severs it from ``L`` while a district sibling still reads ``L`` -- the
+        confounding cancels in an interventional contrast.
         """
         import pymc as pm
         import pytensor.tensor as pt
@@ -319,8 +347,26 @@ class GaussianAdditive:
             design = encode_parents_pt([nodes[p] for p in self.parents], self.parent_cards)
             coef = pm.Normal(self.coef_name, 0.0, self.coef_prior_sd, shape=self._design_width)
             mean = mean + pm.math.dot(design, coef)
+        for lat in self.latents:
+            loading = self._loading_rv(lat)
+            mean = mean + loading * nodes[lat]
         sigma = pm.HalfNormal(self.sigma_name, self.sigma_prior_sd)
         return pm.Normal(self.name, mu=mean, sigma=sigma, shape=(n,))
+
+    def _loading_rv(self, latent: str) -> Any:
+        """The loading RV for ``latent``: ``HalfNormal`` if gauged, else ``Normal``.
+
+        The gauge (one loading per latent pinned positive) lives here so the fit
+        view and the generative view declare an identical prior for the same name,
+        which is what keeps ``sample_posterior_predictive`` reading the fitted draws
+        rather than re-sampling a differently-shaped prior.
+        """
+        import pymc as pm
+
+        name = self.loading_name(latent)
+        if latent in self.gauged_latents:
+            return pm.HalfNormal(name, self.loading_prior_sd)
+        return pm.Normal(name, 0.0, self.loading_prior_sd)
 
     def fit(self, data: Dataset, *, draws: int, tune: int, chains: int, seed: int) -> FitResult:
         import pymc as pm
@@ -417,6 +463,9 @@ class CategoricalGumbelMax:
     parent_cards: tuple[int | None, ...] = ()
     n_categories: int = 0
     coef_prior_sd: float = 3.0
+    latents: tuple[str, ...] = ()
+    gauged_latents: tuple[str, ...] = ()
+    loading_prior_sd: float = 2.0
 
     @property
     def capability(self) -> Capability:
@@ -429,6 +478,10 @@ class CategoricalGumbelMax:
     @property
     def bias_name(self) -> str:
         return f"{self.name}__logit_b"
+
+    def loading_name(self, latent: str) -> str:
+        """The per-class logit loading parameter for this node on latent ``L``."""
+        return f"{self.name}__loading__{latent}"
 
     @property
     def _design_width(self) -> int:
@@ -462,7 +515,9 @@ class CategoricalGumbelMax:
         node forward (the Gumbel-max marginal). The RV names match the merged
         posterior, so ``sample_posterior_predictive`` reads the fitted logits. The
         node's resolved class count must be passed in (it lives on the fit, not the
-        spec).
+        spec). An incident latent ``L`` adds a per-class logit term
+        ``L * loading_L`` (``loading_L`` shape ``(K,)``), so the confounding shifts
+        the relative class logits, and ``pm.do`` severs the node from ``L``.
         """
         import pymc as pm
         import pytensor.tensor as pt
@@ -483,7 +538,32 @@ class CategoricalGumbelMax:
                 shape=(self._design_width, self.n_categories),
             )
             logits = logits + pm.math.dot(design, weight)
+        for lat in self.latents:
+            loading = self._loading_rv(lat)  # (K,)
+            logits = logits + nodes[lat][:, None] * loading[None, :]
         return pm.Categorical(self.name, logit_p=logits, shape=(n,))
+
+    def _loading_rv(self, latent: str) -> Any:
+        """The per-class logit loading RV for ``latent`` (gauge: first class pinned).
+
+        Shape ``(K,)``. When ``latent`` is gauged, the first class's loading is a
+        ``HalfNormal`` (pinned positive to break the ``L -> -L`` reflection) and the
+        remaining classes are ``Normal``; otherwise every class is ``Normal``.
+        """
+        # pm.math re-exports the pytensor ops as the typed-Any surface (pytensor.tensor's
+        # own ops trip mypy's no-untyped-call); this only runs inside a generative/fit
+        # model build, so pymc is already in play.
+        import pymc as pm
+
+        name = self.loading_name(latent)
+        if latent in self.gauged_latents and self.n_categories > 1:
+            head = pm.HalfNormal(f"{name}__0", self.loading_prior_sd)
+            tail = pm.Normal(
+                f"{name}__rest", 0.0, self.loading_prior_sd, shape=self.n_categories - 1
+            )
+            # the (K,) per-class loading: the pinned-positive first class, then the rest.
+            return pm.math.concatenate([head[None], tail])
+        return pm.Normal(name, 0.0, self.loading_prior_sd, shape=self.n_categories)
 
     def fit(self, data: Dataset, *, draws: int, tune: int, chains: int, seed: int) -> FitResult:
         import pymc as pm

@@ -739,3 +739,340 @@ def test_bow_with_binary_treatment_returns_sensitivity_not_a_point() -> None:
     assert res.identified is False
     assert not hasattr(res, "value")
     assert not hasattr(res, "mean")
+
+
+# == THE LATENT-CONFOUNDED ADMG PHASE: golden numbers =========================
+#
+# The headline regression-flip and the Track-D anchors, run live against the
+# planted truths. A continuous-treatment front-door cannot be cross-checked by
+# estimate_effect (E1 is binary-only), so the front-door anchor pins the PLANTED
+# truth; the binary-treatment confounded world cross-checks estimate_effect where
+# it works (already covered by test_binary_treatment_ate_matches_estimate_effect).
+
+
+@pytest.fixture(scope="module")
+def frontdoor() -> tuple[SCM, dict[str, float]]:
+    """The C1 front-door world X->M->Y with U->X, U->Y (U latent).
+
+    b_xm=1.5, b_my=0.8 so the front-door effect is b_xm*b_my = 1.2. U confounds X and
+    Y (loadings a_x=1.3, a_y=1.1), so the naive Y~M slope is biased; only the latent
+    {X, Y} district fit makes the mediated effect computable. The MVP raised here.
+    """
+    b_xm, b_my, a_x, a_y = 1.5, 0.8, 1.3, 1.1
+    rng = np.random.default_rng(20240616)
+    n = 4000
+    u = rng.normal(0, 1, n)
+    x = a_x * u + rng.normal(0, 0.6, n)
+    m = b_xm * x + rng.normal(0, 0.5, n)
+    y = b_my * m + a_y * u + rng.normal(0, 0.5, n)
+    data = tabular({"X": x, "M": m, "Y": y})
+    graph = dag(["X -> M", "M -> Y", "U -> X", "U -> Y"], latent=["U"])
+    scm = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=20240616).fit()
+    return scm, {"b_xm": b_xm, "b_my": b_my, "fd_effect": b_xm * b_my}
+
+
+def test_ate_computes_frontdoor_effect_near_truth(
+    frontdoor: tuple[SCM, dict[str, float]],
+) -> None:
+    """THE headline flip: front-door now COMPUTES ~1.2 (planted), where the MVP raised.
+
+    The {X, Y} district fits its explicit latent L__X__Y, so Y = b_my*M + loading*L +
+    noise fits the true b_my (the latent absorbs the X-Y confounding the MVP plug-in
+    baked into a wrong slope ~2.37). do(X) severs X from L, the L term is its marginal
+    and cancels in the contrast, leaving the mediated b_xm*b_my = 1.2. Golden ~1.211.
+    """
+    scm, p = frontdoor
+    ate = scm.ate("X", "Y")
+    assert isinstance(ate, SCMResult)
+    assert ate.identified is True
+    # anchor on the PLANTED truth (estimate_effect cannot cross-check a continuous
+    # front-door: E1 is binary-only). Golden seeded value ~1.2114.
+    assert ate.mean() == pytest.approx(p["fd_effect"], abs=0.05)
+    assert ate.mean() == pytest.approx(1.211, abs=0.02)
+    # the naive U-confounded Y~X regression slope is the wrong number the MVP would
+    # have returned -- well above the truth, which is what the latent fit corrects.
+    x = np.asarray(scm.data.matrix(["X"]).reshape(-1))
+    y = np.asarray(scm.data.matrix(["Y"]).reshape(-1))
+    naive = float(np.cov(x, y)[0, 1] / np.var(x))
+    assert naive > 1.5  # confounded well above the 1.2 truth
+    assert abs(ate.mean() - p["fd_effect"]) < abs(naive - p["fd_effect"])
+
+
+def test_frontdoor_districts_are_split(frontdoor: tuple[SCM, dict[str, float]]) -> None:
+    """The structure the computation rests on: {X, Y} confounded, M a singleton."""
+    scm, _ = frontdoor
+    assert scm._latent.confounded_districts == (("X", "Y"),)
+    assert scm._latent.singletons == ("M",)
+    assert scm._latent.latents == ("L__X__Y",)
+
+
+# -- ANCHOR: pm.do on a fitted latent district is exact ----------------------
+
+
+def test_pm_do_on_fitted_district_is_exact(bow: tuple[SCM, dict[str, float]]) -> None:
+    """``pm.do`` on the fitted bow district matches the analytic linear interventional.
+
+    The Track-D 1.4008-vs-1.4000 anchor, here against the *fitted* structural
+    coefficient: E[Y|do(X=x)] from the generative pm.do must equal intercept + b_hat*x
+    (the latent term is L's marginal, mean zero, so it cancels). This pins that the
+    latent-aware generative model computes the interventional from the fitted
+    parameters exactly, not from a re-drawn or confounded path. The do-slope equals
+    the fitted b_hat to ~1e-3.
+    """
+    scm, _ = bow
+    fit = scm._fits["Y"]
+    parents = scm.mechanisms["Y"].parents
+    b_hat = float(fit.param_means["Y__coef"][list(parents).index("X")])
+    intercept = float(fit.param_means["Y__intercept"])
+    r2 = scm.interventional("Y", {"X": 2.0}, n=20000)
+    r0 = scm.interventional("Y", {"X": 0.0}, n=20000)
+    assert isinstance(r2, SCMResult) and isinstance(r0, SCMResult)
+    # E[Y|do(X=2)] == intercept + b_hat*2 (the latent contributes its zero-mean marginal).
+    assert r2.mean() == pytest.approx(intercept + b_hat * 2.0, abs=0.02)
+    # the interventional per-unit slope (a 2-unit step) is exactly the fitted coefficient.
+    assert (r2.mean() - r0.mean()) / 2.0 == pytest.approx(b_hat, abs=0.01)
+
+
+# -- ANCHOR: the three-node two-latent district splits identified from not ----
+
+
+def test_three_node_two_latent_district_splits() -> None:
+    """A 3-node district with two shared latents fits; the clean edge recovers, the
+    confounded one is ridge-y -- the split is automatic (Track-D exp4).
+
+    ADMG A->B->C with A<->C (latent L__A__C) and B<->C (latent L__B__C). A->B has no
+    open bidirected back-door, so bAB recovers ~0.6 with tight sampling. B->C is
+    confounded by B<->C, so bBC sits on the ridge (~1.5 against a true 0.5) with a
+    wide loading posterior. No special-casing -- the explicit latents reproduce the
+    identification structure. Golden: bAB ~0.590, bBC ~1.546.
+    """
+    seed = 5
+    rng = np.random.default_rng(seed)
+    n = 4000
+    g1, g2, h1, h2 = 1.0, 0.9, 0.8, 1.1
+    b_ab, b_bc = 0.6, 0.5
+    u1 = rng.normal(0, 1, n)
+    u2 = rng.normal(0, 1, n)
+    a = g1 * u1 + rng.normal(0, 0.5, n)
+    b = b_ab * a + g2 * u2 + rng.normal(0, 0.5, n)
+    c = b_bc * b + h1 * u1 + h2 * u2 + rng.normal(0, 0.5, n)
+    data = tabular({"A": a, "B": b, "C": c})
+    graph = dag(
+        ["A -> B", "B -> C", "U1 -> A", "U1 -> C", "U2 -> B", "U2 -> C"],
+        latent=["U1", "U2"],
+    )
+    scm = SCM(graph, data, draws=500, tune=800, chains=CHAINS, random_state=seed).fit()
+
+    # the structure: one confounded district {A, B, C}, two latents.
+    assert scm._latent.confounded_districts == (("A", "B", "C"),)
+    assert scm._latent.latents == ("L__A__C", "L__B__C")
+    # B's parents are (A,) + latent L__B__C; C's are (B,) + both latents.
+    assert scm.mechanisms["B"].latents == ("L__B__C",)
+    assert set(scm.mechanisms["C"].latents) == {"L__A__C", "L__B__C"}
+
+    fit_b = scm._fits["B"]
+    coef_ab = float(fit_b.param_means["B__coef"][list(scm.mechanisms["B"].parents).index("A")])
+    fit_c = scm._fits["C"]
+    coef_bc = float(fit_c.param_means["C__coef"][list(scm.mechanisms["C"].parents).index("B")])
+
+    # the CLEAN edge A->B recovers its coefficient with tight sampling.
+    assert coef_ab == pytest.approx(b_ab, abs=0.05)  # golden ~0.590
+    sd_ab = float(np.std(fit_b.params["B__coef"][:, list(scm.mechanisms["B"].parents).index("A")]))
+    assert sd_ab < 0.05  # healthy: the clean edge samples tightly
+
+    # the CONFOUNDED edge B->C is biased onto the ridge, NOT near the truth -- this is
+    # the non-identification signal the honesty layer bounds, not a recovered point.
+    assert abs(coef_bc - b_bc) > 0.3  # off the truth (golden ~1.546)
+    sd_bc = float(np.std(fit_c.params["C__coef"][:, list(scm.mechanisms["C"].parents).index("B")]))
+    assert sd_bc > sd_ab  # the confounded edge's coefficient is far less determined
+
+
+# -- ANCHOR: a confounded-district counterfactual is wider, scaling with lever
+
+
+def test_confounded_district_counterfactual_is_wider_and_scales() -> None:
+    """A bow-district CF is wider than the Markovian one, the width growing with the
+    lever, and reproducible (Track-D anchor 3).
+
+    The unit's Y-residual a_y*U + e_y is pinned by the observation, so the CF point is
+    y_obs + b*(x_cf - x_obs); the WIDTH comes from b's posterior, which is the
+    non-identification ridge in the bow (sd(b) ~0.5) versus tight in the Markovian
+    control (~0.02). So the bow CF is many times wider, and -- because width ~
+    |lever|*sd(b) -- it grows with the lever. The point estimate is unchanged.
+    """
+    a_x, a_y, b, s_x, s_y = 1.3, 1.1, 0.7, 0.6, 0.5
+    n = 400
+
+    rng = np.random.default_rng(20240615)
+    u = rng.normal(0, 1, n)
+    x = a_x * u + rng.normal(0, s_x, n)
+    y = b * x + a_y * u + rng.normal(0, s_y, n)
+    data_bow = tabular({"X": x, "Y": y})
+    scm_bow = SCM(
+        dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"]),
+        data_bow,
+        draws=DRAWS,
+        tune=TUNE,
+        chains=CHAINS,
+        random_state=20240615,
+    ).fit()
+
+    rng2 = np.random.default_rng(20240615)
+    xm = rng2.normal(0, 1, n)
+    ym = b * xm + rng2.normal(0, s_y, n)
+    data_m = tabular({"X": xm, "Y": ym})
+    scm_m = SCM(
+        dag(["X -> Y"]), data_m, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=20240615
+    ).fit()
+
+    def width(scm: SCM, data: TabularData, idx: int, lever: float) -> float:
+        x_obs = float(np.asarray(data.matrix(["X"]).reshape(-1))[idx])
+        cf = scm.counterfactual(data.take([idx]), {"X": x_obs + lever}, "Y", use_draws=True)
+        assert isinstance(cf, SCMResult)
+        lo, hi = cf.interval(0.89)
+        return hi - lo
+
+    idx_bow = int(np.argmax(np.abs(x)))  # a high-|x| unit, where the lever bites
+    idx_m = int(np.argmax(np.abs(xm)))
+
+    w_bow_1 = width(scm_bow, data_bow, idx_bow, -1.0)
+    w_bow_5 = width(scm_bow, data_bow, idx_bow, -5.0)
+    w_m_5 = width(scm_m, data_m, idx_m, -5.0)
+
+    # the bow CF is much wider than the Markovian one at a big lever.
+    assert w_bow_5 > 4.0 * w_m_5
+    # and the bow CF width grows with the lever (width ~ |lever| * sd(b)).
+    assert w_bow_5 > w_bow_1
+    # the underlying mechanism: sd(b) is the ridge in the bow, tight in the control.
+    sd_b_bow = float(np.std(scm_bow._fits["Y"].params["Y__coef"][:, 0]))
+    sd_b_m = float(np.std(scm_m._fits["Y"].params["Y__coef"][:, 0]))
+    assert sd_b_bow > 5.0 * sd_b_m
+
+    # reproducible: a seeded refit gives a bitwise-identical CF width.
+    scm_bow2 = SCM(
+        dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"]),
+        data_bow,
+        draws=DRAWS,
+        tune=TUNE,
+        chains=CHAINS,
+        random_state=20240615,
+    ).fit()
+    assert width(scm_bow2, data_bow, idx_bow, -5.0) == pytest.approx(w_bow_5, abs=1e-9)
+
+    # the POINT is unchanged from the deterministic route (the residual is pinned).
+    x_obs = float(x[idx_bow])
+    point = scm_bow.counterfactual(
+        data_bow.take([idx_bow]), {"X": x_obs - 5.0}, "Y", use_draws=False
+    )
+    assert isinstance(point, SCMResult)
+    assert point.std_error is None  # a single deterministic value
+
+
+# -- ANCHOR: the latent gauge -- a seeded refit is reproducible, no reflection
+
+
+def test_latent_gauge_is_reproducible_and_pins_the_sign(
+    bow: tuple[SCM, dict[str, float]],
+) -> None:
+    """One loading pinned positive: a seeded refit is bitwise reproducible and free of
+    the L -> -L reflection multimodality.
+
+    X is the gauge anchor for L__X__Y (the alphabetically-first endpoint), so its
+    loading is a HalfNormal -- pinned positive. A second fit at the same seed
+    reproduces the structural coefficient exactly (no mode-hopping), and the gauged
+    loading is non-negative on every draw.
+    """
+    scm, _ = bow
+    parents = scm.mechanisms["Y"].parents
+    b_hat = float(scm._fits["Y"].param_means["Y__coef"][list(parents).index("X")])
+
+    # the gauged loading on X is non-negative on every posterior draw (the HalfNormal).
+    load_x = np.asarray(scm._fits["X"].params["X__loading__L__X__Y"])
+    assert float(load_x.min()) >= 0.0
+    assert scm.mechanisms["X"].gauged_latents == ("L__X__Y",)
+
+    # a seeded refit of the same world reproduces the coefficient bitwise (no
+    # reflection multimodality: the gauge fixes the sign, the seed fixes the draws).
+    rng = np.random.default_rng(20240615)
+    n = 400
+    u = rng.normal(0, 1, n)
+    x = 1.3 * u + rng.normal(0, 0.6, n)
+    y = 0.7 * x + 1.1 * u + rng.normal(0, 0.5, n)
+    data = tabular({"X": x, "Y": y})
+    refit = SCM(
+        dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"]),
+        data,
+        draws=300,
+        tune=300,
+        chains=CHAINS,
+        random_state=20240615,
+    ).fit()
+    b_refit = float(refit._fits["Y"].param_means["Y__coef"][list(parents).index("X")])
+    assert b_refit == pytest.approx(b_hat, abs=1e-9)
+
+
+# -- ANCHOR: IV and general-ID keep raising (verify-then-widen, decision 3) ----
+
+
+def test_iv_latent_fit_does_not_impose_exclusion_so_ate_raises() -> None:
+    """IV stays raising: the latent-fit do-contrast misses a valid IV effect, but 2SLS
+    nails it -- so ate() points at estimate_effect rather than return the ridge value.
+
+    Z -> X -> Y with U -> X, U -> Y (U latent) and a WEAK instrument against HEAVY
+    confounding. The latent {X, Y} district fit does not impose Z's exclusion
+    restriction, so X's structural coefficient drifts onto the non-identification
+    ridge (latent-fit b_hat ~1.2 against the true 0.7), while estimate_effect's 2SLS
+    recovers 0.7. This is exactly why ate() keeps raising for the iv strategy.
+    """
+    b_true = 0.7
+    rng = np.random.default_rng(7)
+    n = 4000
+    u = rng.normal(0, 1, n)
+    z = rng.normal(0, 1, n)
+    x = 0.2 * z + 2.0 * u + rng.normal(0, 0.6, n)  # weak Z, heavy confounding
+    y = b_true * x + 2.0 * u + rng.normal(0, 0.5, n)
+    data = tabular({"Z": z, "X": x, "Y": y})
+    graph = dag(["Z -> X", "X -> Y", "U -> X", "U -> Y"], latent=["U"])
+
+    # ate() raises with the pointer (decidable pre-MCMC on the iv strategy).
+    scm = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=7)
+    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    with pytest.raises(NotImplementedError) as exc:
+        scm.ate("X", "Y")
+    assert "iv" in str(exc.value) and "estimate_effect" in str(exc.value)
+
+    # and the reason it must: the latent fit's coefficient misses the truth here,
+    # while 2SLS recovers it -- the exclusion restriction the latent fit cannot see.
+    fitted = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=7).fit()
+    parents = fitted.mechanisms["Y"].parents
+    b_hat = float(fitted._fits["Y"].param_means["Y__coef"][list(parents).index("X")])
+    iv_est = estimate_effect(graph, data, "X", "Y")
+    assert iv_est.value == pytest.approx(b_true, abs=0.06)  # 2SLS nails the truth
+    assert abs(b_hat - b_true) > 0.2  # the latent fit does not -- so ate() rightly raises
+
+
+def test_general_id_strategy_keeps_raising_with_pointer() -> None:
+    """The general-ID functional keeps raising (verify-then-widen): a Verma world that
+    identifies only through do-calculus ID points the caller at estimate_effect.
+
+    A->B->C->D with A<->C (latent) and B<->D (latent): the effect of A on D is
+    identified by the general ID algorithm (strategy 'id'), not adjustment/front-door.
+    Its latent-fit do-contrast was not validated to tolerance in this phase, so ate()
+    raises with the pointer rather than emit a possibly-wrong number. Pre-MCMC.
+    """
+    from ergodic import identify_effect
+
+    graph = dag(
+        ["A -> B", "B -> C", "C -> D", "U1 -> A", "U1 -> C", "U2 -> B", "U2 -> D"],
+        latent=["U1", "U2"],
+    )
+    assert identify_effect(graph, "A", "D").strategy == "id"
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular({k: rng.normal(size=n) for k in "ABCD"})
+    scm = SCM(graph, data)
+    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    with pytest.raises(NotImplementedError) as exc:
+        scm.ate("A", "D")
+    assert "id" in str(exc.value)
+    assert "estimate_effect" in str(exc.value)

@@ -25,13 +25,19 @@ the curve, the range, and the obstruction. That type distinction is the thesis.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     import numpy.typing as npt
+
+    from ._mechanism import Mechanism
+
+    AnyArray = npt.NDArray[Any]
 
 
 @dataclass(frozen=True)
@@ -122,3 +128,98 @@ def linear_sensitivity_curve(
         obstruction=obstruction,
         diagnostics=dict(diagnostics or {}),
     )
+
+
+def latent_prior_sweep(
+    order: Sequence[str],
+    mechanisms: Mapping[str, Mechanism],
+    latents: Sequence[str],
+    observed: Mapping[str, AnyArray],
+    *,
+    treatment: str,
+    outcome: str,
+    low: float,
+    high: float,
+    draws: int,
+    tune: int,
+    chains: int,
+    seed: int,
+    obstruction: str,
+    prior_grid: Sequence[float] = (0.3, 0.7, 1.0, 1.5, 2.0, 3.0),
+) -> Sensitivity:
+    """The non-linear non-identified bound: refit the district over a confounding grid.
+
+    The analytic ``b(c)`` curve is exact only for a linear-Gaussian district. For a
+    non-linear or non-Gaussian one (a categorical/binary endpoint), the bound is this
+    *latent-prior sweep*: refit the confounded district under a grid of latent loading
+    prior standard deviations -- each a different honest belief about the confounding
+    strength -- and read the do-contrast ``E[Y|do(high)] - E[Y|do(low)]`` at each. The
+    across-prior spread is the partial-identification interval the pressure-test
+    measured (same data, the answer follows the confounding prior). The grid sd is the
+    ``confounding`` axis; ``identified_at_zero`` is the contrast at the tightest
+    (smallest-sd) prior, the closest the sweep comes to assuming no confounding.
+
+    Import is function-local on :mod:`._compose` to avoid pulling pymc in at module
+    load (the bare-install boundary), and the fit/contrast reuse the same joint
+    machinery the identified path does.
+    """
+    from . import _compose
+
+    sds = np.asarray(prior_grid, dtype=np.float64)
+    contrasts: list[float] = []
+    for i, sd in enumerate(sds):
+        mechs = {n: _with_loading_sd(mechanisms[n], float(sd)) for n in order}
+        fits = _compose.fit_district(
+            order,
+            mechs,
+            latents,
+            observed,
+            draws=draws,
+            tune=tune,
+            chains=chains,
+            seed=seed + i,
+        )
+        n_units = len(next(iter(observed.values())))
+        contrast = _compose.ate_contrast(
+            order,
+            mechs,
+            fits,
+            treatment,
+            outcome,
+            low=low,
+            high=high,
+            n=n_units,
+            seed=seed + i,
+            latents=latents,
+        )
+        contrasts.append(float(np.mean(contrast)))
+    effect = np.asarray(contrasts, dtype=np.float64)
+    return Sensitivity(
+        treatment=treatment,
+        outcome=outcome,
+        confounding=sds,
+        effect=effect,
+        identified_at_zero=float(effect[0]),
+        obstruction=obstruction,
+        diagnostics={
+            "sweep": 1.0,
+            "prior_sd_min": float(sds.min()),
+            "prior_sd_max": float(sds.max()),
+        },
+    )
+
+
+def _with_loading_sd(mech: Mechanism, sd: float) -> Mechanism:
+    """A copy of ``mech`` with its latent loading prior sd set to ``sd`` (if it has one).
+
+    A node with no incident latent is returned unchanged. The sweep moves only the
+    confounding-channel prior, holding the structural priors fixed, so the spread it
+    reports is the confounding's, not a reparameterization of the whole model.
+    """
+    from ._mechanism import CategoricalGumbelMax, GaussianAdditive
+
+    # only the two built-in latent-carrying mechanisms have a loading_prior_sd to move;
+    # anything else (a latent-free node) is returned unchanged.
+    if not isinstance(mech, GaussianAdditive | CategoricalGumbelMax) or not mech.latents:
+        return mech
+    return replace(mech, loading_prior_sd=sd)

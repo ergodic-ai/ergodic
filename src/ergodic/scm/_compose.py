@@ -39,8 +39,10 @@ import numpy as np
 
 from ._mechanism import (
     CategoricalGumbelMax,
+    FitResult,
     GaussianAdditive,
     Mechanism,
+    encode_parent_design,
 )
 
 if TYPE_CHECKING:
@@ -48,8 +50,6 @@ if TYPE_CHECKING:
     from typing import Any
 
     import numpy.typing as npt
-
-    from ._mechanism import FitResult
 
     Array = npt.NDArray[np.float64]
     IntArray = npt.NDArray[np.int64]
@@ -103,6 +103,8 @@ def _build_generative(
     order: Sequence[str],
     mechanisms: Mapping[str, Mechanism],
     n: int,
+    *,
+    latents: Sequence[str] = (),
 ) -> Any:
     """One PyMC generative model: each node built by its own mechanism, vector-shaped.
 
@@ -115,14 +117,211 @@ def _build_generative(
     categorical to an integer code -- and downstream propagates through the mixed
     graph. Categorical mechanisms must arrive with their class count resolved (see
     :func:`_resolved_mechanisms`).
+
+    ``latents`` are the district confounders: each is built first as a per-unit
+    ``Normal(0, 1)`` RV (the explicit common cause of its district endpoints) and
+    placed in ``nodes`` under its own name, so a mechanism that lists it in
+    ``latents`` reads it like any parent. A latent is *not* a fitted parameter -- it
+    is re-drawn fresh here, exactly as ``latent_projection`` semantics intend (a
+    ``<->`` is a marginalized common cause) -- so it never appears in the merged
+    posterior; only the loadings on it do. ``pm.do`` on an endpoint severs that
+    endpoint from the latent while its district sibling still reads it, which is what
+    makes the confounding cancel in an interventional contrast.
     """
     import pymc as pm
 
     with pm.Model() as model:
         nodes: dict[str, Any] = {}
+        for lat in latents:
+            nodes[lat] = pm.Normal(lat, 0.0, 1.0, shape=(n,))
         for name in order:
             nodes[name] = mechanisms[name].generative_rv(nodes, n)
     return model
+
+
+def fit_district(
+    order: Sequence[str],
+    mechanisms: Mapping[str, Mechanism],
+    latents: Sequence[str],
+    observed: Mapping[str, AnyArray],
+    *,
+    draws: int,
+    tune: int,
+    chains: int,
+    seed: int,
+    target_accept: float = 0.95,
+) -> dict[str, FitResult]:
+    """Joint NUTS fit of a confounded district, the Track-D recipe.
+
+    A district whose nodes share a ``<->`` does not factorize -- the latent couples
+    them -- so the district fits as one model rather than per node. Each latent is a
+    non-centered per-unit ``Normal(0, 1)`` (the explicit common cause); each district
+    node carries its structural equation observed at its data, conditioning on its
+    observed parents (in-district siblings by their data, external parents likewise)
+    and adding ``loading_L * L`` for each incident latent. The gauge (one loading per
+    latent pinned positive, via the mechanism's ``gauged_latents``) kills the
+    reflection symmetry, and a high ``target_accept`` tames the non-identified ridge.
+
+    ``order`` is the district's nodes in topological order; ``observed`` maps every
+    referenced name (district nodes and their external parents) to its data column
+    (codes for a discrete column, floats otherwise). Returns one
+    :class:`FitResult` per district node, so the merged-posterior machinery (which is
+    node-keyed) is unchanged -- the loadings land on the node whose ``loading_name``
+    matches. The latent RVs are *not* returned (the generative model re-draws them);
+    only the loadings are.
+
+    The non-identified directions sample badly here (low ESS on a coupled latent's
+    loadings, the ``corr(effect, confounding) ~ -1`` ridge); that pathology is the
+    non-identification signal, not a bug, and the honesty layer bounds exactly those
+    effects. A clean district edge (no open bidirected back-door) still recovers its
+    coefficient with healthy sampling.
+    """
+    import pymc as pm
+
+    n = len(next(iter(observed.values())))
+    with pm.Model():
+        lat_rvs: dict[str, Any] = {}
+        for lat in latents:
+            raw = pm.Normal(f"{lat}__raw", 0.0, 1.0, shape=(n,))  # non-centered
+            lat_rvs[lat] = pm.Deterministic(lat, raw)
+        for name in order:
+            mech = mechanisms[name]
+            _district_likelihood(mech, observed, lat_rvs)
+        idata = pm.sample(
+            draws=draws,
+            tune=tune,
+            chains=chains,
+            target_accept=target_accept,
+            random_seed=seed,
+            progressbar=False,
+            compute_convergence_checks=False,
+        )
+    post = idata.posterior
+    return {name: _split_fit(mechanisms[name], post) for name in order}
+
+
+def _district_likelihood(
+    mech: Mechanism,
+    observed: Mapping[str, AnyArray],
+    lat_rvs: Mapping[str, Any],
+) -> Any:
+    """Add one district node's observed likelihood to the active model.
+
+    A Gaussian node is ``Normal(b0 + encode(PA) . w + sum loading_L L, sigma)``
+    observed at its data; a categorical node the equivalent ``Categorical`` over
+    per-class logits. The parameter RVs share the mechanism's names and the
+    loadings share its gauge, so the generative view reads the fitted draws by name.
+    """
+    import pymc as pm
+
+    n = len(next(iter(observed.values())))
+    raw = _raw_parent_design(mech, observed)
+    if isinstance(mech, GaussianAdditive):
+        intercept = pm.Normal(mech.intercept_name, 0.0, mech.coef_prior_sd)
+        mean: Any = intercept * pm.math.ones((n,))
+        if mech.parents:
+            design = encode_parent_design(raw, mech.parent_cards)
+            coef = pm.Normal(mech.coef_name, 0.0, mech.coef_prior_sd, shape=mech._design_width)
+            mean = mean + pm.math.dot(design, coef)
+        for lat in mech.latents:
+            mean = mean + mech._loading_rv(lat) * lat_rvs[lat]
+        sigma = pm.HalfNormal(mech.sigma_name, mech.sigma_prior_sd)
+        y = np.asarray(observed[mech.name], dtype=np.float64)
+        return pm.Normal(mech.name, mu=mean, sigma=sigma, observed=y)
+    if isinstance(mech, CategoricalGumbelMax):
+        k = mech.n_categories
+        if k <= 0:
+            raise ValueError(
+                f"categorical district node {mech.name!r} has an unresolved class count"
+            )
+        bias = pm.Normal(mech.bias_name, 0.0, mech.coef_prior_sd, shape=k)
+        logits: Any = bias[None, :] * pm.math.ones((n, 1))
+        if mech.parents:
+            design = encode_parent_design(raw, mech.parent_cards)
+            weight = pm.Normal(
+                mech.weight_name, 0.0, mech.coef_prior_sd, shape=(mech._design_width, k)
+            )
+            logits = logits + pm.math.dot(design, weight)
+        for lat in mech.latents:
+            logits = logits + lat_rvs[lat][:, None] * mech._loading_rv(lat)[None, :]
+        codes = np.asarray(observed[mech.name], dtype=np.int64)
+        return pm.Categorical(mech.name, logit_p=logits, observed=codes)
+    raise TypeError(  # pragma: no cover - both built-ins are handled above.
+        f"district fit over node {mech.name!r} of unsupported mechanism {type(mech).__name__}"
+    )
+
+
+def _raw_parent_design(mech: Mechanism, observed: Mapping[str, AnyArray]) -> Array:
+    """The ``(n, p)`` raw parent matrix for a district node, from observed columns."""
+    if not mech.parents:
+        n = len(next(iter(observed.values())))
+        return np.empty((n, 0), dtype=np.float64)
+    return np.column_stack([np.asarray(observed[p], dtype=np.float64) for p in mech.parents])
+
+
+def _split_fit(mech: Mechanism, post: Any) -> FitResult:
+    """Pull one node's parameters (coef/intercept/sigma/loadings) out of the joint posterior.
+
+    The joint district posterior carries every node's parameters under the
+    mechanism's disciplined names; this slices out the ones belonging to ``mech`` and
+    rebuilds the per-node :class:`FitResult` (with ``n_categories`` for a categorical
+    node), so the merged-posterior store stays node-keyed exactly as the per-node
+    path produces.
+    """
+    params: dict[str, Array] = {}
+    for pname in _param_names(mech):
+        params[pname] = _flatten_post(post[pname])
+    means = {k: np.asarray(v.mean(axis=0), dtype=np.float64) for k, v in params.items()}
+    n_cat = mech.n_categories if isinstance(mech, CategoricalGumbelMax) else 0
+    return FitResult(params=params, param_means=means, n_categories=n_cat)
+
+
+def _param_names(mech: Mechanism) -> list[str]:
+    """Every parameter name a district fit produces for ``mech`` (incl. loadings)."""
+    names: list[str] = []
+    if isinstance(mech, GaussianAdditive):
+        names.append(mech.intercept_name)
+        names.append(mech.sigma_name)
+        if mech.parents:
+            names.append(mech.coef_name)
+    elif isinstance(mech, CategoricalGumbelMax):
+        names.append(mech.bias_name)
+        if mech.parents:
+            names.append(mech.weight_name)
+    names.extend(_loading_param_names(mech))
+    return names
+
+
+def _loading_param_names(mech: Mechanism) -> list[str]:
+    """The loading parameter names a fit emits for ``mech`` (the gauge splits some).
+
+    A gauged Gaussian loading is one ``HalfNormal`` under ``loading_name``. A gauged
+    categorical loading is split into ``..__0`` (the pinned class) and ``..__rest``;
+    an ungauged one is a single vector under ``loading_name``. These must match the
+    RVs :meth:`_loading_rv` declares, since the generative view re-declares them and
+    ``sample_posterior_predictive`` matches by name.
+    """
+    out: list[str] = []
+    # only the two built-in mechanisms carry latents (and so a loading_name); a
+    # latent-free Markovian mechanism returns no loading names. Narrowing to the
+    # union keeps loading_name resolvable without widening the Mechanism protocol.
+    if not isinstance(mech, GaussianAdditive | CategoricalGumbelMax):
+        return out
+    gauged = mech.gauged_latents
+    for lat in mech.latents:
+        base = mech.loading_name(lat)
+        if isinstance(mech, CategoricalGumbelMax) and lat in gauged and mech.n_categories > 1:
+            out.append(f"{base}__0")
+            out.append(f"{base}__rest")
+        else:
+            out.append(base)
+    return out
+
+
+def _flatten_post(arr: Any) -> Array:
+    """Collapse an arviz ``(chain, draw, ...)`` posterior array to ``(S, ...)``."""
+    a = np.asarray(arr.values, dtype=np.float64)
+    return a.reshape(-1, *a.shape[2:])
 
 
 def _is_categorical(mech: Mechanism) -> bool:
@@ -191,6 +390,7 @@ def interventional_draws(
     *,
     n: int,
     seed: int,
+    latents: Sequence[str] = (),
 ) -> AnyArray:
     """Draws of ``target`` under ``do``, through ``pm.do`` on the generative model.
 
@@ -200,7 +400,8 @@ def interventional_draws(
     ``sample_posterior_predictive`` over the merged posterior, so the draws carry
     parameter uncertainty. ``target`` must not be an intervened node (it leaves the
     predictive set). A categorical target's draws are returned as integer codes (the
-    caller forms the marginal); a continuous target's as floats.
+    caller forms the marginal); a continuous target's as floats. ``latents`` are the
+    district confounders woven into the generative model.
     """
     from pymc.model.transform.conditioning import do as pm_do
 
@@ -210,7 +411,7 @@ def interventional_draws(
             "leaves the predictive set. Read a downstream node instead"
         )
     mechs = _resolved_mechanisms(mechanisms, fits)
-    model = _build_generative(order, mechs, n)
+    model = _build_generative(order, mechs, n, latents=latents)
     idata = _merged_idata(fits)
     intervention = {k: _intervention_vector(mechs[k], v, n) for k, v in do.items()}
     model_do = pm_do(model, intervention)
@@ -229,6 +430,7 @@ def ate_contrast(
     high: float,
     n: int,
     seed: int,
+    latents: Sequence[str] = (),
 ) -> Array:
     """A posterior over ``E[Y | do(X = high)] - E[Y | do(X = low)]``.
 
@@ -241,6 +443,12 @@ def ate_contrast(
     type (a binary/categorical level is pinned as its integer code); the outcome
     must be a numeric (Gaussian-additive) node -- a categorical contrast has no
     scalar difference, and the caller gates that.
+
+    ``latents`` are the district confounders. When the treatment is a district
+    endpoint, ``pm.do`` severs it from the latent while the outcome (its district
+    sibling, or a downstream node) still reads the latent's marginal, which has the
+    same mean at both levels and so cancels in the contrast -- this is exactly what
+    lets an identified-despite-confounding effect (front-door and its kin) compute.
     """
     from pymc.model.transform.conditioning import do as pm_do
 
@@ -248,7 +456,7 @@ def ate_contrast(
     idata = _merged_idata(fits)
 
     def per_draw_mean(level: float) -> Array:
-        model = _build_generative(order, mechs, n)
+        model = _build_generative(order, mechs, n, latents=latents)
         model_do = pm_do(model, {treatment: _intervention_vector(mechs[treatment], level, n)})
         preds = _ppc_target(model_do, idata, outcome, seed=seed)
         arr = np.asarray(preds.to_numpy(), dtype=np.float64)
@@ -266,13 +474,15 @@ def observational_draws(
     *,
     n: int,
     seed: int,
+    latents: Sequence[str] = (),
 ) -> AnyArray:
     """Posterior-predictive draws of ``target`` from the generative model (no do).
 
     A categorical target returns integer codes; a continuous target floats.
+    ``latents`` are the district confounders woven into the generative model.
     """
     mechs = _resolved_mechanisms(mechanisms, fits)
-    model = _build_generative(order, mechs, n)
+    model = _build_generative(order, mechs, n, latents=latents)
     idata = _merged_idata(fits)
     preds = _ppc_target(model, idata, target, seed=seed)
     return _read_target(preds, mechs[target])

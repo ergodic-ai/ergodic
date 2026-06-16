@@ -363,6 +363,136 @@ def test_scm_query_before_fit_raises() -> None:
         scm.interventional("cat", {"cont": 1.0})
 
 
+# -- latent-district structure analysis (the _district module, dep-free) ------
+
+
+def test_scm_accepts_an_admg_graph() -> None:
+    """The construction guard is relaxed: an ADMG (<-> edges) builds, not raises.
+
+    An ADMG over the observed margin realizes each bidirected edge as a latent; the
+    SCM fits the observed nodes (all of them carry data) and the latent structure is
+    read off the projection. (A bow -- a directed and a bidirected edge on the *same*
+    pair -- is written instead with an explicit ``latent=`` confounder, since the
+    graph data model holds one edge per pair; that path is covered elsewhere.)
+    """
+    from ergodic import admg
+
+    rng = np.random.default_rng(0)
+    data = tabular({k: rng.normal(size=30) for k in "ABC"})
+    g = admg(["A -> B", "B -> C", "A <-> C"])
+    assert g.is_admg()
+    scm = SCM(g, data)
+    assert scm.observed == ("A", "B", "C")
+    assert scm._latent.latents == ("L__A__C",)
+    assert scm._latent.confounded_districts == (("A", "C"),)
+    assert scm._latent.singletons == ("B",)
+
+
+def test_latent_structure_singleton_district_is_markovian() -> None:
+    """A DAG with no bidirected edge: every node is a singleton, no latents (MVP path)."""
+    from ergodic.graph._primitives import latent_projection
+    from ergodic.scm._district import latent_structure
+
+    g = dag(["A -> B", "B -> C"])
+    ls = latent_structure(latent_projection(g))
+    assert ls.latents == ()
+    assert not ls.has_latents
+    assert ls.confounded_districts == ()
+    assert set(ls.singletons) == {"A", "B", "C"}
+
+
+def test_latent_structure_names_one_latent_per_bidirected_edge() -> None:
+    """Each <-> becomes one latent ``L__{u}__{v}`` (sorted), incident to both ends.
+
+    The gauge anchor is the alphabetically-first endpoint: its loading is pinned
+    positive. A node in a multi-edge district carries one latent per incident edge.
+    """
+    from ergodic.graph._primitives import latent_projection
+    from ergodic.scm._district import latent_name, latent_structure
+
+    # three-node, two-latent district: A->B->C, A<->C (via U1), B<->C (via U2).
+    g = dag(
+        ["A -> B", "B -> C", "U1 -> A", "U1 -> C", "U2 -> B", "U2 -> C"],
+        latent=["U1", "U2"],
+    )
+    ls = latent_structure(latent_projection(g))
+    assert ls.latents == ("L__A__C", "L__B__C")
+    assert latent_name("C", "A") == "L__A__C"  # sorted, order-independent
+    # the whole {A, B, C} is one confounded district; no singletons.
+    assert ls.confounded_districts == (("A", "B", "C"),)
+    assert ls.singletons == ()
+    # incidence: A and C share L__A__C; B and C share L__B__C; C touches both.
+    assert ls.latents_of("A") == ("L__A__C",)
+    assert ls.latents_of("B") == ("L__B__C",)
+    assert set(ls.latents_of("C")) == {"L__A__C", "L__B__C"}
+    # gauge anchors are the first endpoints (A for A<->C, B for B<->C).
+    assert ls.gauged_of("A") == ("L__A__C",)
+    assert ls.gauged_of("B") == ("L__B__C",)
+    assert ls.gauged_of("C") == ()  # C is never the first endpoint, so anchors nothing
+
+
+def test_latent_structure_frontdoor_splits_district_from_singleton() -> None:
+    """The front-door C1 world: {X, Y} is the confounded district, M its own singleton.
+
+    X->M->Y with U->X, U->Y latent projects to X<->Y plus the directed chain, so the
+    mediator M sits outside the confounded district -- the joint district fit
+    conditions on M as an external observed parent of Y.
+    """
+    from ergodic.graph._primitives import latent_projection
+    from ergodic.scm._district import latent_structure
+
+    g = dag(["X -> M", "M -> Y", "U -> X", "U -> Y"], latent=["U"])
+    ls = latent_structure(latent_projection(g))
+    assert ls.latents == ("L__X__Y",)
+    assert ls.confounded_districts == (("X", "Y"),)
+    assert ls.singletons == ("M",)
+    assert ls.node_district["M"] == ("M",)
+    assert ls.node_district["X"] == ("X", "Y")
+
+
+def test_mechanism_carries_incident_latents_from_the_structure() -> None:
+    """A district node's mechanism lists its incident latents and the ones it gauges.
+
+    ``_build_mechanism`` pours the structure's incidence onto the node's mechanism,
+    so the fit and the generative view both see the loading RVs. A Markovian node
+    lists no latents and reduces to the MVP mechanism.
+    """
+    rng = np.random.default_rng(0)
+    data = tabular({"X": rng.normal(size=30), "Y": rng.normal(size=30)})
+    g = dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"])
+    scm = SCM(g, data)
+    # X is the gauge anchor (min(X, Y)); both carry the latent, X's loading is pinned.
+    assert scm.mechanisms["X"].latents == ("L__X__Y",)
+    assert scm.mechanisms["X"].gauged_latents == ("L__X__Y",)
+    assert scm.mechanisms["Y"].latents == ("L__X__Y",)
+    assert scm.mechanisms["Y"].gauged_latents == ()  # Y is not the anchor
+    assert scm.mechanisms["Y"].parents == ("X",)  # the latent is not an observed parent
+
+
+def test_district_size_cap_warns_not_raises() -> None:
+    """Decision 5: a confounded district over the cap warns (advisory), does not raise.
+
+    A big district samples slower, not wrong, so the cap is a warning with a pointer
+    to a screen. Set the cap to 1 so a 2-node district trips it, dep-free (the warning
+    fires at construction, before any fit).
+    """
+    import warnings
+
+    rng = np.random.default_rng(0)
+    data = tabular({"X": rng.normal(size=30), "Y": rng.normal(size=30)})
+    g = dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        SCM(g, data, district_size_cap=1)
+    msgs = [str(w.message) for w in caught]
+    assert any("over the cap" in m and "slow" in m for m in msgs)
+    # under a generous cap, no warning.
+    with warnings.catch_warnings(record=True) as caught2:
+        warnings.simplefilter("always")
+        SCM(g, data, district_size_cap=8)
+    assert not [w for w in caught2 if "over the cap" in str(w.message)]
+
+
 def test_scm_unknown_node_raises() -> None:
     data = _toy_data()
     g = dag(["cont -> cat"])
@@ -400,36 +530,51 @@ def test_ate_dml_engine_is_stubbed_with_pointer() -> None:
         scm.ate("X", "Y", engine="dml")
 
 
-def test_ate_raises_on_frontdoor_identified_effect_not_a_wrong_point() -> None:
-    """C1: an effect identified by a NON-back-door criterion raises, never a point.
+def test_ate_computes_frontdoor_via_latent_district() -> None:
+    """Latent-ADMG phase (flips the MVP C1 raise): front-door now COMPUTES, not raises.
 
     The front-door world U->X, U->Y, X->M, M->Y (U latent) has a KNOWN-identified
-    effect (true 1.2), but the SCM posterior plug-in computes back-door
-    g-computation only -- on the U-confounded Y~M fit it would return a confident
-    wrong number (~2.37) stamped identified=True. So the engine must refuse: it is
-    gated on the identification *strategy* and raises with a pointer to
-    estimate_effect. The raise is decidable before any MCMC.
+    effect (true 1.2). The MVP plug-in raised here, because dropping U left the Y~M
+    fit confounded (it would have returned ~2.37). This phase realizes the X<->Y
+    bidirected edge as an explicit latent in the {X, Y} district, so the structural
+    mechanism on the causal path fits clean and the do-contrast recovers the
+    identified value. The strategy gate therefore now *admits* front-door (alongside
+    adjustment and the null case); it is no longer in the raise set.
+
+    Dep-free here (the gate decision is pre-MCMC): the numeric 1.2 is the
+    pymc-gated golden test ``test_ate_computes_frontdoor_effect_near_truth``. This
+    asserts the routing was flipped -- the strategy is identified-by-front-door and
+    the gate lets it through to the contrast rather than raising.
     """
     graph = dag(["U -> X", "U -> Y", "X -> M", "M -> Y"], latent=["U"])
 
-    # the effect IS identified -- by front-door, not adjustment. This documents
-    # that the MVP defers a known-identified effect, not a non-identified one.
+    # the effect IS identified -- by front-door, not adjustment.
     ident = identify_effect(graph, "X", "Y")
     assert ident.identifiable is True
     assert ident.strategy == "frontdoor"
+    # the flip: front-door is now in the SCM's computed set, not the raise set.
+    assert ident.strategy in ("adjustment", "null", "frontdoor")
 
     rng = np.random.default_rng(0)
     n = 30
     data = tabular({"X": rng.normal(size=n), "M": rng.normal(size=n), "Y": rng.normal(size=n)})
     scm = SCM(graph, data)
-    # short-circuit only the fit gate; the strategy gate fires before any sampling.
-    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
+    # The district {X, Y} is confounded (the latent L__X__Y), M is its own singleton:
+    # this is the structure the joint fit reads. Confirming it dep-free documents the
+    # realization that makes the front-door effect computable.
+    assert scm._latent.latents == ("L__X__Y",)
+    assert scm._latent.confounded_districts == (("X", "Y"),)
+    assert "M" in scm._latent.singletons
+    # the front-door strategy must NOT hit the strategy-gate's NotImplementedError.
+    # Drive ate() past the fit gate with empty fits: the strategy gate (the C1 raise)
+    # would fire FIRST if front-door were still refused. It does not -- so ate() runs
+    # on to the contrast and fails LATER in the compose path on the empty fit, never
+    # raising the "identified by the 'frontdoor' criterion" message.
+    scm._fits = dict.fromkeys(scm.mechanisms, FitResult(params={}, param_means={}, n_categories=0))
     assert scm.fitted
-    with pytest.raises(NotImplementedError) as exc:
+    with pytest.raises(Exception) as exc:  # the gate raise is what we assert is absent
         scm.ate("X", "Y")
-    msg = str(exc.value)
-    assert "frontdoor" in msg
-    assert "estimate_effect" in msg
+    assert "is identified by the 'frontdoor' criterion" not in str(exc.value)
 
 
 def test_latent_node_rejected_as_intervention_target() -> None:
@@ -690,6 +835,11 @@ def _fake_fit(n_categories: int) -> FitResult:
     return FitResult(params={}, param_means={}, n_categories=n_categories)
 
 
+def _empty_fits(scm: SCM) -> dict[str, FitResult]:
+    """Empty fits for every mechanism, to drive the pre-MCMC strategy gate dep-free."""
+    return {node: _fake_fit(0) for node in scm.mechanisms}
+
+
 def test_intervention_vector_dtypes_by_node_kind() -> None:
     """A categorical do-target pins as an int code; a continuous one as a float.
 
@@ -717,12 +867,14 @@ def test_marginal_from_codes_is_normalized_bincount() -> None:
     assert marginal_from_codes(np.array([], dtype=np.int64), 4).tolist() == [0.0, 0.0, 0.0, 0.0]
 
 
-def test_c1_frontdoor_gate_holds_for_a_binary_treatment() -> None:
-    """C1 is type-agnostic: a binary-treatment front-door effect still raises a pointer.
+def test_frontdoor_computes_for_a_binary_treatment_too() -> None:
+    """Front-door is type-agnostic in the latent phase: a binary treatment also computes.
 
-    The strategy gate fires before any MCMC, so a known-identified-by-front-door
-    effect raises NotImplementedError (never a confident wrong point) even when the
-    treatment is binary. Dep-free: the raise is pre-sampler.
+    The flip is type-agnostic: a binary-treatment front-door effect is now admitted by
+    the strategy gate (not raised), exactly as the continuous one is. The latent {X, Y}
+    district fits with X a Gumbel-max node; the gate lets front-door through. Dep-free
+    (the gate decision is pre-sampler); the binary-treatment number rides the same
+    machinery the golden test exercises for the continuous case.
     """
     graph = dag(["U -> X", "U -> Y", "X -> M", "M -> Y"], latent=["U"])
     assert identify_effect(graph, "X", "Y").strategy == "frontdoor"
@@ -733,8 +885,53 @@ def test_c1_frontdoor_gate_holds_for_a_binary_treatment() -> None:
         types={"X": "categorical"},
     )
     scm = SCM(graph, data)
-    scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
-    with pytest.raises(NotImplementedError) as exc:
+    assert scm._latent.confounded_districts == (("X", "Y"),)
+    # the strategy gate must admit front-door (not raise the C1 NotImplementedError);
+    # past it, ate() runs to the contrast and fails later on the empty fit instead.
+    scm._fits = {
+        node: FitResult(params={}, param_means={}, n_categories=2 if node == "X" else 0)
+        for node in scm.mechanisms
+    }
+    with pytest.raises(Exception) as exc:  # the gate raise is what we assert is absent
         scm.ate("X", "Y")
-    assert "frontdoor" in str(exc.value)
-    assert "estimate_effect" in str(exc.value)
+    assert "is identified by the 'frontdoor' criterion" not in str(exc.value)
+
+
+def test_ate_keeps_raising_for_iv_and_general_id() -> None:
+    """Decision 3 (verify-then-widen): IV and the general-ID functional still raise.
+
+    Front-door was relaxed (it computes), but the SCM's latent-fit do-contrast does
+    not impose an instrument's exclusion restriction, so an IV world's X->Y
+    coefficient can drift onto the same non-identification ridge as a bow (verified
+    live: a weak-instrument, heavy-confounding world gives a latent-fit b_hat ~1.23
+    against a true 0.7 that 2SLS recovers exactly). The general-ID functional is
+    likewise not validated to tolerance. Both therefore keep raising with a pointer
+    to estimate_effect. The raise is decidable pre-MCMC (gated on the strategy).
+    """
+    rng = np.random.default_rng(0)
+    n = 30
+
+    # IV world: Z -> X -> Y, U -> X, U -> Y (U latent). strategy == "iv".
+    g_iv = dag(["Z -> X", "X -> Y", "U -> X", "U -> Y"], latent=["U"])
+    assert identify_effect(g_iv, "X", "Y").strategy == "iv"
+    data_iv = tabular({"Z": rng.normal(size=n), "X": rng.normal(size=n), "Y": rng.normal(size=n)})
+    scm_iv = SCM(g_iv, data_iv)
+    scm_iv._fits = _empty_fits(scm_iv)
+    with pytest.raises(NotImplementedError) as exc_iv:
+        scm_iv.ate("X", "Y")
+    assert "iv" in str(exc_iv.value)
+    assert "estimate_effect" in str(exc_iv.value)
+
+    # general-ID (Verma) world: A->B->C->D, A<->C (U1), B<->D (U2). strategy == "id".
+    g_id = dag(
+        ["A -> B", "B -> C", "C -> D", "U1 -> A", "U1 -> C", "U2 -> B", "U2 -> D"],
+        latent=["U1", "U2"],
+    )
+    assert identify_effect(g_id, "A", "D").strategy == "id"
+    data_id = tabular({k: rng.normal(size=n) for k in "ABCD"})
+    scm_id = SCM(g_id, data_id)
+    scm_id._fits = _empty_fits(scm_id)
+    with pytest.raises(NotImplementedError) as exc_id:
+        scm_id.ate("A", "D")
+    assert "id" in str(exc_id.value)
+    assert "estimate_effect" in str(exc_id.value)
