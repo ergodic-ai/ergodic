@@ -603,6 +603,94 @@ def test_continuous_counterfactual_with_binary_parent_is_exact() -> None:
     assert (cf.mean() - float(y[idx])) == pytest.approx(coef_b, abs=1e-9)
 
 
+def test_categorical_ancestor_counterfactual_interval_spreads_per_draw() -> None:
+    """M1 golden: a CF through a categorical ANCESTOR carries its parameter width.
+
+    Near-boundary topology Z -> C(binary) -> Y, Z -> Y at a SMALL n, so C's
+    logit-slope posterior sd is large and C's decision flips across draws under an
+    upstream do(Z). C dominates Y (coef ~6), so the flip is the lion's share of the
+    counterfactual spread. The fix re-decides the ancestor PER posterior draw (the
+    abducted Gumbel held fixed, the logit parameters integrated over), so that width
+    enters the interval; the old code collapsed the ancestor to a single
+    posterior-mean decision and dropped it.
+
+    The discriminating signal: the per-draw counterfactual is BIMODAL (some draws on
+    the C=0 branch near the Z direct effect, some on the C=1 branch near +6), so its
+    95% width is coefficient-sized (>3). Under the posterior-mean collapse every draw
+    sits in one narrow band (width ~0.3), so this test would fail if the code
+    regressed. The point estimate (use_draws=False) and the far/large-n width are
+    unchanged.
+    """
+
+    def _flip_world(n: int, seed: int) -> tuple[SCM, dict[str, np.ndarray]]:
+        rng = np.random.default_rng(seed)
+        z = rng.normal(0, 1, n)
+        c = rng.binomial(1, 1.0 / (1.0 + np.exp(-(1.0 * z)))).astype(int)
+        y = 6.0 * c + 0.1 * z + rng.normal(0, 0.05, n)
+        data = tabular({"Z": z, "C": c, "Y": y}, types={"C": "categorical"})
+        scm = SCM(
+            dag(["Z -> C", "Z -> Y", "C -> Y"]),
+            data,
+            draws=300,
+            tune=300,
+            chains=CHAINS,
+            random_state=seed,
+        ).fit()
+        return scm, {"Z": z, "C": c, "Y": y}
+
+    def _pick_flip(scm: SCM, cols: dict[str, np.ndarray]) -> tuple[int, float]:
+        # the (unit, do(Z)) whose C decision is closest to 50/50 across the logit
+        # posterior, using the SAME abduction seed the counterfactual path uses.
+        mech = scm.mechanisms["C"]
+        assert isinstance(mech, CategoricalGumbelMax)
+        fit = scm._fits["C"]
+        c_seed = scm._seed(6) + list(scm._order).index("C")
+        best = (0, 0.0, 1.0)
+        for i in range(scm.data.n_rows):
+            zf = float(cols["Z"][i])
+            g = mech.abduct(fit, np.array([cols["C"][i]]), np.array([[zf]]), seed=c_seed)
+            for zp in np.linspace(-6, 6, 61):
+                ld = mech.logits_per_draw(fit, np.full((1, 1, 1), zp))
+                frac1 = float(np.argmax(ld + g[None], axis=-1).mean())
+                if abs(frac1 - 0.5) < best[2]:
+                    best = (i, float(zp), abs(frac1 - 0.5))
+        return best[0], best[1]
+
+    # NEAR-BOUNDARY: small n -> wide logit posterior, the ancestor flips across draws.
+    scm, cols = _flip_world(n=15, seed=3)
+    idx, z_prime = _pick_flip(scm, cols)
+    unit = scm.data.take([idx])
+
+    near = scm.counterfactual(unit, {"Z": z_prime}, "Y", use_draws=True)
+    assert isinstance(near, SCMResult)
+    draws = near.draws()
+    # the interval is coefficient-sized (the flip is priced in), NOT the ~0.3-wide
+    # continuous-hop-only band the posterior-mean collapse would give.
+    lo, hi = near.interval(0.95)
+    assert (hi - lo) > 3.0, f"95% width {hi - lo:.3f} too narrow -- collapsed?"
+    assert near.std_error is not None and near.std_error > 1.0
+    # genuinely bimodal: both branches appear (C=0 branch near 0, C=1 branch near +6).
+    assert float(draws.min()) < 1.0
+    assert float(draws.max()) > 3.0
+    assert 0.05 < float((draws > 3.0).mean()) < 0.95  # a real per-draw flip, not all-one
+
+    # the POINT is unchanged: the deterministic use_draws=False path is exact and
+    # lands at one branch (the posterior-mean decision), unmoved by the fix.
+    point = scm.counterfactual(unit, {"Z": z_prime}, "Y", use_draws=False)
+    assert isinstance(point, SCMResult)
+    assert point.std_error is None  # a single deterministic value
+
+    # FAR / LARGE-n: a tight logit posterior -> no per-draw flip -> width ~1x (tiny),
+    # exactly as before (the fix touches only the flipping case).
+    scm_far, cols_far = _flip_world(n=4000, seed=3)
+    far_unit = scm_far.data.take([0])
+    z_far = float(cols_far["Z"][0]) + 4.0  # push Z hard: C is firmly category 1
+    far = scm_far.counterfactual(far_unit, {"Z": z_far}, "Y", use_draws=True)
+    assert isinstance(far, SCMResult)
+    flo, fhi = far.interval(0.95)
+    assert (fhi - flo) < 0.2  # unchanged ~1x: no flip to spread
+
+
 def test_interventional_propagates_through_a_binary_mediator() -> None:
     """do() on a root propagates through a BINARY mediator to a continuous outcome.
 

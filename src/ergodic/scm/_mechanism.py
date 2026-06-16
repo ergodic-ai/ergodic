@@ -525,6 +525,37 @@ class CategoricalGumbelMax:
             out = out + design @ weight
         return np.asarray(out, dtype=np.float64)
 
+    def logits_per_draw(self, fit: FitResult, parent_values: Array) -> Array:
+        """The ``(S, n, K)`` class logits per parameter-posterior draw.
+
+        The per-draw twin of :meth:`logits`: ``bias`` is ``(S, K)`` and ``weight``
+        ``(S, P, K)``, so each draw's logits read ``bias[d] + encode(PA)[d] . w[d]``.
+        ``parent_values`` is the ``(S, n, p)`` *raw* per-draw parent matrix (an
+        intervened/categorical parent's singleton draw axis broadcasts up to ``S``,
+        and is one-hot encoded per draw so the design matches the ``(S, P, K)`` weight
+        draws). With no parents the result is the broadcast bias draws. Used by the
+        counterfactual to spread a categorical ancestor's decision across draws, so
+        its logit-parameter posterior enters the counterfactual interval (the
+        posterior-mean collapse it replaces understated the width).
+        """
+        bias = np.asarray(fit.params[self.bias_name], dtype=np.float64)  # (S, K)
+        s, k = bias.shape
+        pv = np.asarray(parent_values, dtype=np.float64)
+        n = pv.shape[1] if pv.ndim == 3 else pv.shape[0]
+        if not self.parents:
+            return np.broadcast_to(bias[:, None, :], (s, n, k)).copy()
+        weight = np.asarray(fit.params[self.weight_name], dtype=np.float64)  # (S, P, K)
+        if pv.ndim == 2:
+            pv = pv[None, :, :]
+        if pv.shape[0] != s:
+            pv = np.broadcast_to(pv, (s, n, pv.shape[2]))
+        design = np.stack(
+            [encode_parent_design(pv[d], self.parent_cards) for d in range(s)], axis=0
+        )  # (S, n, P)
+        # (S, n, P) @ (S, P, K) batched over the draw axis -> (S, n, K)
+        contrib = np.einsum("snp,spk->snk", design, weight)
+        return np.asarray(bias[:, None, :] + contrib, dtype=np.float64)
+
     def abduct(
         self, fit: FitResult, observed_codes: IntArray, parent_values: Array, *, seed: int
     ) -> Array:

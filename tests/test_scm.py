@@ -582,11 +582,96 @@ def test_ate_levels_multicategory_treatment_requires_explicit_levels() -> None:
     scm._fits = {n: _fake_fit(4 if n == "T" else 0) for n in scm.mechanisms}
     with pytest.raises(ValueError, match="no default contrast"):
         scm._ate_levels("T", None)
-    # an explicit valid pair resolves
+    # an explicit valid pair resolves (integer-valued floats are fine)
     assert scm._ate_levels("T", (1, 3)) == (1.0, 3.0)
+    assert scm._ate_levels("T", (1.0, 3.0)) == (1.0, 3.0)
     # an out-of-range code raises
     with pytest.raises(ValueError, match="not a category code"):
         scm._ate_levels("T", (0, 9))
+
+
+def test_ate_levels_fractional_categorical_level_is_rejected_not_snapped() -> None:
+    """m2: a fractional categorical level raises instead of silently rounding.
+
+    ``ate(levels=(0.0, 0.7))`` must NOT become the (0, 1) contrast via banker's
+    rounding; a non-integral level for a categorical treatment is a user error.
+    """
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular(
+        {"T": rng.integers(0, 4, size=n), "Y": rng.normal(size=n)},
+        types={"T": "categorical"},
+    )
+    scm = SCM(dag(["T -> Y"]), data)
+    scm._fits = {nm: _fake_fit(4 if nm == "T" else 0) for nm in scm.mechanisms}
+    with pytest.raises(ValueError, match="not an integer category code"):
+        scm._ate_levels("T", (0.0, 0.7))
+    # 0.5 would round to 0 (banker's rounding) and silently degenerate -- also rejected.
+    with pytest.raises(ValueError, match="not an integer category code"):
+        scm._ate_levels("T", (0.5, 2.0))
+
+
+def test_interventional_and_do_validate_categorical_do_code() -> None:
+    """m1: interventional()/do() reject an out-of-range categorical do-code.
+
+    ``interventional("Y", {"C": 99})`` on a 4-category node must raise, not silently
+    treat code 99 as the reference category (its drop-first one-hot is all zeros) and
+    return a confident wrong answer -- mirroring ``_ate_levels``' range check on the
+    do-path. The check is pre-MCMC (the resolved class count lives on the fit), so it
+    is decidable dep-free with a monkeypatched fit.
+
+    m2 rides along: a fractional code is rejected, not snapped.
+    """
+    rng = np.random.default_rng(0)
+    n = 30
+    data = tabular(
+        {"C": rng.integers(0, 4, size=n), "Y": rng.normal(size=n)},
+        types={"C": "categorical"},
+    )
+    scm = SCM(dag(["C -> Y"]), data)
+    scm._fits = {nm: _fake_fit(4 if nm == "C" else 0) for nm in scm.mechanisms}
+    assert scm.fitted
+
+    # m1: out-of-range code raises on every do-path entry point.
+    with pytest.raises(ValueError, match="not a category code"):
+        scm.interventional("Y", {"C": 99})
+    with pytest.raises(ValueError, match="not a category code"):
+        scm.do({"C": 99})  # fitted, so do() validates eagerly too
+    with pytest.raises(ValueError, match="not a category code"):
+        scm.counterfactual({"C": [0], "Y": [0.0]}, {"C": 99}, "Y")
+    # a negative code is equally out of range.
+    with pytest.raises(ValueError, match="not a category code"):
+        scm.interventional("Y", {"C": -1})
+
+    # m2: a fractional code raises (not snapped to the nearest integer).
+    with pytest.raises(ValueError, match="not an integer category code"):
+        scm.interventional("Y", {"C": 0.5})
+    with pytest.raises(ValueError, match="not an integer category code"):
+        scm.do({"C": 1.5})
+
+    # a valid in-range code (int or integer-valued float) passes the guard. It then
+    # reaches the sampler, which needs pymc; the guard itself is what we assert here,
+    # so confirm _check_do_value accepts the valid codes directly.
+    scm._check_do_value("C", 3)
+    scm._check_do_value("C", 0)
+    scm._check_do_value("C", 2.0)  # integer-valued float is valid
+
+
+def test_intervention_vector_rejects_fractional_categorical_code() -> None:
+    """m2 at the compose boundary: _intervention_vector refuses a fractional code.
+
+    Defense in depth -- even reached directly with the resolved mechanism, a
+    fractional categorical do-value raises rather than silently rounding (the old
+    ``round()`` snap). An integer-valued float stays valid.
+    """
+    from ergodic.scm._compose import _intervention_vector
+    from ergodic.scm._mechanism import BinaryGumbelMax
+
+    cat = BinaryGumbelMax(name="T", parents=())
+    with pytest.raises(ValueError, match="not an integer category code"):
+        _intervention_vector(cat, 0.5, 5)
+    # integer-valued float still works.
+    assert _intervention_vector(cat, 1.0, 5).tolist() == [1, 1, 1, 1, 1]
 
 
 def test_ate_levels_continuous_treatment_defaults_to_unit_step() -> None:

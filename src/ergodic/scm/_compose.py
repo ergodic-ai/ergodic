@@ -137,7 +137,14 @@ def _intervention_vector(mech: Mechanism, value: float, n: int) -> AnyArray:
     verified shape gotcha: ``pm.do`` wants a length-n vector, not a scalar.
     """
     if _is_categorical(mech):
-        return np.full(n, round(float(value)), dtype=np.int64)
+        v = float(value)
+        if v != round(v):
+            raise ValueError(
+                f"categorical do-value {value!r} for node {mech.name!r} is not an "
+                "integer category code (a fractional do-value is not snapped); pass an "
+                "integer code"
+            )
+        return np.full(n, round(v), dtype=np.int64)
     return np.full(n, float(value), dtype=np.float64)
 
 
@@ -293,14 +300,17 @@ def counterfactual_continuous(
     ``U = X - f(PA)`` -- the machine-precision route (the pressure-test's WAY C): no
     eps, no MCMC floor. A categorical *ancestor* reuses its abducted Gumbel and
     re-decides ``argmax`` under shifted parent logits (so it responds to an upstream
-    intervention), at the posterior mean; the ``target`` itself must be Gaussian (a
-    categorical target uses :func:`counterfactual_categorical`).
+    intervention); the ``target`` itself must be Gaussian (a categorical target uses
+    :func:`counterfactual_categorical`).
 
     With ``use_draws`` the Gaussian prediction runs per parameter-posterior draw, so
     the counterfactual is a distribution whose spread is the structural uncertainty
-    of the continuous hops; the residual is abducted at the posterior mean (the
-    unit's exact residual given the fitted mechanism). Returns the flattened draws of
-    ``target``.
+    of the mechanisms; the residual is abducted at the posterior mean (the unit's
+    exact residual given the fitted mechanism). A categorical ancestor's decision is
+    *also* spread per draw -- re-decided under each draw's logit parameters with its
+    abducted Gumbel held fixed -- so its logit-parameter posterior enters the
+    counterfactual interval too, not only the continuous hops'. Returns the flattened
+    draws of ``target``.
     """
     factual_arr = {k: np.asarray(v, dtype=np.float64).reshape(-1) for k, v in factual.items()}
     n_units = len(next(iter(factual_arr.values())))
@@ -309,11 +319,11 @@ def counterfactual_continuous(
     # world, then recomputed on the action branch reusing its noise. A Gaussian node
     # is exact (the residual reused per parameter draw). A categorical ANCESTOR (a
     # confounder/mediator upstream of a continuous target) carries its abducted
-    # Gumbel and re-decides argmax under shifted parent logits, at the posterior mean
-    # -- so it responds correctly to an upstream do() but does not spread the
-    # categorical's own parameter uncertainty per draw (an honest MVP simplification;
-    # the continuous hop still carries full parameter uncertainty). A categorical
-    # TARGET takes the dedicated counterfactual_categorical path, not this one.
+    # Gumbel and re-decides argmax under shifted parent logits; under use_draws it is
+    # re-decided PER posterior draw (each draw's logit params, the Gumbel held fixed),
+    # so the categorical's own parameter uncertainty enters the counterfactual
+    # interval -- not just the continuous hop's. A categorical TARGET takes the
+    # dedicated counterfactual_categorical path, not this one.
     target_mech = mechanisms[target]
     if not isinstance(target_mech, GaussianAdditive):
         raise TypeError(
@@ -348,10 +358,22 @@ def counterfactual_continuous(
             cf[name] = np.full((1, n_units), value) if use_draws else np.full(n_units, value)
             continue
         if isinstance(mech, CategoricalGumbelMax):
-            # re-decide at the posterior-mean logits over the counterfactual parents.
-            pv = _cf_parents(mech, cf, n_units)
-            codes = mech.decide(mech.logits(fits[name], pv), gumbel_noise[name])
-            cf[name] = codes.astype(np.float64)[None, :] if use_draws else codes.astype(np.float64)
+            g = gumbel_noise[name]  # the unit's abducted structural Gumbel, (n, K), FIXED.
+            if use_draws:
+                # spread the decision PER posterior draw: re-decide under each draw's
+                # logit parameters while holding the abducted Gumbel fixed (the Gumbel
+                # is the unit's identity; the logit params are the posterior we
+                # integrate over). This carries the categorical ancestor's parameter
+                # uncertainty forward, exactly as the Gaussian hops carry theirs --
+                # so the (draws, n) shape feeds the per-draw downstream machine.
+                pv_draws = _cf_parents_per_draw(mech, cf, n_units)
+                logits_draws = mech.logits_per_draw(fits[name], pv_draws)  # (S, n, K)
+                codes = _decide_per_draw(logits_draws, g)  # (S, n)
+                cf[name] = codes.astype(np.float64)
+            else:
+                # the deterministic point: re-decide at the posterior-mean logits.
+                pv = _cf_parents(mech, cf, n_units)
+                cf[name] = mech.decide(mech.logits(fits[name], pv), g).astype(np.float64)
             continue
         assert isinstance(mech, GaussianAdditive)
         u = gauss_noise[name]
@@ -363,6 +385,19 @@ def counterfactual_continuous(
             pv = _cf_parents(mech, cf, n_units)
             cf[name] = mech.structural_mean(fits[name], pv) + u
     return np.asarray(cf[target], dtype=np.float64).reshape(-1)
+
+
+def _decide_per_draw(logits_draws: Array, gumbel: Array) -> IntArray:
+    """``argmax(logits + g)`` per draw, with the unit's Gumbel held fixed across draws.
+
+    ``logits_draws`` is ``(S, n, K)`` (per parameter-posterior draw); ``gumbel`` the
+    ``(n, K)`` abducted structural noise, broadcast over the draw axis. Returns the
+    ``(S, n)`` per-draw counterfactual codes. The Gumbel is the unit's identity
+    (abducted once); spreading only the logits is what restores the categorical
+    ancestor's parameter uncertainty without re-drawing its noise.
+    """
+    total = np.asarray(logits_draws, dtype=np.float64) + np.asarray(gumbel, dtype=np.float64)[None]
+    return np.asarray(np.argmax(total, axis=-1), dtype=np.int64)
 
 
 def _factual_parents(mech: Mechanism, factual: Mapping[str, Array]) -> Array:

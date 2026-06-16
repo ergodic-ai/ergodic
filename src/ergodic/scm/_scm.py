@@ -223,6 +223,11 @@ class SCM:
         """
         for node in intervention:
             self._check_observable(node, "do-target")
+            # validate a categorical code early when the SCM is fitted (the resolved
+            # class count lives on the fit); an unfitted chainable view still builds,
+            # and interventional() re-validates before it samples regardless.
+            if self.fitted:
+                self._check_do_value(node, intervention[node])
         return InterventionView(self, dict(intervention))
 
     def interventional(
@@ -243,6 +248,7 @@ class SCM:
         intervention = dict(do or {})
         for node in intervention:
             self._check_observable(node, "do-target")
+            self._check_do_value(node, intervention[node])
         draws = _compose.interventional_draws(
             self._order,
             self.mechanisms,
@@ -282,6 +288,7 @@ class SCM:
         self._check_observable(target, "counterfactual target")
         for node in do:
             self._check_observable(node, "do-target")
+            self._check_do_value(node, do[node])
         factual = self._factual_values(units)
 
         mech = self.mechanisms[target]
@@ -451,7 +458,14 @@ class SCM:
         low, high = levels
         if is_categorical:
             for lvl in (low, high):
-                code = round(float(lvl))
+                v = float(lvl)
+                if v != round(v):
+                    raise ValueError(
+                        f"level {lvl!r} for categorical/binary treatment {treatment!r} is "
+                        f"not an integer category code (a fractional level is not snapped); "
+                        f"pass integer codes (its codes are 0..{n_cat - 1})"
+                    )
+                code = round(v)
                 if code < 0 or code >= n_cat:
                     raise ValueError(
                         f"level {lvl!r} is not a category code of {treatment!r}; its codes "
@@ -537,6 +551,37 @@ class SCM:
                 f"node {node!r} is latent (no data column, no fitted mechanism), so it "
                 f"cannot be a {role}; the SCM fits the observed margin. The SCM's "
                 f"observed nodes are {list(self.observed)}"
+            )
+
+    def _check_do_value(self, node: str, value: DoValue) -> None:
+        """Validate a do-target's value against the node's kind.
+
+        A categorical/binary do-target is pinned by its *integer category code*, so a
+        fractional value (``do(C=0.5)``) or an out-of-range code (``do(C=99)`` on a
+        4-category node) is a user error, not something to silently snap or treat as
+        the reference category. This mirrors :meth:`_ate_levels`' code-range check on
+        the do-path: ``interventional``/``do``/``counterfactual`` all route through it,
+        so neither silently returns a confident wrong answer. A continuous do-target
+        takes any float, so nothing is checked. Runs post-fit (the resolved class
+        count lives on the fit).
+        """
+        mech = self.mechanisms[node]
+        if not isinstance(mech, CategoricalGumbelMax):
+            return
+        v = float(value)
+        if v != round(v):
+            raise ValueError(
+                f"do-value {value!r} for categorical/binary node {node!r} is not an "
+                f"integer category code; pass an integer code (its codes are 0.."
+                f"{(self._fits[node].n_categories or mech.n_categories) - 1}), not a "
+                "fractional value (a fractional do-value is not snapped)"
+            )
+        code = round(v)
+        n_cat = self._fits[node].n_categories or mech.n_categories
+        if code < 0 or code >= n_cat:
+            raise ValueError(
+                f"do-value {value!r} is not a category code of {node!r}; its codes are "
+                f"0..{n_cat - 1}"
             )
 
     def _factual_values(self, units: Dataset | Mapping[str, Any]) -> dict[str, npt.NDArray[Any]]:
