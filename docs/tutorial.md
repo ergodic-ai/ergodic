@@ -1,117 +1,150 @@
-# Getting started
+# Get started
 
-This walks through both core objects on one example: the wet-grass model. A season decides whether the sprinkler runs and whether it rains, both wet the grass, and wet grass is slippery. By the end you'll have built a causal graph, asked it independence questions, intervened on it, and checked it against what you know.
-
-Install first:
+You have data and a decision to make. The fastest answer, comparing the averages, can be
+confidently and expensively wrong, and no dashboard will warn you. Here is causal inference
+earning its keep in five minutes. No background needed; if the ideas themselves are new, the
+[learn series](learn/index.md) takes them from zero.
 
 ```bash
-uv add ergodic   # or: pip install ergodic
+pip install ergodic   # or: uv add ergodic
 ```
 
-## Build a graph
+The data below is simulated, so the true answer is known: we plant the discount's real effect
+at exactly **$6** per customer. Watch the obvious method miss it and ergodic find it. The full
+runnable script is at the [bottom of the page](#reproduce-every-number).
+
+## "The discount worked!"
+
+You emailed a $50 discount to part of your customer base. The customers who got it went on to
+spend more than the ones who did not. Roll it out to everyone?
 
 ```python
-from ergodic import dag
-
-g = dag([
-    "season -> sprinkler",
-    "season -> rain",
-    "sprinkler -> wet",
-    "rain -> wet",
-    "wet -> slippery",
-])
-
-g.node_list()            # ['rain', 'season', 'slippery', 'sprinkler', 'wet']
-g.parents("wet")         # frozenset({'rain', 'sprinkler'})
-g.ancestors("slippery")  # frozenset({'rain', 'season', 'sprinkler', 'wet'})
+# `frame`: one row per customer, with `value` (a standing tendency to spend),
+# `discount` (1 if they were emailed the offer), and `spend` (what they spent after).
+discounted = frame.loc[frame.discount == 1, "spend"].mean()
+rest = frame.loc[frame.discount == 0, "spend"].mean()
+discounted - rest      # +$22.69 per customer
 ```
 
-`dag(...)` reads each edge from a glyph string and checks the result is fully directed and acyclic. Family lookups return frozensets, since a graph is an immutable value.
+A large, profitable-looking lift. It is also wrong, and the error is not noise: collect ten
+times the data and it stays.
 
-## Ask independence questions
+## Who got the discount?
 
-d-separation tells you which independences the graph implies. The sprinkler and the rain share a cause (the season) and share an effect (wet grass), so the answer turns on what you condition on.
+The offer did not go out at random. Your team sent it to high-value customers, the ones who
+were going to spend more anyway. Customer value drives *both* who got the discount *and* how
+much each person spends. Drawn as a causal graph:
+
+```mermaid
+graph LR
+    V["customer value"] --> D["discount"]
+    V --> S["spend"]
+    D --> S
+```
+
+`value` is a ==confounder==: a common cause sitting behind both the treatment and the outcome.
+The naive comparison hands the discount credit for spending that the customers' own value
+produced. To isolate what the discount did, you have to hold value fixed.
+
+## The causal answer
+
+Give ergodic the graph and the data. It reads the graph, sees that adjusting for `value`
+identifies the effect, picks an estimator, fits it, and returns a number with an interval.
 
 ```python
-g.d_separated("sprinkler", "rain")                     # False
-g.d_separated("sprinkler", "rain", "season")           # True
-g.d_separated("sprinkler", "rain", {"season", "wet"})  # False
+from ergodic import dag, tabular, estimate_effect
+
+g = dag(["value -> discount", "value -> spend", "discount -> spend"])
+estimate_effect(g, tabular(frame), "discount", "spend")
+# EffectEstimate(aipw, analytic: ate=5.91, se=0.395, 95% CI [5.14, 6.68], n=4000)
 ```
 
-With nothing fixed, the season connects them. Hold the season and that path closes, so the two are independent. Add wet grass and you open the collider, where the sprinkler and the rain meet head to head, so they depend on each other again. The conditioning argument takes a single name or any iterable of names.
+The real effect of the discount is about **$6 per customer**, the $6 we planted, not $23.
+ergodic recovered it as $5.91 with a tight interval. The missing $17 was customer value
+showing up as a treatment effect. If the discount costs more than $6 a head, the naive number
+would have sent you into a money-losing rollout sure it was a winner.
 
-The Markov blanket is the set that screens a variable off from the rest:
+## What just happened
 
-```python
-g.markov_blanket("wet")  # frozenset({'rain', 'slippery', 'sprinkler'})
-```
+You gave ergodic a *model* of the problem, not just the numbers, and it did three things plain
+regression does not do on its own:
 
-## Intervene
+1. **Identification.** It checked the graph and confirmed the effect *can* be recovered from
+   this data, by adjusting for `value`. Change the graph and the answer can flip to "you
+   cannot, not from this data", which is an honest result and a useful one.
+2. **Estimation.** It chose a suitable estimator (a doubly robust one), fit it, and reported
+   its uncertainty.
+3. **A claim you can argue with.** The graph is a stated assumption. A colleague can point at
+   an edge and disagree, which is the point: the assumptions are on the table, not buried in a
+   model's fine print.
 
-`do` is graph surgery for an intervention. Setting the sprinkler from outside cuts its incoming edge from the season, while its effect on the grass stays.
+Don't know the graph? ergodic can [learn it from the data](discovery.md), then estimate
+straight off what it finds.
 
-```python
-mutilated = g.do("sprinkler")
-mutilated.parents("sprinkler")  # frozenset()
-mutilated.parents("wet")        # frozenset({'rain', 'sprinkler'})
-g.parents("sprinkler")          # frozenset({'season'})
-```
+## Reproduce every number
 
-The intervened graph drops the season's influence on the sprinkler and keeps the sprinkler's effect on the grass. The original `g` is untouched, because every edit returns a new graph. The observational graph and the intervened graph both exist, which is what you want when comparing a do against the baseline.
+??? note "The simulated world, and the planted answer (runnable top to bottom)"
 
-## Add what you know
+    ```python
+    import numpy as np
+    import pandas as pd
+    from ergodic import dag, tabular, estimate_effect
 
-Most prior knowledge is an order. The season comes before the sprinkler and the rain, those come before wet grass, and wet grass comes before slippery. State it as tiers.
+    rng = np.random.default_rng(7)
+    n = 4000
 
-```python
-from ergodic import DomainKnowledge
+    # customer value: a standing tendency to spend (the confounder)
+    value = rng.normal(50, 15, n)
 
-dk = DomainKnowledge().with_tiers([
-    ["season"],
-    ["sprinkler", "rain"],
-    ["wet"],
-    ["slippery"],
-])
+    # targeting: higher-value customers are likelier to get the discount
+    p = 1 / (1 + np.exp(-(-4 + 0.08 * value)))
+    discount = rng.binomial(1, p)
 
-dk.permits_edge("season", "wet")  # True
-dk.permits_edge("wet", "season")  # False
-dk.is_consistent(g)               # True
-```
+    # spend: the discount truly adds $6; value drives much more
+    true_effect = 6.0
+    spend = 20 + true_effect * discount + 1.2 * value + rng.normal(0, 10, n)
 
-A later tier cannot cause an earlier one, so `wet -> season` is not permitted. The graph you built respects the order, so it is consistent.
+    frame = pd.DataFrame({"value": value, "discount": discount, "spend": spend})
 
-## Catch a bad graph
+    # the obvious answer, inflated by who got targeted
+    naive = frame.loc[frame.discount == 1, "spend"].mean() - frame.loc[frame.discount == 0, "spend"].mean()
+    print(round(naive, 2))                       # 22.69
 
-`is_consistent` checks a candidate, and `violations` says why one failed.
+    # the causal answer, adjusting for value
+    g = dag(["value -> discount", "value -> spend", "discount -> spend"])
+    print(estimate_effect(g, tabular(frame), "discount", "spend"))
+    # EffectEstimate(aipw, analytic: ate=5.91, se=0.395, 95% CI [5.14, 6.68], n=4000)
+    ```
 
-```python
-bad = dag(["wet -> season"])
-dk.is_consistent(bad)  # False
-dk.violations(bad)     # ['order violated: wet is an ancestor of season']
-```
+## Where to go next
 
-## Orient a skeleton from what you know
+<div class="grid cards" markdown>
 
-Knowledge alone can orient some edges. Give `apply_to` an undirected skeleton and the tiers point each edge whose direction is forced.
+-   :material-school-outline:{ .lg .middle } __New to the ideas?__
 
-```python
-from ergodic import mixed
+    ---
 
-skeleton = mixed([
-    "season -- sprinkler", "season -- rain",
-    "sprinkler -- wet", "rain -- wet", "wet -- slippery",
-])
+    The [learn series](learn/index.md): ten guides from zero, each on a story like this one,
+    no background assumed.
 
-oriented = dk.apply_to(skeleton)
-oriented.is_dag()                                         # True
-oriented.get_edge("season", "sprinkler").directed_pair()  # ('season', 'sprinkler')
-```
+-   :material-cube-outline:{ .lg .middle } __The objects underneath__
 
-Here the tiers pin every edge, so the skeleton turns into the original DAG. With looser knowledge some edges stay undirected, which is the honest answer.
+    ---
 
-## Next
+    [Foundations](foundations.md): the graph, domain knowledge, the typed data, and how a graph
+    becomes an estimand.
 
-- [Learn causal inference](learn/index.md) if the ideas themselves are new: ten notebook guides, no background assumed.
-- [Concepts](concepts.md) for the model behind these objects: marks, kinds, and why graphs are immutable.
-- [Causal graphs](graph.md) and [Domain knowledge](knowledge.md) for the method-by-method guides.
-- [API reference](reference.md) for the full surface.
+-   :material-layers-outline:{ .lg .middle } __Pick a method__
+
+    ---
+
+    [Pillars](pillars.md): causal discovery, causal inference, and process intelligence, end to
+    end.
+
+-   :material-book-open-variant:{ .lg .middle } __The full surface__
+
+    ---
+
+    The [API reference](reference.md) for every object and function.
+
+</div>

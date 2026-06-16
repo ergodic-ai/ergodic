@@ -7,6 +7,9 @@ the words "confounder" or "estimand", start at guide one and read in order. If y
 field and want the API, the [getting started](../tutorial.md) page and the reference guides
 are the faster route.
 
+!!! tip "Unfamiliar term?"
+    Every piece of jargon in this series is defined in plain words in the [glossary](../glossary.md).
+
 Every guide runs on simulated data, and that's a deliberate choice, not a shortcut. On real
 data nobody can tell you whether your estimate of an effect is right, because the true effect
 is exactly the thing nobody measured. In a simulation we write the answer into the code, in
