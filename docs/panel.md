@@ -61,7 +61,7 @@ est.value             # ~2.3; the planted estimand is 2.25
 est.by_group_time[0]  # GroupTimeEffect(group=4, period=0, event_time=-4, estimate=0.18, ...)
 ```
 
-A third flavor, `strategy="twfe"`, is the static two-way fixed-effects regression. It's offered for reference and `auto` never picks it: under staggered adoption with effects that change over time, TWFE mixes the cell effects with weights that can go negative (Goodman-Bacon 2021), because already-treated cohorts end up serving as controls for later ones. On the staggered world above it returns ~1.8 where the estimand is 2.25, and the planted effect grows with time since adoption, which is exactly the case that breaks it.
+A third flavor, `strategy="twfe"`, is the static two-way fixed-effects regression. It's offered for reference and `auto` never picks it: when groups adopt at different times and the effect grows or shrinks, plain two-way fixed-effects can weight the pieces with negative weights and return the wrong answer (Goodman-Bacon 2021), because earlier-treated cohorts end up serving as controls for later ones. On the staggered world above it returns ~1.8 where the estimand is 2.25, and the planted effect grows with time since adoption, which is exactly the case that breaks it.
 
 When every unit eventually adopts, there's no never-treated pool and the default comparison raises. Pass `comparison="not_yet_treated"` to admit units that adopt only after the periods a cell reads:
 

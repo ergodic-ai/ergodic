@@ -154,6 +154,10 @@ Because `estimate_effect` runs identification first, the whole bridge composes i
 
 The first four fields cover the named strategies and are unchanged. The last two ride along for the general ID algorithm, which the next section describes.
 
+---
+
+The strategies so far (adjustment, front-door, instruments) cover the everyday cases, and most work stops here. The rest of the page is the general theory: the complete do-calculus algorithm behind any single graph, identification across an equivalence class, and mediation. Reach for it when the named strategies don't apply.
+
 ## The general ID algorithm
 
 Adjustment, the front-door, and an instrument are the three patterns people reach for, and they cover most graphs. They do not cover all of them. Some effects are identifiable only through a formula that is none of the three, and some are not identifiable at all. The do-calculus settles every case: given a single graph, it decides whether P(Y | do(X)) is a function of the observational distribution, and when it is, it writes the formula. `identify_distribution` runs that algorithm.

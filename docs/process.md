@@ -40,7 +40,7 @@ The timestamps here are plain seconds. Datetime stamps work everywhere below, an
 
 ## The map
 
-`process_map` walks each case and counts how often one activity directly follows another, with the mean and median gap in seconds on every arc. Synthetic `START` and `END` arcs record where cases enter and leave, so the boundaries are data too.
+`process_map` walks each case and counts how often one activity directly follows another, with the mean and median gap in seconds on every arc. That object, the counts of direct succession between activities, is the directly-follows graph (DFG) that process-mining tools draw; ergodic calls it a process map. Synthetic `START` and `END` arcs record where cases enter and leave, so the boundaries are data too.
 
 ```python
 from ergodic import process_map
@@ -87,7 +87,7 @@ for v in variant_table(log, top=2):
 # 733 49% ('open', 'triage', 'close')
 ```
 
-The reviewed variant runs about 10.7 seconds slower on average (`mean_duration` ~27.9 against ~17.1). Hold that gap; the causal section is about how much of it review causes. The third variant, three cases of `('open', 'close', 'triage')`, is the broken stamps again: a variant table is where you notice such things. The ranking is shared with `filter_variants`, so "the top two variants" means the same thing everywhere.
+The reviewed variant runs about 10.8 seconds slower on average (`mean_duration` ~27.9 against ~17.1). Hold that gap; the causal section is about how much of it review causes. The third variant, three cases of `('open', 'close', 'triage')`, is the broken stamps again: a variant table is where you notice such things. The ranking is shared with `filter_variants`, so "the top two variants" means the same thing everywhere.
 
 ## Filters
 

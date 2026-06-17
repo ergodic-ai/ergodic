@@ -219,6 +219,9 @@ zoo.round(0)
 # %% [markdown]
 # ## Choosing a learner without the answer key
 #
+# *A deep dive on model selection; the case study's verdict and refutation are below it, so
+# skip ahead if you just want the result.*
+#
 # Start with what double machine learning is actually made of. It never models the effect
 # directly. It builds two ordinary predictions and combines them: the expected wealth given the
 # confounders, and the probability of eligibility given the confounders. Both of those have

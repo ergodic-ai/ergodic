@@ -144,8 +144,8 @@ draw_dag(g, pos={"tenure": (1.0, 1.2), "member": (0.0, 0.0), "spend": (2.0, 0.0)
 # fork at the top, `member <- tenure -> spend`. No causation flows along it, but association
 # does: knowing someone is a member tells you they're probably new, and being new tells you
 # they probably spend less. The naive comparison adds both routes together and reports the
-# sum. That's all a confounder is: a back door that lets association through without
-# causation.
+# sum. That's all a confounder is: a hidden common cause that makes two things move
+# together even when neither one causes the other.
 #
 # The question the business is asking isn't "what do members spend". It's "what would happen
 # to spending if we enrolled someone". That's an intervention, written do(member), and on the

@@ -80,10 +80,10 @@ print("truth: 6.00")
 # says to, and the effect vanishes.
 #
 # Nothing malfunctioned. The regression answered the question you asked: "what do ads do,
-# holding visits fixed?" Holding visits fixed means comparing ad regions to no-ad regions
-# among customers who visited equally often, and within such a group the ads have nothing
-# left to do, because bringing visits is what ads are for. You amputated the mechanism and
-# then measured the stump.
+# holding visits fixed?" That means comparing ad and no-ad regions among customers who
+# visited equally often, and there the ads look identical, because the only thing ads do is
+# bring visits and you just held that fixed. You amputated the mechanism and then measured
+# the stump.
 #
 # A variable on the causal path from treatment to outcome is a mediator, and you control for
 # it exactly when you mean to ask "how much of the effect does not pass through this

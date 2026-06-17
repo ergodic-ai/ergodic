@@ -358,4 +358,4 @@ print(f"overlap_share: {ps.overlap_share:.2f}   flagged: {ps.flagged}")
 # process model whose decision points carry price tags. The
 # [process guide](../process.md) documents the model layer's full surface, mining cuts
 # and replay conventions included, and the [API reference](../reference.md) covers
-# every object these nine guides used.
+# every object these ten guides used.

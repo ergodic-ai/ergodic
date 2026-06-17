@@ -221,6 +221,10 @@ print(f"ad_spend -> revenue: identifiable = {verdict.identifiable}")
 # the one question that depends on it, and the machinery billed exactly that question and
 # no other.
 
+# %% [markdown]
+# The next cell is just drawing (a `draw_graph` helper with hand-set positions); you can skip
+# it and read the figure it produces below.
+
 # %%
 from matplotlib.patches import FancyArrowPatch
 

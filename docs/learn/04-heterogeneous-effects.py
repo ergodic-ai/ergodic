@@ -62,9 +62,9 @@ print(f"estimated ATE: {ate.value:.2f}  CI [{lo:.2f}, {hi:.2f}]   serving cost: 
 # The conditional average treatment effect, CATE, is the effect as a function of who:
 # CATE(tenure, activity) instead of one number. The estimator we'll use, the DR-learner,
 # does something pleasingly direct. Cross-fitting the same two nuisance models AIPW uses,
-# it builds a per-customer pseudo-effect, a noisy but unbiased estimate of that customer's
-# own treatment effect, and then regresses those pseudo-effects on the covariates like any
-# supervised problem. The final regression is an ordinary model in an ordinary slot, so you
+# it builds a rough per-customer effect guess, noisy for any one person but centered on the
+# right answer on average, and then fits a plain predictive model from each customer's
+# features to that guess, like any supervised problem. The final regression is an ordinary model in an ordinary slot, so you
 # choose how flexible the effect surface can be. The truth is a curve, so give the final
 # slot a model that can bend:
 

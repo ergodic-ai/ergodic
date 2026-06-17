@@ -80,7 +80,7 @@ boot.draws.shape         # (1000,)
 boot.interval()          # the 2.5% and 97.5% draw quantiles
 ```
 
-AIPW's ATE has an analytic standard error from its influence function, since the estimator is Neyman-orthogonal. Outcome regression and IPW bootstrap, which fills the draws. A point estimate is the degenerate case of a distribution, so the Bayesian path below returns posterior draws through the same result and the same accessors.
+AIPW gets an exact (analytic) standard error with no resampling, because its math is built so small errors in the helper models cancel out (the property called Neyman-orthogonality). Outcome regression and IPW bootstrap, which fills the draws. A point estimate is the degenerate case of a distribution, so the Bayesian path below returns posterior draws through the same result and the same accessors.
 
 ## Targets
 

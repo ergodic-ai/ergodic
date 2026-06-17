@@ -146,8 +146,9 @@ print(f"front-door: {est_fd.value:+.2f}  CI [{lo:.2f}, {hi:.2f}]   truth: +2.12"
 # %% [markdown]
 # Be honest about how rare this is. The front door needs a mediator that carries the entire
 # effect (no side channel around it) and is itself unconfounded with the treatment. Most
-# problems don't have one; when one exists, you get nonparametric identification under
-# confounding you never measured, which is as close to magic as this subject offers. The
+# problems don't have one; when one exists, you can recover the true effect with no
+# assumption about the shape of the relationships, and despite a confounder you never
+# measured, which is as close to magic as this subject offers. The
 # commercial versions do exist: a recommendation's effect on purchases through the click,
 # an ad's effect through the visit, a policy's effect through the feature it unlocks. The
 # discipline is arguing the "entire effect" clause with a straight face.

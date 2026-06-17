@@ -43,7 +43,7 @@ PC(test=Linear()).fit(data)     # bound at fit
 PC(test="linear").fit(data)     # the string alias
 ```
 
-The data comes from exactly one place. An unbound test needs data at `fit`; a bound test can omit it; a bound test plus a different dataset raises; neither raises.
+Data is supplied in exactly one place. An unbound test gets its data at `fit`. A bound test already has data, so `fit` can omit it. Passing a bound test a different dataset raises; passing it the same data is fine.
 
 Alpha lives in the algorithm, not the test, so the p-value cache is alpha-independent. One warmed oracle serves many runs:
 
@@ -55,7 +55,7 @@ loose = PC(test=linear, alpha=0.10).fit()   # every p-value comes from the cache
 
 ## When triples disagree: conservative and majority colliders
 
-Standard PC decides each v-structure from one separating set, the first one the skeleton phase happened to record. On real data different sets can disagree, and a collider decided by a coin flip of search order is how PC earns its reputation for flakiness. The conservative and majority rules re-test each unshielded triple against every subset of both endpoints' neighborhoods and vote:
+This is a refinement for messy real data; on a first read you can skip to [The tests](#the-tests). Standard PC decides each v-structure from one separating set, the first one the skeleton phase happened to record. On real data different sets can disagree, and a collider decided by a coin flip of search order is how PC earns its reputation for flakiness. The conservative and majority rules re-test each unshielded triple against every subset of both endpoints' neighborhoods and vote:
 
 ```python
 result = discover(data, method="pc", colliders="majority")

@@ -112,7 +112,8 @@ print(f"packs that sent an order back to pick: {n_loop} of {n_pack}")
 # arcs. The picture is what the commercial tools sell, and with a fixed activity set it
 # takes one matplotlib helper: positions set by hand, arrow width following traffic,
 # every arc labeled with its count and median gap in hours, and a bend or a label nudge
-# wherever the geometry would collide.
+# wherever the geometry would collide. You can skip the next cell; the payoff is the
+# picture it produces.
 
 # %%
 import matplotlib.pyplot as plt
