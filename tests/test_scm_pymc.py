@@ -1076,3 +1076,109 @@ def test_general_id_strategy_keeps_raising_with_pointer() -> None:
         scm.ate("A", "D")
     assert "id" in str(exc.value)
     assert "estimate_effect" in str(exc.value)
+
+
+# == ITE: per-unit individual treatment effects ===============================
+
+
+def test_ite_levels_recovers_constant_effect_on_linear_fork(
+    fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """Linear-Gaussian: every unit's ITE equals the coefficient; the mean is the ATE.
+
+    The continuous ITE is constant across units under a linear-additive mechanism (the
+    abducted noise cancels), so the per-unit array is ~1.5 everywhere and its mean
+    matches ate() to tolerance. This is the honest 'no heterogeneity here' baseline.
+    """
+    scm, _ = fork
+    units = scm.data.take(list(range(300)))
+    ite = scm.ite(units, "X", "Y")  # default levels (0, 1)
+    assert ite.shape == (300,)
+    assert float(np.mean(ite)) == pytest.approx(1.5, abs=0.05)
+    assert float(np.std(ite)) < 0.01  # constant across units (linear mechanism)
+    ate = scm.ate("X", "Y")
+    assert isinstance(ate, SCMResult)
+    assert float(np.mean(ite)) == pytest.approx(ate.mean(), abs=0.02)
+
+
+def test_ite_shift_matches_single_unit_counterfactual(
+    fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """THE per-unit-do correctness anchor: the cohort shift equals the scalar path.
+
+    A shift= contrast hands the engine a per-unit do-vector x_i + delta. For any unit
+    that must equal the single-unit scalar counterfactual do(X = x_i + delta) minus its
+    factual outcome, to machine precision. And for a linear mechanism the shift is the
+    constant coef*delta, so shift=2 gives ~3.0 everywhere.
+    """
+    scm, cols = fork
+    delta = 2.0
+    units = scm.data.take(list(range(300)))
+    ite = scm.ite(units, "X", "Y", shift=delta)
+    assert float(np.mean(ite)) == pytest.approx(2.0 * 1.5, abs=0.1)  # coef*delta
+    assert float(np.std(ite)) < 0.02  # constant (linear)
+    # the per-unit do-vector path == the single-unit scalar counterfactual, exactly.
+    x0, y0 = float(cols["X"][0]), float(cols["Y"][0])
+    single = scm.counterfactual(scm.data.take([0]), {"X": x0 + delta}, "Y", use_draws=False)
+    assert isinstance(single, SCMResult)
+    assert float(ite[0]) == pytest.approx(single.mean() - y0, abs=1e-9)
+
+
+def test_ite_shift_equals_levels_step_for_linear(
+    fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """Linear: a shift of delta and a level step of width delta are the same contrast."""
+    scm, _ = fork
+    units = scm.data.take(list(range(200)))
+    shift = scm.ite(units, "X", "Y", shift=1.0)
+    levels = scm.ite(units, "X", "Y", levels=(0.0, 1.0))
+    assert float(np.mean(shift)) == pytest.approx(float(np.mean(levels)), abs=0.02)
+
+
+def test_ite_binary_outcome_is_heterogeneous() -> None:
+    """A binary outcome's ITE is the per-unit counterfactual flip in {-1, 0, 1}.
+
+    The logistic response varies with each unit's baseline, so the per-unit effect is
+    genuinely heterogeneous (some units flip, most do not), unlike the constant
+    continuous-linear ITE. The mean is the ATE on the outcome scale, and the treatment
+    raises P(Y=1) here, so the flips are positive.
+    """
+    rng = np.random.default_rng(5)
+    n = 1500
+    z = rng.normal(0, 1, n)
+    t = rng.binomial(1, 1.0 / (1.0 + np.exp(-z))).astype(int)
+    y = rng.binomial(1, 1.0 / (1.0 + np.exp(-(0.4 + 1.6 * t - 1.0 * z)))).astype(int)
+    data = tabular({"Z": z, "T": t, "Y": y}, types={"T": "categorical", "Y": "categorical"})
+    scm = SCM(
+        dag(["Z -> T", "Z -> Y", "T -> Y"]), data, draws=300, tune=300, chains=2, random_state=5
+    ).fit()
+    ite = scm.ite(data, "T", "Y")
+    assert ite.shape == (n,)
+    assert set(np.unique(ite).tolist()).issubset({-1.0, 0.0, 1.0})  # per-unit flips
+    assert 0.05 < float((ite != 0.0).mean()) < 0.95  # genuine heterogeneity
+    assert float(np.mean(ite)) > 0.0  # the treatment raises P(Y=1) on average
+
+
+def test_ite_rejects_shift_on_binary_treatment(
+    binary_fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """shift= is for a continuous treatment; a binary T has no additive shift."""
+    scm, _ = binary_fork
+    with pytest.raises(ValueError, match="continuous treatment"):
+        scm.ite(scm.data.take([0, 1, 2]), "T", "Y", shift=1.0)
+
+
+def test_ite_rejects_levels_and_shift_together(
+    fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """levels= and shift= are two framings of one contrast; passing both is an error."""
+    scm, _ = fork
+    with pytest.raises(ValueError, match="either"):
+        scm.ite(scm.data.take([0]), "X", "Y", levels=(0.0, 1.0), shift=1.0)
+
+
+def test_ite_rejects_multicategory_outcome() -> None:
+    """A 3+ category outcome has no scalar individual effect; ite points at counterfactual."""
+    scm, data = _categorical_world()  # Z -> C, C has 4 categories
+    with pytest.raises(ValueError, match="categories"):
+        scm.ite(data, "Z", "C")

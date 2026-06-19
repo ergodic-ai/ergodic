@@ -473,6 +473,139 @@ class SCM:
             _draws=draws,
         )
 
+    # -- individual treatment effects ----------------------------------------
+
+    def ite(
+        self,
+        units: Dataset | Mapping[str, Any],
+        treatment: str,
+        outcome: str,
+        *,
+        levels: tuple[float, float] | None = None,
+        shift: float | None = None,
+    ) -> npt.NDArray[np.float64]:
+        """Per-unit individual treatment effects, through the twin network.
+
+        For each unit, the exact counterfactual contrast of ``outcome`` under two
+        treatment worlds that share *that unit's* abducted noise (the same-person,
+        two-worlds twin network). Returns one effect per unit, ordered as ``units`` --
+        the structural-model sibling of a CATE estimator's
+        :meth:`~ergodic.inference.OutcomeRegression.cate`, which returns a *conditional
+        average* over the noise rather than the individual's own counterfactual.
+
+        Two framings of the contrast, and you pick one:
+
+        * an absolute **level** contrast (the default): ``Y | do(X=high) -
+          Y | do(X=low)``, both worlds pinning the treatment to a fixed level for every
+          unit, the very contrast :meth:`ate` averages. Pass ``levels=(low, high)``; it
+          defaults to ``(0.0, 1.0)`` (a unit step, or the two codes of a binary
+          treatment). Works for a continuous, binary, or (with explicit codes)
+          categorical treatment, and for a continuous or binary outcome -- a binary
+          outcome's per-unit effect is its counterfactual flip, in ``{-1, 0, 1}``.
+        * a **shift** (a "shock"): ``Y | do(X = x_i + shift) - Y_factual``, perturbing
+          each unit's treatment from its *own* factual value, against the world where
+          nothing was done. Pass ``shift=delta`` (a continuous treatment and outcome).
+
+        The two coincide for a linear-additive mechanism: the shift contrast is the
+        constant ``coef * delta`` for every unit, equal to the matching level step. They
+        part only once a mechanism is nonlinear, where the shift is the unit's local
+        response at its own baseline. So with the built-in linear-Gaussian mechanisms
+        the continuous ITE is constant across units (the coefficient), and genuine
+        per-unit spread comes from a **binary or categorical outcome**, whose logistic
+        response varies with each unit's baseline.
+
+        Each effect is the exact point (invertible mechanisms). For an individual's
+        posterior *interval*, call :meth:`counterfactual` on that one unit per arm with
+        ``use_draws=True`` and difference the draws.
+        """
+        self._require_fit()
+        self._check_observable(treatment, "treatment")
+        self._check_observable(outcome, "outcome")
+        if levels is not None and shift is not None:
+            raise ValueError(
+                "pass either levels= or shift=, not both (they are two framings of the "
+                "same per-unit contrast)"
+            )
+        out_mech = self.mechanisms[outcome]
+        if isinstance(out_mech, CategoricalGumbelMax):
+            n_cat = self._fits[outcome].n_categories or out_mech.n_categories
+            if n_cat > 2:
+                raise ValueError(
+                    f"ite needs a numeric outcome; {outcome!r} has {n_cat} categories, "
+                    f"which has no scalar individual effect. Read per-unit counterfactual "
+                    f"distributions with counterfactual(units, do, {outcome!r}) instead"
+                )
+        if shift is not None:
+            return self._ite_shift(units, treatment, outcome, shift)
+        low, high = self._ate_levels(treatment, levels)
+        return self._ite_levels(units, treatment, outcome, low, high)
+
+    def _ite_levels(
+        self,
+        units: Dataset | Mapping[str, Any],
+        treatment: str,
+        outcome: str,
+        low: float,
+        high: float,
+    ) -> npt.NDArray[np.float64]:
+        """The per-unit ``Y|do(X=high) - Y|do(X=low)`` contrast, on shared abducted noise.
+
+        Both arms route through :meth:`counterfactual` (same units, same fixed seed), so
+        each unit's noise is identical across the two worlds and the contrast is a
+        coherent individual effect, not two independent draws. A continuous outcome
+        differences the per-unit draws; a binary outcome differences the per-unit
+        counterfactual codes (the flip, in ``{-1, 0, 1}``).
+        """
+        high_cf = self.counterfactual(units, {treatment: high}, outcome, use_draws=False)
+        low_cf = self.counterfactual(units, {treatment: low}, outcome, use_draws=False)
+        if isinstance(high_cf, CategoricalResult):
+            assert isinstance(low_cf, CategoricalResult)
+            high_u, low_u = high_cf.per_unit(), low_cf.per_unit()
+            assert high_u is not None and low_u is not None
+            return high_u.astype(np.float64) - low_u.astype(np.float64)
+        assert isinstance(low_cf, SCMResult)
+        return high_cf.draws() - low_cf.draws()
+
+    def _ite_shift(
+        self,
+        units: Dataset | Mapping[str, Any],
+        treatment: str,
+        outcome: str,
+        shift: float,
+    ) -> npt.NDArray[np.float64]:
+        """The per-unit shock ``Y|do(X = x_i + shift) - Y_factual``, from each unit's baseline.
+
+        A continuous treatment and outcome only. The baseline world ``do(X = x_i)`` pins
+        the treatment to its own factual value, which (on invertible mechanisms)
+        reproduces the factual outcome exactly, so the subtrahend is just the factual
+        column. The shifted world hands the engine a per-unit do-vector ``x_i + shift``
+        -- the one query that reads a non-scalar do.
+        """
+        if isinstance(self.mechanisms[treatment], CategoricalGumbelMax):
+            raise ValueError(
+                f"shift= is for a continuous treatment; {treatment!r} is categorical/"
+                f"binary, which has no additive shift. Use levels=(low_code, high_code)"
+            )
+        if isinstance(self.mechanisms[outcome], CategoricalGumbelMax):
+            raise ValueError(
+                f"shift= needs a continuous outcome; {outcome!r} is categorical/binary. "
+                f"Use a levels= contrast (do(X=high) - do(X=low)) instead"
+            )
+        factual = self._factual_values(units)
+        x_factual = np.asarray(factual[treatment], dtype=np.float64)
+        shifted = _compose.counterfactual_continuous(
+            self._order,
+            self.mechanisms,
+            self._fits,
+            factual,
+            {treatment: x_factual + shift},
+            outcome,
+            use_draws=False,
+            seed=self._seed(6),
+        )
+        baseline = np.asarray(factual[outcome], dtype=np.float64)
+        return shifted - baseline
+
     # -- effects, identification-gated ---------------------------------------
 
     def ate(
