@@ -42,6 +42,12 @@ bayes = ["pymc>=5"]
 # The SCM pillar (ergodic.scm). Same pymc dependency as `bayes`, named so it
 # reads as `pip install ergodic[scm]`. The bare install never imports pymc.
 scm = ["pymc>=5"]
+# Neural CATE learners (TARNet / DragonNet / CFR). A reserved seam: phase 1 ships
+# no module that imports torch; the registry points here when one is selected.
+neural = ["torch>=2.2"]
+# Foundation-model CATE learners (the in-context / PFN causal estimators). Also a
+# reserved seam, unused in phase 1.
+foundation = ["torch>=2.2"]
 
 [project.urls]
 Homepage = "https://ergodic.ai"

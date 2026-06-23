@@ -8,22 +8,19 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .._crossfit import _fit_predict, _folds, _train_mask
-from .._estimator import Slot, Task, _AdjustmentBase
+from .._estimator import Slot, Task, _MetaLearnerBase
 from .._learner import _mean_predict
 from .._target import EffectTarget
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import Self
 
     import numpy.typing as npt
 
-    from ...data import TabularData
-    from ...identification import Identification
     from .._learner import Learner
 
 
-class RLearner(_AdjustmentBase):
+class RLearner(_MetaLearnerBase):
     """The R-learner: residualize the outcome and treatment, then fit the CATE.
 
     Robinson's residual-on-residual moment with a heterogeneous final model,
@@ -45,7 +42,6 @@ class RLearner(_AdjustmentBase):
         super().__init__(learners, **kwargs)
         self.n_folds = n_folds
         self.clip = clip
-        self._final: Learner | None = None
 
     def _residualize(
         self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
@@ -68,7 +64,7 @@ class RLearner(_AdjustmentBase):
             res_t[test] = a[test] - e
         return res_y, res_t
 
-    def _fit_final(
+    def _fit_cate(
         self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
     ) -> Learner:
         res_y, res_t = self._residualize(arrays, make)
@@ -84,28 +80,11 @@ class RLearner(_AdjustmentBase):
             ) from exc
         return final
 
-    def fit(self, identification: Identification, data: TabularData) -> Self:
-        super().fit(identification, data)
-        self._final = self._fit_final(self._state.arrays, self._state.make)
-        return self
-
-    def _point(
-        self,
-        arrays: dict[str, npt.NDArray[np.float64]],
-        target: EffectTarget,
-        make: dict[str, Callable[[], Learner]],
-    ) -> float:
-        final = self._fit_final(arrays, make)
-        return float(np.mean(_mean_predict(final, arrays["Z"])))
-
-    def cate(self, data: TabularData | None = None) -> npt.NDArray[np.float64]:
-        """Per-unit CATE, in-sample when ``data`` is ``None``, else on its covariates."""
-        if self._final is None:
-            raise RuntimeError("r_learner is not fitted; call fit first")
-        return _mean_predict(self._final, self._cate_covariates(data))
+    def _predict_cate(self, model: Learner, z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return _mean_predict(model, z)
 
 
-class XLearner(_AdjustmentBase):
+class XLearner(_MetaLearnerBase):
     """The X-learner: per-arm outcome models, imputed effects, propensity-weighted.
 
     Fit one outcome model per arm, impute each unit's effect against the other
@@ -121,9 +100,8 @@ class XLearner(_AdjustmentBase):
     def __init__(self, learners: Any = None, *, clip: float = 1e-3, **kwargs: Any) -> None:
         super().__init__(learners, **kwargs)
         self.clip = clip
-        self._models: tuple[Learner, Learner, Learner] | None = None
 
-    def _fit_models(
+    def _fit_cate(
         self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
     ) -> tuple[Learner, Learner, Learner]:
         a = arrays["A"]
@@ -140,29 +118,9 @@ class XLearner(_AdjustmentBase):
         propensity = make["propensity"]().fit(z, a)
         return tau0, tau1, propensity
 
-    def _combine(
-        self, models: tuple[Learner, Learner, Learner], z: npt.NDArray[np.float64]
+    def _predict_cate(
+        self, model: tuple[Learner, Learner, Learner], z: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
-        tau0, tau1, propensity = models
+        tau0, tau1, propensity = model
         e = np.clip(_mean_predict(propensity, z), self.clip, 1.0 - self.clip)
         return e * _mean_predict(tau0, z) + (1.0 - e) * _mean_predict(tau1, z)
-
-    def fit(self, identification: Identification, data: TabularData) -> Self:
-        super().fit(identification, data)
-        self._models = self._fit_models(self._state.arrays, self._state.make)
-        return self
-
-    def _point(
-        self,
-        arrays: dict[str, npt.NDArray[np.float64]],
-        target: EffectTarget,
-        make: dict[str, Callable[[], Learner]],
-    ) -> float:
-        models = self._fit_models(arrays, make)
-        return float(np.mean(self._combine(models, arrays["Z"])))
-
-    def cate(self, data: TabularData | None = None) -> npt.NDArray[np.float64]:
-        """Per-unit CATE, in-sample when ``data`` is ``None``, else on its covariates."""
-        if self._models is None:
-            raise RuntimeError("x_learner is not fitted; call fit first")
-        return self._combine(self._models, self._cate_covariates(data))

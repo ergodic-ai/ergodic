@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._estimator import Slot, Task, _AdjustmentBase
+from .._estimator import Slot, Task, _MetaLearnerBase
 from .._learner import _mean_predict, _mean_predict_draws
 from .._target import EffectTarget
 
@@ -23,12 +23,13 @@ if TYPE_CHECKING:
     from .._learner import Learner
 
 
-class OutcomeRegression(_AdjustmentBase):
+class OutcomeRegression(_MetaLearnerBase):
     """Fit a model for the outcome and average the predicted contrast.
 
     With ``per_arm=False`` (the default) one model carries the treatment as a
     feature (the S-learner / g-formula). With ``per_arm=True`` a separate model is
-    fit on each arm (the T-learner).
+    fit on each arm (the T-learner). A Bayesian outcome learner flows its posterior
+    into the per-unit CATE result and into ``cate_draws``/``cate_interval``.
     """
 
     name = "outcome_regression"
@@ -41,36 +42,49 @@ class OutcomeRegression(_AdjustmentBase):
         self._model: Learner | None = None
         self._arm_models: tuple[Learner, Learner] | None = None
 
-    def fit(self, identification: Identification, data: TabularData) -> Self:
-        super().fit(identification, data)
-        state = self._state
-        a = state.arrays["A"]
-        y = state.arrays["Y"]
-        z = state.arrays["Z"]
+    def _fit_cate(
+        self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
+    ) -> Learner | tuple[Learner, Learner]:
+        a = arrays["A"]
+        y = arrays["Y"]
+        z = arrays["Z"]
         if self.per_arm:
-            model1 = state.make["outcome"]().fit(z[a == 1.0], y[a == 1.0])
-            model0 = state.make["outcome"]().fit(z[a == 0.0], y[a == 0.0])
-            self._arm_models = (model0, model1)
-        else:
-            self._model = state.make["outcome"]().fit(np.hstack([a.reshape(-1, 1), z]), y)
-        return self
+            model1 = make["outcome"]()
+            model1.fit(z[a == 1.0], y[a == 1.0])
+            model0 = make["outcome"]()
+            model0.fit(z[a == 0.0], y[a == 0.0])
+            return (model0, model1)
+        model = make["outcome"]()
+        model.fit(np.hstack([a.reshape(-1, 1), z]), y)
+        return model
 
-    def cate(self, data: TabularData | None = None) -> npt.NDArray[np.float64]:
-        """Per-unit CATE (mu1 - mu0), in-sample when ``data`` is ``None``."""
-        z = self._cate_covariates(data)
-        n = z.shape[0]
-        if self.per_arm:
-            if self._arm_models is None:
-                raise RuntimeError("outcome_regression is not fitted; call fit first")
-            model0, model1 = self._arm_models
+    def _predict_cate(
+        self, model: Learner | tuple[Learner, Learner], z: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        if isinstance(model, tuple):
+            model0, model1 = model
             return _mean_predict(model1, z) - _mean_predict(model0, z)
-        if self._model is None:
-            raise RuntimeError("outcome_regression is not fitted; call fit first")
+        n = z.shape[0]
         ones = np.ones((n, 1), dtype=np.float64)
         zeros = np.zeros((n, 1), dtype=np.float64)
-        return _mean_predict(self._model, np.hstack([ones, z])) - _mean_predict(
-            self._model, np.hstack([zeros, z])
+        return _mean_predict(model, np.hstack([ones, z])) - _mean_predict(
+            model, np.hstack([zeros, z])
         )
+
+    def fit(self, identification: Identification, data: TabularData) -> Self:
+        super().fit(identification, data)
+        model = self._cate_model()
+        if isinstance(model, tuple):
+            self._arm_models = model
+        else:
+            self._model = model
+        return self
+
+    def _cate_draws(
+        self, model: Learner | tuple[Learner, Learner], z: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64] | None:
+        mu1, mu0 = self._outcome_draws(z)
+        return np.asarray(mu1 - mu0, dtype=np.float64)
 
     # -- the posterior path (Bayesian outcome learner) -----------------------
 

@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
     from ..data import Dataset
     from ..graph import MixedGraph
+    from ..inference import ITEResult
     from ._mechanism import FitResult, Mechanism
 
     Array = npt.NDArray[np.float64]
@@ -483,7 +484,7 @@ class SCM:
         *,
         levels: tuple[float, float] | None = None,
         shift: float | None = None,
-    ) -> npt.NDArray[np.float64]:
+    ) -> ITEResult:
         """Per-unit individual treatment effects, through the twin network.
 
         For each unit, the exact counterfactual contrast of ``outcome`` under two
@@ -518,6 +519,8 @@ class SCM:
         posterior *interval*, call :meth:`counterfactual` on that one unit per arm with
         ``use_draws=True`` and difference the draws.
         """
+        from ..inference import ITEResult
+
         self._require_fit()
         self._check_observable(treatment, "treatment")
         self._check_observable(outcome, "outcome")
@@ -536,9 +539,38 @@ class SCM:
                     f"distributions with counterfactual(units, do, {outcome!r}) instead"
                 )
         if shift is not None:
-            return self._ite_shift(units, treatment, outcome, shift)
-        low, high = self._ate_levels(treatment, levels)
-        return self._ite_levels(units, treatment, outcome, low, high)
+            values = self._ite_shift(units, treatment, outcome, shift)
+            framing = f"shift={shift}"
+            note = (
+                "structural individual treatment effects: per-unit "
+                f"Y|do({treatment}=x_i+{shift}) - Y_factual through the twin network "
+                "(abduct the unit's noise, predict on the shifted branch)"
+            )
+        else:
+            low, high = self._ate_levels(treatment, levels)
+            values = self._ite_levels(units, treatment, outcome, low, high)
+            framing = f"levels=({low}, {high})"
+            note = (
+                "structural individual treatment effects: per-unit "
+                f"Y|do({treatment}={high}) - Y|do({treatment}={low}) on shared abducted "
+                "noise (the same-person, two-worlds twin network)"
+            )
+        factual = self._factual_values(units)
+        out_col = np.asarray(factual.get(outcome), dtype=np.float64)
+        n = int(values.shape[0])
+        return ITEResult(
+            treatment=treatment,
+            outcome=outcome,
+            covariates=(),
+            n=n,
+            kind="point",
+            source="scm",
+            framing=framing,
+            note=note,
+            _values=np.asarray(values, dtype=np.float64),
+            _index=np.arange(n, dtype=np.int64),
+            _factual=out_col,
+        )
 
     def _ite_levels(
         self,

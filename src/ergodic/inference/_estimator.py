@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
+from ._crossfit import _folds, _train_mask
 from ._learner import _as_learner, _fresh, _is_bayesian, _is_classifier
 from ._target import EffectTarget, as_target
 from .learners import OLS, LogisticRegression
@@ -39,7 +40,9 @@ if TYPE_CHECKING:
     from ..data import TabularData
     from ..identification import Identification
     from ._learner import Learner
+    from ._perunit import CATEResult
     from ._result import EffectEstimate
+    from ._scores import DRScores
 
 
 # Estimand families, matching ``Identification.strategy``.
@@ -210,6 +213,9 @@ class CausalEstimator(ABC):
         self._treated = treated
         self._fit_state: _FitState | None = None
         self._covariates: tuple[str, ...] = ()
+        self._identification: Identification | None = None
+        self._treatment_name: str = ""
+        self._outcome_name: str = ""
 
     # -- learner resolution --------------------------------------------------
 
@@ -268,6 +274,7 @@ class CausalEstimator(ABC):
                 f"{self.name} consumes {sorted(self.consumes)}, "
                 f"but the effect was identified by {identification.strategy!r}"
             )
+        self._identification = identification
         arrays, y_binary, diagnostics = self._extract(identification, data)
         make, learner_names, bayesian = self._resolve(y_binary)
         self._fit_state = _FitState(
@@ -499,6 +506,8 @@ class _AdjustmentBase(CausalEstimator):
         covariates = identification.adjustment_set or frozenset()
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
+        self._treatment_name = treatment
+        self._outcome_name = outcome
         a = self._treatment_vector(data, treatment)
         y, y_binary = _outcome_vector(data, outcome)
         z = _covariate_matrix(data, covariates)
@@ -516,6 +525,243 @@ class _AdjustmentBase(CausalEstimator):
             "n_covariates": float(z.shape[1]),
         }
         return arrays, y_binary, diagnostics
+
+
+class _MetaLearnerBase(_AdjustmentBase):
+    """Shared coherence layer for the heterogeneous-effect meta-learners.
+
+    Factors the pattern the DR-, R-, and X-learner duplicate: fit a CATE model on
+    the arrays, predict a per-unit effect on a covariate design, and report it as a
+    structured :class:`~ergodic.inference.CATEResult` rather than a bare array.
+    Subclasses supply two hooks, :meth:`_fit_cate` (build the model handle) and
+    :meth:`_predict_cate` (per-unit prediction on a design), and the base does the
+    rest: the ``cate`` surface, the per-unit uncertainty, and the doubly-robust
+    scores the explainability layer reads. The ATE ``_point`` reuses the same two
+    hooks, so the math is identical to the per-estimator code it replaces.
+
+    Per-unit uncertainty, uniform across the meta-learners:
+
+    * a Bayesian learner slot gives posterior ``(S, n)`` draws (``_cate_draws``);
+    * otherwise the bootstrap path refits the CATE model on resamples and collects
+      per-unit predictions into ``(S, n)`` draws (``kind="bootstrap"``);
+    * the DR-learner additionally has the analytic influence-function standard error
+      where the final stage is linear (``_cate_analytic_se``).
+    """
+
+    def _fit_cate(
+        self,
+        arrays: dict[str, npt.NDArray[np.float64]],
+        make: dict[str, Callable[[], Learner]],
+    ) -> Any:
+        """Fit the CATE model on ``arrays`` and return an opaque handle."""
+        raise NotImplementedError
+
+    def _predict_cate(self, model: Any, z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Per-unit CATE on the covariate design ``z`` from a fitted handle."""
+        raise NotImplementedError
+
+    def _cate_draws(self, model: Any, z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64] | None:
+        """Posterior per-unit CATE draws ``(S, n)`` when the slot is Bayesian, else ``None``."""
+        return None
+
+    def _cate_analytic_se(
+        self, model: Any, z: npt.NDArray[np.float64], data: TabularData | None
+    ) -> npt.NDArray[np.float64] | None:
+        """Per-unit analytic standard errors when a closed form exists, else ``None``."""
+        return None
+
+    # -- the shared ATE path reuses the CATE model ---------------------------
+
+    def _cate_model(self) -> Any:
+        model = getattr(self, "_fitted_cate", None)
+        if model is None:
+            raise RuntimeError(f"{self.name} is not fitted; call fit first")
+        return model
+
+    def fit(self, identification: Identification, data: TabularData) -> Self:
+        super().fit(identification, data)
+        self._fitted_cate = self._fit_cate(self._state.arrays, self._state.make)
+        return self
+
+    def _point(
+        self,
+        arrays: dict[str, npt.NDArray[np.float64]],
+        target: EffectTarget,
+        make: dict[str, Callable[[], Learner]],
+    ) -> float:
+        model = self._fit_cate(arrays, make)
+        return float(np.mean(self._predict_cate(model, arrays["Z"])))
+
+    # -- the uniform per-unit result -----------------------------------------
+
+    def cate(self, data: TabularData | None = None) -> CATEResult:
+        """Per-unit CATE as a :class:`~ergodic.inference.CATEResult`.
+
+        In-sample when ``data`` is ``None``, else scored on its covariates. The
+        result carries the per-unit point, the uncertainty (posterior draws for a
+        Bayesian slot, the bootstrap draws otherwise, the analytic standard error
+        for the linear DR final), the identification, and the cached doubly-robust
+        scores for :meth:`~ergodic.inference.CATEResult.explain`.
+        """
+        from ._perunit import CATEResult
+
+        model = self._cate_model()
+        z = self._cate_covariates(data)
+        point = np.asarray(self._predict_cate(model, z), dtype=np.float64)
+        n = point.shape[0]
+
+        draws: npt.NDArray[np.float64] | None = None
+        std_error: npt.NDArray[np.float64] | None = None
+        kind = "point"
+        if self._has_bayesian_slot(self._state):
+            draws = self._cate_draws(model, z)
+            if draws is not None:
+                kind = "posterior"
+        if draws is None:
+            analytic = self._cate_analytic_se(model, z, data)
+            if analytic is not None:
+                std_error = analytic
+                kind = "analytic"
+            else:
+                draws = self._cate_bootstrap(z, data)
+                kind = "bootstrap"
+
+        scores = self._cate_scores(data)
+        return CATEResult(
+            treatment=self._treatment_name,
+            outcome=self._outcome_name,
+            covariates=self._covariates,
+            n=n,
+            kind=kind,
+            source=self.name,
+            diagnostics=dict(self._state.diagnostics),
+            identification=self._identification,
+            _values=point,
+            _index=self._cate_index(data, n),
+            _std_error=std_error,
+            _draws=draws,
+            _scores=scores,
+        )
+
+    def _cate_bootstrap(
+        self, z: npt.NDArray[np.float64], data: TabularData | None
+    ) -> npt.NDArray[np.float64] | None:
+        """Refit the CATE model on row resamples, predict on ``z``: ``(S, n)`` draws.
+
+        Mirrors the scalar bootstrap (the same resample-refit machinery), but
+        collects the per-unit predictions on the fixed evaluation design rather than
+        a single number. ``None`` when no resample yields a finite prediction.
+        """
+        state = self._state
+        arrays = state.arrays
+        keys = list(arrays)
+        nrows = arrays["Z"].shape[0]
+        rng = np.random.default_rng(self._random_state)
+        collected: list[npt.NDArray[np.float64]] = []
+        attempts = 0
+        budget = self._n_boot * 5
+        while len(collected) < self._n_boot and attempts < budget:
+            attempts += 1
+            idx = rng.integers(0, nrows, nrows)
+            sub = {key: arrays[key][idx] for key in keys}
+            try:
+                model = self._fit_cate(sub, state.make)
+                pred = np.asarray(self._predict_cate(model, z), dtype=np.float64)
+            except (ValueError, ZeroDivisionError, np.linalg.LinAlgError):
+                continue
+            if not np.all(np.isfinite(pred)):
+                continue
+            collected.append(pred)
+        if not collected:
+            return None
+        return np.asarray(np.vstack(collected), dtype=np.float64)
+
+    def _cate_scores(self, data: TabularData | None) -> DRScores | None:
+        """The cross-fit doubly-robust scores on the fit data, for explainability.
+
+        Built once on the in-sample arrays, since the AIPW signal is defined over the
+        observed treatment and outcome (it is not an out-of-sample prediction). When
+        ``data`` is given (a fresh covariate design with no treatment/outcome), the
+        scores are still those of the fit sample, so ``explain`` describes the fit
+        population; that is documented on the result.
+        """
+        if self._identification is None or data is not None:
+            return None
+        from ._scores import DRScores
+        from ._scores import aipw_scores as _scores_fn
+
+        state = self._state
+        a, y, z = state.arrays["A"], state.arrays["Y"], state.arrays["Z"]
+        try:
+            mu0, mu1, e = self._dr_nuisances(state.arrays, state.make)
+            tau_hat = self._crossfit_tau_hat(state.arrays, state.make)
+        except (ValueError, np.linalg.LinAlgError):
+            return None
+        return DRScores(
+            scores=_scores_fn(a, y, mu0, mu1, e),
+            mu0=mu0,
+            mu1=mu1,
+            propensity=e,
+            covariates=z,
+            treatment=a,
+            outcome=y,
+            covariate_names=self._covariates,
+            tau_hat=tau_hat,
+        )
+
+    def _crossfit_tau_hat(
+        self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
+    ) -> npt.NDArray[np.float64] | None:
+        """Out-of-fold predicted effects: a fixed proxy ranking for honest explainability.
+
+        The literature's honesty recipe needs the ranking proxy fixed on data not used
+        for the summary. Fitting the CATE model on each train fold and predicting the
+        held-out fold gives an out-of-fold ``tau_hat`` that does not share rows with the
+        scores it is later sorted against, so GATES, RATE, and the calibration test do
+        not pick up the in-sample fit's spurious self-correlation. ``None`` (the
+        in-sample fit is used) when a fold refit fails.
+        """
+        a, z = arrays["A"], arrays["Z"]
+        n = a.shape[0]
+        n_folds = int(getattr(self, "n_folds", 5))
+        tau = np.empty(n, dtype=np.float64)
+        rng = np.random.default_rng(self._random_state)
+        try:
+            for test in _folds(n, n_folds, rng, stratify=a):
+                train = _train_mask(n, test)
+                sub = {key: arr[train] for key, arr in arrays.items()}
+                model = self._fit_cate(sub, make)
+                tau[test] = self._predict_cate(model, z[test])
+        except (ValueError, np.linalg.LinAlgError, TypeError):
+            return None
+        if not np.all(np.isfinite(tau)):
+            return None
+        return tau
+
+    def _dr_nuisances(
+        self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """Cross-fit ``mu0, mu1, e`` for the explainability scores (DR construction)."""
+        from ._scores import _crossfit_nuisances
+
+        n_folds = getattr(self, "n_folds", 5)
+        clip = getattr(self, "clip", 1e-3)
+        make_outcome = make.get("outcome") or (lambda: OLS())
+        make_propensity = make.get("propensity") or (lambda: LogisticRegression())
+        return _crossfit_nuisances(
+            arrays["A"],
+            arrays["Y"],
+            arrays["Z"],
+            make_outcome=make_outcome,
+            make_propensity=make_propensity,
+            n_folds=n_folds,
+            clip=clip,
+            random_state=self._random_state,
+        )
+
+    def _cate_index(self, data: TabularData | None, n: int) -> npt.NDArray[np.int64]:
+        """Positional row ids for the scored units (the data carries no key index)."""
+        return np.arange(n, dtype=np.int64)
 
 
 class _FrontdoorBase(CausalEstimator):

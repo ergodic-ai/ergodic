@@ -8,7 +8,7 @@ per family is the default (the doubly-robust one for adjustment).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ._estimator import ADJUSTMENT, FRONTDOOR, IV, NULL, CausalEstimator
 from ._target import EffectTarget
@@ -29,7 +29,22 @@ from .estimators import (
 )
 
 if TYPE_CHECKING:
+    from ..data import TabularData
     from ..identification import Identification
+    from ._perunit import CATEResult
+
+
+@runtime_checkable
+class HasCate(Protocol):
+    """A fitted estimator that reports a per-unit CATE result.
+
+    The CATE facade casts the resolved (and fitted) estimator to this Protocol so
+    ``cate`` is callable while the library stays mypy-strict. The meta-learners and
+    DML satisfy it.
+    """
+
+    def cate(self, data: TabularData | None = ...) -> CATEResult: ...
+
 
 _BY_FAMILY: dict[str, list[type[CausalEstimator]]] = {
     ADJUSTMENT: [AIPW, DML, DRLearner, OutcomeRegression, IPW, Stratification, RLearner, XLearner],
@@ -81,6 +96,73 @@ _DEFAULT_TARGET: dict[str, EffectTarget] = {
     IV: EffectTarget.LATE,
     NULL: EffectTarget.ATE,
 }
+
+# The CATE-capable estimators, by user-facing name. The doubly-robust DR-learner is
+# the default (the robust choice, and it shares the doubly-robust score helper that
+# the explainability layer reads).
+_CATE_DEFAULT = "dr_learner"
+_CATE_BY_NAME: dict[str, type[CausalEstimator]] = {
+    "dr_learner": DRLearner,
+    "drlearner": DRLearner,
+    "dr": DRLearner,
+    "r_learner": RLearner,
+    "rlearner": RLearner,
+    "x_learner": XLearner,
+    "xlearner": XLearner,
+    "s_learner": OutcomeRegression,
+    "t_learner": OutcomeRegression,
+    "outcome_regression": OutcomeRegression,
+    "g_formula": OutcomeRegression,
+    "dml": DML,
+    "double_ml": DML,
+}
+
+# Extra constructor knobs a CATE method name implies (the S/T-learner split is one
+# class with a flag, so the name carries the flag).
+_CATE_KWARGS: dict[str, dict[str, object]] = {
+    "t_learner": {"per_arm": True},
+    "s_learner": {"per_arm": False},
+}
+
+# Reserved method names for the neural and foundation-model CATE learners. They are
+# a documented seam: phase 1 ships nothing that imports them, and selecting one
+# raises a clear "install the extra" error until the guarded-import strategies land.
+_CATE_NEURAL = ("tarnet", "dragonnet", "cfr", "drnet")
+_CATE_FOUNDATION = ("causal_pfn", "causalfm", "causal_pfm")
+
+
+def cate_kwargs_for(strategy: str | None = None) -> dict[str, object]:
+    """The extra constructor kwargs a CATE method name implies (e.g. the T-learner flag)."""
+    name = (strategy or _CATE_DEFAULT).lower()
+    if name in ("auto", ""):
+        name = _CATE_DEFAULT
+    return dict(_CATE_KWARGS.get(name, {}))
+
+
+def cate_estimator_for(strategy: str | None = None) -> type[CausalEstimator]:
+    """The CATE-capable estimator class for a name, or the doubly-robust default.
+
+    Recognizes the reserved neural and foundation names and raises a clear pointer
+    to the optional extra (the phase-1 seam), rather than a generic unknown-name
+    error.
+    """
+    name = (strategy or _CATE_DEFAULT).lower()
+    if name in ("auto", ""):
+        name = _CATE_DEFAULT
+    if name in _CATE_BY_NAME:
+        return _CATE_BY_NAME[name]
+    if name in _CATE_NEURAL:
+        raise NotImplementedError(
+            f"the neural CATE learner {name!r} needs the optional 'neural' extra "
+            "(pip install ergodic[neural]); it is a reserved seam and not built yet"
+        )
+    if name in _CATE_FOUNDATION:
+        raise NotImplementedError(
+            f"the foundation-model CATE learner {name!r} needs the optional 'foundation' "
+            "extra (pip install ergodic[foundation]); it is a reserved seam and not built yet"
+        )
+    allowed = ", ".join(sorted(_CATE_BY_NAME))
+    raise ValueError(f"unknown CATE method {strategy!r}; use one of {allowed}, or 'auto'")
 
 
 def estimator_for(

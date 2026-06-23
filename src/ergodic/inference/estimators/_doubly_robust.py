@@ -9,6 +9,7 @@ import numpy as np
 
 from .._estimator import Slot, Task, _AdjustmentBase, _dirichlet_weights
 from .._learner import _mean_predict, _mean_predict_draws
+from .._scores import aipw_scores as _aipw_ate_scores
 from .._target import EffectTarget
 
 if TYPE_CHECKING:
@@ -18,18 +19,6 @@ if TYPE_CHECKING:
 
     from .._estimator import _FitState
     from .._learner import Learner
-
-
-def _aipw_ate_scores(
-    a: npt.NDArray[np.float64],
-    y: npt.NDArray[np.float64],
-    mu0: npt.NDArray[np.float64],
-    mu1: npt.NDArray[np.float64],
-    e: npt.NDArray[np.float64],
-) -> npt.NDArray[np.float64]:
-    """Efficient influence scores for the ATE; their mean is the AIPW point."""
-    scores = (mu1 - mu0) + a * (y - mu1) / e - (1.0 - a) * (y - mu0) / (1.0 - e)
-    return np.asarray(scores, dtype=np.float64)
 
 
 def _aipw_att_scores(
