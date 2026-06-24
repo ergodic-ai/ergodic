@@ -533,7 +533,7 @@ class CausalForest(_MetaLearnerBase):
 
     # -- the per-unit result, with the infinitesimal-jackknife variance ------
 
-    def cate(self, data: TabularData | None = None) -> CATEResult:
+    def cate(self, data: TabularData | None = None, *, uncertainty: bool = True) -> CATEResult:
         """Per-unit CATE with infinitesimal-jackknife standard errors and intervals.
 
         Overrides the base meta-learner ``cate`` (which would bootstrap-refit the
@@ -542,6 +542,9 @@ class CausalForest(_MetaLearnerBase):
         bootstrap-of-little-bags grouping), valid because the forest is honest and
         subsampled. The result carries the cached doubly-robust scores for
         :meth:`~ergodic.inference.CATEResult.explain`.
+
+        ``uncertainty=False`` returns the point effects with ``kind="point"`` and no
+        standard error, skipping the infinitesimal-jackknife pass over the trees.
         """
         from .._perunit import CATEResult
 
@@ -549,14 +552,15 @@ class CausalForest(_MetaLearnerBase):
         z = self._cate_covariates(data)
         point = np.asarray(model.predict(z), dtype=np.float64)
         n = point.shape[0]
-        std_error = self._ij_standard_error(model, z, point)
+        std_error = self._ij_standard_error(model, z, point) if uncertainty else None
+        kind = "analytic" if uncertainty else "point"
         scores = self._cate_scores(data)
         return CATEResult(
             treatment=self._treatment_name,
             outcome=self._outcome_name,
             covariates=self._covariates,
             n=n,
-            kind="analytic",
+            kind=kind,
             source=self.name,
             diagnostics=dict(self._state.diagnostics),
             identification=self._identification,

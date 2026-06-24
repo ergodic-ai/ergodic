@@ -194,6 +194,48 @@ def test_bootstrap_per_unit_interval_brackets_truth() -> None:
     assert coverage > 0.5  # the fitted-CATE bootstrap brackets the linear truth
 
 
+# -- uncertainty=False: a fast point-only CATE -------------------------------
+
+
+def test_uncertainty_false_skips_bootstrap_same_points() -> None:
+    """uncertainty=False returns a point-only result; the points match the bootstrap one."""
+    data, graph, _ = _hetero(n=1500, seed=0)
+    ident = identify_effect(graph, "A", "Y")
+    # a non-linear (KNN) final routes uncertainty through the expensive bootstrap path
+    est = DRLearner({"final": "knn"}, random_state=0, n_boot=10).fit(ident, data)
+
+    point = est.cate(uncertainty=False)
+    assert point.kind == "point"
+    assert point.std_error is None
+    assert point.draws() is None
+
+    full = est.cate()  # the default path builds bootstrap draws
+    assert full.kind == "bootstrap"
+    assert full.draws() is not None
+    np.testing.assert_allclose(point.values, full.values)  # points are n_boot-independent
+
+    with pytest.raises(ValueError, match="no uncertainty"):
+        point.interval()
+    assert isinstance(point.explain(), Heterogeneity)  # explain reads scores, not draws
+
+
+def test_uncertainty_false_through_facade_and_dml() -> None:
+    """The facade and DML honor uncertainty=False (point-only, no standard error)."""
+    data, graph, _ = _hetero(n=1200, seed=0)
+    # the X-learner always bootstraps; uncertainty=False makes it point-only
+    res = cate(graph, data, "A", "Y", method="x_learner", uncertainty=False, random_state=0)
+    assert res.kind == "point"
+    assert res.std_error is None
+    assert res.draws() is None
+    # DML's analytic standard error is skipped too; the constant theta point is unchanged
+    dml_point = cate(graph, data, "A", "Y", method="dml", uncertainty=False, random_state=0)
+    dml_full = cate(graph, data, "A", "Y", method="dml", random_state=0)
+    assert dml_point.kind == "point"
+    assert dml_point.std_error is None
+    assert dml_full.kind == "analytic"
+    np.testing.assert_allclose(dml_point.values, dml_full.values)
+
+
 # -- BLP ----------------------------------------------------------------------
 
 

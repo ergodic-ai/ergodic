@@ -119,6 +119,7 @@ def cate(
     treated: Any | None = None,
     random_state: int | None = None,
     n_boot: int = 1000,
+    uncertainty: bool = True,
     **kwargs: Any,
 ) -> CATEResult:
     """Identify the effect of ``treatment`` on ``outcome``, then estimate the CATE.
@@ -133,7 +134,8 @@ def cate(
     uncertainty (a posterior with a Bayesian slot, the bootstrap otherwise, the
     analytic standard error for the linear DR final) and the cached doubly-robust
     scores, so :meth:`~ergodic.inference.CATEResult.explain` runs the Tier-B
-    characterization.
+    characterization. Pass ``uncertainty=False`` to skip that step for a fast
+    point-only result (``explain`` still works off the cached scores).
     """
     identification = identify_effect(graph, treatment, outcome)
     if not identification.identifiable:
@@ -158,4 +160,4 @@ def cate(
         learner, random_state=random_state, n_boot=n_boot, treated=treated, **method_kwargs
     )
     estimator.fit(identification, data)
-    return cast("HasCate", estimator).cate()
+    return cast("HasCate", estimator).cate(uncertainty=uncertainty)

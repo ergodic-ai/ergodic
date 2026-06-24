@@ -133,6 +133,20 @@ def test_ij_per_unit_interval_shape_and_kind() -> None:
     assert bool(np.all(lo <= hi))
 
 
+def test_forest_uncertainty_false_is_point_only() -> None:
+    """uncertainty=False skips the infinitesimal-jackknife pass; the points are unchanged."""
+    data, graph, _ = _linear_tau(n=2000, seed=0)
+    forest = _fit(data, graph, n_trees=200, min_leaf=10, random_state=0)
+    full = forest.cate()
+    point = forest.cate(uncertainty=False)
+    assert full.kind == "analytic"
+    assert point.kind == "point"
+    assert point.std_error is None
+    np.testing.assert_allclose(point.values, full.values)
+    with pytest.raises(ValueError, match="no uncertainty"):
+        point.interval()
+
+
 def test_ij_coverage_near_nominal() -> None:
     """Honest IJ 90% per-unit intervals cover a + b*x1 near the nominal rate.
 

@@ -262,6 +262,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 
 from ergodic.inference import DRLearner
 
+# Only the point per-customer effect is read below (the decile table), so uncertainty=False
+# skips the per-unit bootstrap; we never call .interval()/.std_error() here.
 cate = (
     DRLearner(
         {
@@ -272,7 +274,8 @@ cate = (
         random_state=0,
     )
     .fit(identify_effect(g, "offer", "churned"), data)
-    .cate()
+    .cate(uncertainty=False)
+    .values  # the raw per-customer effect array (CATEResult.values) for the decile table below
 )
 
 baseline_risk = (

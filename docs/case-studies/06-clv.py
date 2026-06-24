@@ -212,6 +212,8 @@ print(f"corr(predicted value, true perk effect): {np.corrcoef(predicted_clv, tau
 # %%
 from ergodic.inference import DRLearner
 
+# Only the point per-customer effect is used below (mean, correlation, ranking), so
+# uncertainty=False skips the per-unit bootstrap; we never read .interval()/.std_error() here.
 cate = (
     DRLearner(
         {
@@ -222,7 +224,8 @@ cate = (
         random_state=0,
     )
     .fit(identify_effect(g, "perk", "value"), data)
-    .cate()
+    .cate(uncertainty=False)
+    .values  # the raw per-customer effect array (CATEResult.values) for the arithmetic below
 )
 print(f"average of per-customer effects: ${cate.mean():.2f}   (recovers the ATE)")
 print(f"corr(estimated effect, true effect): {np.corrcoef(cate, tau)[0, 1]:.2f}")

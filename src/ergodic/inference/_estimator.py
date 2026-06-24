@@ -594,7 +594,7 @@ class _MetaLearnerBase(_AdjustmentBase):
 
     # -- the uniform per-unit result -----------------------------------------
 
-    def cate(self, data: TabularData | None = None) -> CATEResult:
+    def cate(self, data: TabularData | None = None, *, uncertainty: bool = True) -> CATEResult:
         """Per-unit CATE as a :class:`~ergodic.inference.CATEResult`.
 
         In-sample when ``data`` is ``None``, else scored on its covariates. The
@@ -602,6 +602,13 @@ class _MetaLearnerBase(_AdjustmentBase):
         Bayesian slot, the bootstrap draws otherwise, the analytic standard error
         for the linear DR final), the identification, and the cached doubly-robust
         scores for :meth:`~ergodic.inference.CATEResult.explain`.
+
+        Pass ``uncertainty=False`` for a fast point-only result (``kind="point"``,
+        no standard error or draws): it skips the uncertainty step, which for a
+        non-linear final means a full bootstrap refit of the cross-fit pipeline.
+        Use it when only the effect curve is needed (ranking, targeting, plots);
+        the per-unit points are identical either way. ``explain`` still works (it
+        reads the cached scores, not the draws).
         """
         from ._perunit import CATEResult
 
@@ -613,18 +620,19 @@ class _MetaLearnerBase(_AdjustmentBase):
         draws: npt.NDArray[np.float64] | None = None
         std_error: npt.NDArray[np.float64] | None = None
         kind = "point"
-        if self._has_bayesian_slot(self._state):
-            draws = self._cate_draws(model, z)
-            if draws is not None:
-                kind = "posterior"
-        if draws is None:
-            analytic = self._cate_analytic_se(model, z, data)
-            if analytic is not None:
-                std_error = analytic
-                kind = "analytic"
-            else:
-                draws = self._cate_bootstrap(z, data)
-                kind = "bootstrap"
+        if uncertainty:
+            if self._has_bayesian_slot(self._state):
+                draws = self._cate_draws(model, z)
+                if draws is not None:
+                    kind = "posterior"
+            if draws is None:
+                analytic = self._cate_analytic_se(model, z, data)
+                if analytic is not None:
+                    std_error = analytic
+                    kind = "analytic"
+                else:
+                    draws = self._cate_bootstrap(z, data)
+                    kind = "bootstrap"
 
         scores = self._cate_scores(data)
         return CATEResult(

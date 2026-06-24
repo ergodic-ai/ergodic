@@ -44,7 +44,7 @@ class HasCate(Protocol):
     DML satisfy it.
     """
 
-    def cate(self, data: TabularData | None = ...) -> CATEResult: ...
+    def cate(self, data: TabularData | None = ..., *, uncertainty: bool = ...) -> CATEResult: ...
 
 
 _BY_FAMILY: dict[str, list[type[CausalEstimator]]] = {

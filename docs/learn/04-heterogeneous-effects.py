@@ -78,7 +78,10 @@ model = DRLearner(
     random_state=0,
 ).fit(identify_effect(g, "voucher", "spend"), data)
 
-cate = model.cate()
+# .cate() returns a CATEResult (per-unit points + uncertainty + .explain()); this guide reads
+# only the effect curve, so uncertainty=False skips the per-unit bootstrap, and .values is the
+# raw per-customer effect array the arithmetic and plots below treat like any vector.
+cate = model.cate(uncertainty=False).values
 print(f"average of the per-customer effects: {cate.mean():.2f}")
 
 # %% [markdown]
