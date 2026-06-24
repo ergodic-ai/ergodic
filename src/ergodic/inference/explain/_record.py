@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
     from .._scores import DRScores
+    from ._policy import PolicyTree
 
 
 @dataclass(frozen=True)
@@ -89,3 +90,21 @@ class Heterogeneity:
             n_boot=n_boot,
             random_state=random_state,
         )
+
+    def policy_tree(
+        self,
+        covariates: str | tuple[str, ...] | list[str] | None = None,
+        *,
+        depth: int = 2,
+    ) -> PolicyTree:
+        """The depth-limited, DR-welfare-optimal policy tree off these scores.
+
+        A convenience that forwards the shared doubly-robust scores to
+        :func:`~ergodic.inference.policy_tree`. ``covariates`` selects the split
+        columns by name (``None`` uses all of them). The "act" companion to
+        :meth:`rate`: where ``rate`` scores a ranking, this returns an interpretable
+        treat-or-not rule and its estimated policy value.
+        """
+        from ._policy import policy_tree as _policy_tree
+
+        return _policy_tree(self.scores, covariates, depth=depth)

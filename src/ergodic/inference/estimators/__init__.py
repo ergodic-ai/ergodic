@@ -6,6 +6,7 @@ from __future__ import annotations
 from ._did import DiDEffect, EventTimeEffect, GroupTimeEffect, did, event_study
 from ._dml import DML, DRLearner
 from ._doubly_robust import AIPW
+from ._forest import CausalForest, VariableImportance
 from ._frontdoor import TwoStageRegression
 from ._its import ITSEffect, interrupted_time_series
 from ._iv import PLIV, TwoStageLeastSquares, Wald
@@ -22,6 +23,7 @@ __all__ = [
     "DML",
     "IPW",
     "PLIV",
+    "CausalForest",
     "DRLearner",
     "DiDEffect",
     "EventTimeEffect",
@@ -35,6 +37,7 @@ __all__ = [
     "SyntheticControlEffect",
     "TwoStageLeastSquares",
     "TwoStageRegression",
+    "VariableImportance",
     "Wald",
     "XLearner",
     "did",

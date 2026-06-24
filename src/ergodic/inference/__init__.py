@@ -36,12 +36,14 @@ from ._refute import Refutation, refute_effect
 from ._registry import candidates
 from ._result import EffectEstimate
 from ._scores import DRScores, dr_scores
+from ._select import SelectionReport, select_cate
 from ._target import EffectTarget
 from .estimators import (
     AIPW,
     DML,
     IPW,
     PLIV,
+    CausalForest,
     DiDEffect,
     DRLearner,
     EventTimeEffect,
@@ -55,6 +57,7 @@ from .estimators import (
     SyntheticControlEffect,
     TwoStageLeastSquares,
     TwoStageRegression,
+    VariableImportance,
     Wald,
     XLearner,
     did,
@@ -63,7 +66,7 @@ from .estimators import (
     interrupted_time_series,
     synthetic_control,
 )
-from .explain import Heterogeneity
+from .explain import Heterogeneity, PolicyTree, policy_tree
 from .learners import (
     OLS,
     KNNClassifier,
@@ -82,6 +85,7 @@ __all__ = [
     "BayesianLearner",
     "CATEResult",
     "CausalEstimator",
+    "CausalForest",
     "DRLearner",
     "DRScores",
     "Design",
@@ -101,16 +105,19 @@ __all__ = [
     "NullEffect",
     "OutcomeRegression",
     "PerUnitEffect",
+    "PolicyTree",
     "PyMCClassifier",
     "PyMCLearner",
     "RLearner",
     "Refutation",
+    "SelectionReport",
     "Slot",
     "Stratification",
     "SyntheticControlEffect",
     "Task",
     "TwoStageLeastSquares",
     "TwoStageRegression",
+    "VariableImportance",
     "Wald",
     "XLearner",
     "candidates",
@@ -122,6 +129,8 @@ __all__ = [
     "estimate_mediation",
     "event_study",
     "interrupted_time_series",
+    "policy_tree",
     "refute_effect",
+    "select_cate",
     "synthetic_control",
 ]

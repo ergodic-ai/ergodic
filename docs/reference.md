@@ -64,6 +64,22 @@ The `cate` facade and the uniform per-unit result. `cate(graph, data, X, Y)` is 
 
 ::: ergodic.inference.Heterogeneity
 
+### Causal forest, policy trees, and CATE model selection
+
+The honest causal forest (GRF) is its own CATE learner, reachable through the `cate` facade (`method="causal_forest"` or `"grf"`) or directly as `CausalForest`; it returns a `CATEResult` with native per-unit infinitesimal-jackknife intervals, and `CausalForest(...).fit(...).variable_importance()` returns a `VariableImportance` driver signal. `policy_tree` (also `CATEResult.explain().policy_tree(...)`) learns an interpretable, depth-limited, doubly-robust-optimal treat/don't `PolicyTree`. `select_cate` ranks candidate CATE learners by the doubly-robust tau-risk and returns a `SelectionReport` with the selected result and a Q-aggregation ensemble.
+
+::: ergodic.CausalForest
+
+::: ergodic.inference.VariableImportance
+
+::: ergodic.policy_tree
+
+::: ergodic.PolicyTree
+
+::: ergodic.select_cate
+
+::: ergodic.SelectionReport
+
 ## Process intelligence
 
 Event-log mining: the map, the causal case table, the model layer, and decision-point analysis.
