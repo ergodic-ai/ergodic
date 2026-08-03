@@ -2,7 +2,7 @@
 
 `DomainKnowledge` records what you know about a problem before you look at the data: which edges must or must not exist, the order variables come in, which are roots or sinks, and which pairs share a hidden confounder. Discovery uses it to prune and orient. Inference uses it to assert the conditions an effect needs. It serves all three pillars.
 
-Like a graph, a knowledge object is immutable. Each method returns a new object, so you build one up by chaining.
+Like a graph, a knowledge object is immutable. Each method returns a new object, so you don't mutate one in place. You build one up by chaining instead.
 
 ## Stating what you know
 
@@ -28,7 +28,7 @@ The constraints you can state:
 - `forbid_between(group_a, group_b)` to ban every edge from one set into another.
 - `restrict_to(skeleton)` to allow adjacencies only on a known support.
 
-A pair forbidden in both directions is an adjacency ban: no directed, bidirected, or undirected edge may join the two. A single `forbid(cause, effect)` constrains that directed edge only, so `A <-> B` or `A -- B` still passes. And order is transitive: with A before B and B before C, an edge from C into A is out even though no single constraint names that pair.
+A pair forbidden in both directions is an adjacency ban: no directed, bidirected, or undirected edge may join the two. A single `forbid(cause, effect)` constrains that directed edge only, so `A <-> B` or `A -- B` still passes. Order is transitive, too: with A before B and B before C, an edge from C into A is out even though no single constraint names that pair.
 
 ## Tiers are the natural form
 
@@ -55,7 +55,7 @@ temporal = DomainKnowledge().with_tiers([["X"], ["Y"], ["Z"]])
 both = expert & temporal
 ```
 
-Knowledge can contradict itself. `conflicts()` lists the problems and `validate()` raises on any:
+Knowledge can contradict itself, and it won't catch that on its own unless you ask. `conflicts()` lists the problems and `validate()` raises on any:
 
 ```python
 bad = DomainKnowledge().require("X", "Y").forbid("X", "Y")
@@ -119,8 +119,8 @@ dk.permits_edge("age", "smoking")         # True: in the support, order allows i
 dk.permits_edge("smoking", "age")         # False: in the support, blocked by the tiers
 ```
 
-The argument can be a graph, where any mark counts as an adjacency, or plain pairs: `restrict_to([("age", "smoking")])`. Discovery then searches only over the allowed pairs. `apply_to` drops every edge outside the list, `edge_mask` zeroes both directions, and `violations` reports any graph that strays. A required edge or a confounded pair outside the support shows up in `conflicts()`, since no graph could satisfy both. Restrictions compose by intersection: restricting twice, or combining two restricted objects with `&`, keeps only the pairs both sides allow. An empty list is legal and allows nothing.
+The argument can be a graph, where any mark counts as an adjacency, or plain pairs: `restrict_to([("age", "smoking")])`. Discovery then searches only over the allowed pairs. `apply_to` drops every edge outside the list, `edge_mask` zeroes both directions, and `violations` reports any graph that strays. A required edge or a confounded pair outside the support shows up in `conflicts()`, since no graph could satisfy both. Restrictions compose by intersection: restricting twice, or combining two restricted objects with `&`, keeps only the pairs both sides allow. An empty list is legal, and it just allows nothing.
 
-## Soft knowledge is not built yet
+## Soft knowledge isn't built yet
 
-`energy(graph)` and `log_prior(graph)` are where probabilistic knowledge will attach: a penalty or a prior over graphs rather than a hard yes or no. They raise for now. That work comes with Bayesian discovery, and it will carry provenance too (where a belief came from, and how much to trust it). For today, the hard constraints above are the surface.
+`energy(graph)` and `log_prior(graph)` are where probabilistic knowledge will attach: a penalty or a prior over graphs rather than a hard yes or no. They raise for now. That work comes with Bayesian discovery, and it'll carry provenance too (where a belief came from, and how much to trust it). For today, the hard constraints above are the surface.

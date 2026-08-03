@@ -1,10 +1,9 @@
 # %% [markdown]
 # # Why a correlation can't answer your question
 #
-# Here's a meeting that happens somewhere every week. A subscription retailer runs a loyalty
-# program. An analyst pulls the numbers and finds that members spend less per quarter than
-# non-members. The number is correct: clean data, no bugs, a real gap. Someone proposes
-# killing the program.
+# A subscription retailer runs a loyalty program, and every week somewhere an analyst pulls
+# the numbers and finds that members spend less per quarter than non-members. The number is
+# correct: clean data, no bugs, a real gap. Someone proposes killing the program.
 #
 # The number is right and the conclusion is wrong, and the gap between those two statements
 # is what causal inference is about.

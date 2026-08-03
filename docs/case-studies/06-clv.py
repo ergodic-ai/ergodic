@@ -198,7 +198,7 @@ print(
 print(f"corr(predicted value, true perk effect): {np.corrcoef(predicted_clv, tau)[0, 1]:+.3f}")
 
 # %% [markdown]
-# Essentially zero. The thing the team ranks on and the thing that should decide the budget are
+# Close to zero. The thing the team ranks on and the thing that should decide the budget are
 # unrelated, and they're unrelated by construction, because value rides on engagement and the
 # perk's effect rides on headroom. The whales the model loves are valuable and immovable. The
 # customers the perk can actually grow are scattered through the middle of the value distribution,

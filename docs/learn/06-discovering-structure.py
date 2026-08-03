@@ -80,7 +80,7 @@ sorted(e.glyph() for e in result.graph.edges)
 #
 # ## Estimate straight off the discovered graph
 #
-# Here's the move this library was built around. You don't have to pick one graph out of
+# This is the move the library was built around. You don't have to pick one graph out of
 # the class to act. Identification accepts the CPDAG itself, and when it certifies an
 # effect, the certificate holds in every graph the class contains, dashes and all:
 

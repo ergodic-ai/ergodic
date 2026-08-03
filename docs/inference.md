@@ -247,7 +247,7 @@ The default is the placebo treatment: shuffle the treatment column so it points 
 - `"random_common_cause"` adds an irrelevant random parent of both treatment and outcome. The effect should not move; it passes when the mean stays within 10 percent of the original. `p_value` is `None` here.
 - `"data_subset"` re-estimates on a random 80 percent of the rows (set by `subset_fraction`). The effect should hold; it passes when the original sits within two standard deviations of the subset spread.
 
-None of these proves the estimate is right, since nothing on observational data can, but a failure is a real warning, and they cost only the refitting. Read the numbers, not just `passed`. These are the cheap, model-agnostic checks; sensitivity to a specific named confounder is a sharper, separate tool that comes later. Every case study ends with this placebo check.
+None of these proves the estimate is right, since nothing on observational data can, but a failure is a real warning, and they cost only the refitting. Look at the actual numbers, since `passed` alone hides how close the call was. These are the cheap, model-agnostic checks; sensitivity to a specific named confounder is a sharper, separate tool that comes later. Every case study ends with this placebo check.
 
 ## The gates
 

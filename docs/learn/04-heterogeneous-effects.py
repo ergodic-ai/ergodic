@@ -167,7 +167,7 @@ fig.tight_layout()
 # all the way down to the treat-everyone loss at the right edge. Every targeting decision a
 # marketing team debates is a point on this curve.
 #
-# ## What to keep in mind
+# ## What heterogeneity costs you
 #
 # Heterogeneity is a modeling claim, so the honesty bar is higher than for an ATE. The
 # pseudo-effects are unbiased but loud, and a flexible final model can hallucinate structure

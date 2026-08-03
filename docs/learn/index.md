@@ -1,6 +1,6 @@
 # Learn causal inference
 
-This series teaches causal inference from zero. Not the library first: the ideas. Each guide
+This series teaches causal inference from zero, the ideas before the library. Each guide
 takes one question a working analyst faces, shows the obvious answer failing, and
 walks through why the causal answer is different and how to compute it. If you've never seen
 the words "confounder" or "estimand", start at guide one and read in order. If you know the
