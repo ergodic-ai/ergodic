@@ -25,9 +25,10 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import pandas as pd
 
+    from ..data import Hierarchy
     from ..graph import MixedGraph
 
-__all__ = ["ForecastResult"]
+__all__ = ["ForecastResult", "coherence_gap"]
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,12 @@ class ForecastResult:
     diagnostics: Mapping[str, Any] | None = None
     reconciliation: str | None = None
     coherent: bool | None = None
+    #: Each node's in-sample one-step residual variance, when the fits computed
+    #: it. It rides along so the whole reconciliation menu stays available after
+    #: the fact: MinT-shrink weights are a property of the fit rather than of the
+    #: draws, and without them here an unreconciled result could not be
+    #: reconciled that way without sampling everything again.
+    residual_var: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
         if self.horizon < 1:
@@ -143,6 +150,22 @@ class ForecastResult:
         hi = np.percentile(draws, (1.0 - tail) * 100.0, axis=0)
         return np.asarray(lo, dtype=np.float64), np.asarray(hi, dtype=np.float64)
 
+    # -- the hierarchy -------------------------------------------------------
+
+    def coherence_error(self, hierarchy: Hierarchy) -> float:
+        """The worst gap between a parent and its children, over every draw and step.
+
+        Zero means the forecast keeps the hierarchy's arithmetic promise exactly.
+        The number is absolute rather than relative, in the units of the series,
+        so read it against the size of the total: a residual of 1e-12 on a series
+        near 200 is float64 rounding, and anything a reconciliation strategy
+        leaves behind should look like that.
+
+        Every node of the tree has to be in the result, since a missing one is a
+        gap that cannot be measured rather than a gap of zero.
+        """
+        return coherence_gap(self.series, hierarchy)
+
     def to_frame(self, level: float = 0.9) -> pd.DataFrame:
         """A tidy frame: one row per node and step, with the median and the band."""
         import pandas as pd
@@ -169,3 +192,26 @@ class ForecastResult:
         if self.coherent is not None:
             body += f", coherent={self.coherent}"
         return f"ForecastResult({self.kind}: {body})"
+
+
+def coherence_gap(series: Mapping[str, npt.NDArray[np.float64]], hierarchy: Hierarchy) -> float:
+    """The largest ``|parent - aggregate(children)|`` over parents, draws, and steps.
+
+    Free-standing so a set of draws can be measured before it is wrapped in a
+    result, which is what the reconciliation layer does on its way out.
+    """
+    missing = sorted(set(hierarchy.nodes) - set(series))
+    if missing:
+        raise ValueError(
+            f"coherence cannot be measured: {missing} have no draws. Every node of the "
+            "hierarchy has to be present, since a missing series is an unknown gap rather "
+            "than a gap of zero."
+        )
+    worst = 0.0
+    for parent in hierarchy.internal_nodes:
+        kids = hierarchy.children_of(parent)
+        stacked = np.stack([np.asarray(series[kid], dtype=np.float64) for kid in kids], axis=0)
+        expected = stacked.mean(axis=0) if hierarchy.aggregation == "mean" else stacked.sum(axis=0)
+        gap = np.max(np.abs(np.asarray(series[parent], dtype=np.float64) - expected))
+        worst = max(worst, float(gap))
+    return worst

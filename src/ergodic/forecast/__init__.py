@@ -39,7 +39,14 @@ from __future__ import annotations
 from ._backtest import BacktestFold, BacktestReport, backtest
 from ._baselines import Drift, Naive, SeasonalNaive
 from ._facade import forecast
-from ._fit import NodeDiagnostics, NodeFit, NodeForecast, fit_node, forecast_node
+from ._fit import (
+    NodeDiagnostics,
+    NodeFit,
+    NodeForecast,
+    fit_node,
+    forecast_node,
+    in_sample_median,
+)
 from ._mechanism import (
     ScenarioMechanism,
     TemporalMechanism,
@@ -67,6 +74,15 @@ from ._metrics import (
     smape,
 )
 from ._protocol import ForecastModel
+from ._reconcile import (
+    PROPORTION_RULES,
+    RECONCILE_METHODS,
+    WEIGHT_RULES,
+    constraint_matrix,
+    historical_shares,
+    mint_weights,
+    reconcile,
+)
 from ._result import ForecastResult
 from ._scalers import IdentityScaler, LogScaler, RatioScaler, Scaler, ZScoreScaler
 from ._schedule import NodeRole, Stage, StageStrategy, TrainingSchedule
@@ -74,6 +90,9 @@ from ._structure import bases, max_lag, split_lag, validate_window_graph, window
 from .mechanisms import StructuralMechanism
 
 __all__ = [
+    "PROPORTION_RULES",
+    "RECONCILE_METHODS",
+    "WEIGHT_RULES",
     "BacktestFold",
     "BacktestReport",
     "Drift",
@@ -103,17 +122,22 @@ __all__ = [
     "backtest",
     "bases",
     "compute_metrics",
+    "constraint_matrix",
     "coverage",
     "crps",
     "fit_node",
     "forecast",
     "forecast_node",
+    "historical_shares",
+    "in_sample_median",
     "infer_period",
     "mae",
     "mape",
     "mape_full",
     "mase",
     "max_lag",
+    "mint_weights",
+    "reconcile",
     "rmse",
     "rolling_accuracy",
     "rolling_accuracy_3",
