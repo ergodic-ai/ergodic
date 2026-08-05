@@ -32,7 +32,12 @@ from .data import (
     timeseries,
 )
 from .discovery import discover, granger
-from .forecast import backtest
+
+# `forecast` names both the pillar and its facade, and the function is what the
+# top level exports: `from ergodic import forecast` gives the callable, while
+# `from ergodic.forecast import backtest` still reaches the module. Import the
+# function last so the binding is the deliberate one.
+from .forecast import backtest, forecast
 from .graph import (
     Edge,
     GraphKind,
@@ -182,6 +187,7 @@ __all__ = [
     "estimate_mediation",
     "event_log",
     "event_study",
+    "forecast",
     "frontdoor_set",
     "granger",
     "hts",

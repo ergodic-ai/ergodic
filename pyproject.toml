@@ -42,6 +42,12 @@ bayes = ["pymc>=5"]
 # The SCM pillar (ergodic.scm). Same pymc dependency as `bayes`, named so it
 # reads as `pip install ergodic[scm]`. The bare install never imports pymc.
 scm = ["pymc>=5"]
+# The forecasting pillar (ergodic.forecast). Same pymc dependency again; the bare
+# install never imports it. Sampling goes through PyMC's JAX backend when jax and
+# numpyro are present, which the S0 spike measured at 4x the C backend on the
+# workhorse model, so installing them alongside is worth it; the pillar runs
+# without them.
+forecast = ["pymc>=5"]
 # Neural CATE learners (TARNet / DragonNet / CFR). A reserved seam: phase 1 ships
 # no module that imports torch; the registry points here when one is selected.
 neural = ["torch>=2.2"]
@@ -62,6 +68,12 @@ dev = [
     "pandas-stubs>=2.1",
     "pymc>=5",
     "scikit-learn>=1.9.0",
+    # The forecast pillar's sampler path: PyMC through its JAX backend. Not in
+    # the `forecast` extra (the floor stays pymc alone), but the tests run on it,
+    # because the S0 spike measured it 4x faster than the C backend on exactly
+    # the model the forecaster fits.
+    "jax>=0.4",
+    "numpyro>=0.15",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -138,7 +150,7 @@ module = ["networkx.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*"]
+module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "numpyro.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
