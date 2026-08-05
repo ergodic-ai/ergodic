@@ -32,6 +32,7 @@ from .data import (
     timeseries,
 )
 from .discovery import discover, granger
+from .forecast import backtest
 from .graph import (
     Edge,
     GraphKind,
@@ -163,6 +164,7 @@ __all__ = [
     "__version__",
     "adjustment_set",
     "admg",
+    "backtest",
     "case_table",
     "cate",
     "conformance",
