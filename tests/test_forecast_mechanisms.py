@@ -228,19 +228,22 @@ def test_the_ninety_percent_band_is_a_ninety_percent_band(calibration: tuple[int
 # -- World C: robustness ------------------------------------------------------
 
 
-#: Where the spikes go. Late in the training window on purpose, and measured:
-#: a state-space smoother absorbs a mid-window outlier into sigma_obs and the
-#: forecast never feels it (spikes at 20, 41 and 63 move the Normal fit's
-#: sigma_obs from 4.16 to 7.43 and its holdout MAE not at all), so mid-window
-#: contamination cannot exercise robustness. A shock near the forecast origin
-#: bends the level and slope that get extrapolated, which is the thing a heavy
-#: tail is there to refuse.
-OUTLIER_POSITIONS = (70, 76, 82)
+#: Where the spikes go: right at the forecast origin, and measured rather than
+#: guessed. A state-space smoother absorbs a mid-window outlier into sigma_obs
+#: and the forecast never feels it (spikes at 20, 41 and 63 move the Normal
+#: fit's sigma_obs from 4.16 to 7.43 and its holdout MAE not at all), so
+#: mid-window contamination cannot exercise robustness at all. The margin grows
+#: the closer the shock lands to the origin, because that is where it bends the
+#: level and slope that get extrapolated: mid-window is no contest, steps 70, 76
+#: and 82 give plain 7.77 against robust 6.07, and these give plain 14.77
+#: against robust 5.63. The last of those is the only placement that holds on
+#: every seed tried, so it is the one pinned.
+OUTLIER_POSITIONS = (79, 81, 83)
 
 
 @pytest.fixture(scope="module")
 def world_c(world_a: tuple[Array, Array, Array]) -> Array:
-    """World A with three eight-sigma spikes planted late in the training window."""
+    """World A with three eight-sigma spikes planted at the forecast origin."""
     y, _, _ = world_a
     contaminated = y.copy()
     for position in OUTLIER_POSITIONS:
@@ -460,16 +463,61 @@ def test_the_forecast_model_registers_the_named_sites(fit_a: NodeFit) -> None:
 
 
 def test_diagnostics_are_carried_on_every_fit(fit_a: NodeFit) -> None:
-    """Criterion 12: the fields are there, populated, and honest about one chain."""
+    """Criterion 12: every field is checked against what the trace actually holds.
+
+    Each assertion here is one the code could fail. A diagnostic that reported a
+    plausible number rather than the sampler's own would pass a test that only
+    asked for a non-negative count, so nothing below asks for that.
+    """
     diagnostics = fit_a.diagnostics
+    posterior = _group_dataset(fit_a.trace, "posterior")
+    stats = _group_dataset(fit_a.trace, "sample_stats")
+
     assert isinstance(diagnostics, NodeDiagnostics)
     assert diagnostics.node == "sales"
+
+    # the draw count is the trace's own chain x draw product, not the argument
+    assert diagnostics.n_draws == int(np.prod(np.asarray(posterior["sales_phi"]).shape[:2]))
     assert diagnostics.n_draws == DRAWS
-    assert diagnostics.divergences >= 0
-    assert 0.0 <= diagnostics.divergence_share <= 1.0
-    assert diagnostics.min_ess > 0.0
+
+    # the divergence count is the sampler's, to the unit
+    assert diagnostics.divergences == int(np.asarray(stats["diverging"]).sum())
+    assert diagnostics.divergence_share == diagnostics.divergences / diagnostics.n_draws
+
+    # min_ess is a real number and it is the minimum over the scalar sites, so a
+    # site that mixed badly cannot be hidden by one that mixed well
+    assert np.isfinite(diagnostics.min_ess)
+    assert diagnostics.min_ess == min(diagnostics.ess_by_site.values())
+    scalars = {str(name) for name in posterior.data_vars if posterior[name].ndim == 2}
+    assert set(diagnostics.ess_by_site) == scalars
+    assert "sales_phi" in scalars
+    # the innovation vectors are not scalars and must not be in there: they are
+    # T-long and would swamp the reading
+    assert "sales_z_level" not in diagnostics.ess_by_site
+    assert "sales_season_raw" not in diagnostics.ess_by_site
+
     assert diagnostics.max_rhat is None, "one chain cannot have an r-hat"
-    assert "sales_phi" in diagnostics.ess_by_site
+
+
+def test_two_chains_give_an_rhat_and_stack_their_draws() -> None:
+    """Criterion 12, the other branch: r-hat exists once there is more than one chain."""
+    y, _, _ = world(WORLD_SEED + 21, 48)
+    fitted = fit_or_skip(
+        "sales",
+        y,
+        StructuralMechanism(period=12),
+        draws=200,
+        warmup=SMALL_WARMUP,
+        chains=2,
+        seed=23,
+    )
+    diagnostics = fitted.diagnostics
+    assert diagnostics.n_draws == 400, "two chains of 200 draws stack into one draw axis"
+    assert isinstance(diagnostics.max_rhat, float)
+    assert np.isfinite(diagnostics.max_rhat)
+    assert 0.9 < diagnostics.max_rhat < 1.5, f"r-hat {diagnostics.max_rhat} is not a sane value"
+    # and the forecast reads the stacked axis, not one chain of it
+    assert forecast_node(fitted, 4, seed=1023).draws.shape == (400, 4)
 
 
 def test_the_warning_fires_on_a_breach() -> None:

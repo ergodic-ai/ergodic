@@ -9,6 +9,15 @@ draws and the provenance to explain where they came from.
 The signature is the finished one. Everything it will eventually accept is
 already a keyword, and the parts that are not built yet refuse by name instead of
 being absent, so no working call ever has to change shape later.
+
+One name, two things, and the function wins. ``ergodic.forecast`` at the top
+level is this function, so ``from ergodic import forecast`` gives something
+callable. The subpackage is still reachable as ``from ergodic.forecast import
+backtest``, because that goes through the import system rather than through the
+attribute. What does not work the way it looks is ``import ergodic.forecast as
+mod``: that binds the *function*, since Python prefers the attribute when one is
+there. This is the only place in the package where a name is shadowed like this,
+and it is deliberate: the facade is what people reach for.
 """
 
 from __future__ import annotations

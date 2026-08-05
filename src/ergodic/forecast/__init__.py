@@ -24,6 +24,14 @@ pymc is imported inside the methods that sample, so the bare install never loads
 it; ``pip install ergodic[forecast]`` adds it. Sampling runs through PyMC's JAX
 backend when jax and numpyro are installed, which the engine spike measured at
 about four times the C backend on this model.
+
+A note on the name, because this pillar is the one place in the package where a
+name is shadowed. ``ergodic.forecast`` at the top level is the *function*:
+``from ergodic import forecast`` gives something callable. This subpackage is
+reached with ``from ergodic.forecast import backtest``, which goes through the
+import system and is unaffected. But ``import ergodic.forecast as mod`` binds the
+function rather than the module, because Python prefers the attribute when one
+exists.
 """
 
 from __future__ import annotations

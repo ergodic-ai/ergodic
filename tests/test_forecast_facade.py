@@ -328,6 +328,27 @@ def test_a_different_seed_moves_the_draws(small_forecast: Any) -> None:
 
 
 @requires_pymc
+def test_robust_reaches_the_fit_through_the_facade(small_forecast: Any) -> None:
+    """The flag reaches the auto-assigned mechanism and the Student-t model samples.
+
+    The mechanism-level comparison of the two likelihoods lives in
+    `test_forecast_mechanisms.py`; what this pins is the wiring, that
+    `robust=True` is not quietly dropped somewhere between the keyword and the
+    model that gets built.
+    """
+    result = forecast(monthly(48), 6, draws=300, warmup=300, chains=1, seed=3, robust=True)
+    assert result.mechanisms is not None
+    mechanism = result.mechanisms["sales"]
+    assert isinstance(mechanism, StructuralMechanism)
+    assert mechanism.robust is True
+    assert result.draws("sales").shape == (300, 6)
+    assert bool(np.all(np.isfinite(result.draws("sales"))))
+    # a different likelihood is a different model, so the draws cannot match the
+    # Normal fit's under the same seed
+    assert not np.array_equal(result.draws("sales"), small_forecast.draws("sales"))
+
+
+@requires_pymc
 def test_two_series_get_their_own_seeds_and_mechanisms() -> None:
     """Each column is fitted alone, with a seed of its own, and both land on the result."""
     stamps = np.array(
