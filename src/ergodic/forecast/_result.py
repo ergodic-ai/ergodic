@@ -55,7 +55,10 @@ class ForecastResult:
     mechanisms: Mapping[str, Any] | None = None
     graph: MixedGraph | None = None
     schedule: Any | None = None
-    diagnostics: Mapping[str, float] | None = None
+    #: Per-node sampler diagnostics, one record each (divergences, minimum bulk
+    #: ESS, r-hat when there is more than one chain). A model that does no
+    #: sampling leaves it None.
+    diagnostics: Mapping[str, Any] | None = None
     reconciliation: str | None = None
     coherent: bool | None = None
 

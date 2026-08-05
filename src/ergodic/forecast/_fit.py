@@ -339,7 +339,6 @@ def _audit_sites(model: Any, trace: Any) -> None:
 
     for rv in model.free_RVs:
         name = str(rv.name)
-        shape = _static_shape(rv)
         if name.endswith(_FC_SUFFIX):
             if name in held:
                 raise ValueError(
@@ -347,6 +346,9 @@ def _audit_sites(model: Any, trace: Any) -> None:
                     "of simulated, and the horizon would reuse the training innovations"
                 )
             continue
+        # Only now: reading a shape can mean walking the graph, and a forecast
+        # site's graph runs through the whole scan.
+        shape = _static_shape(rv)
         if name not in held:
             raise ValueError(
                 f"site {name!r} is in the forecast model but not in the trace; "

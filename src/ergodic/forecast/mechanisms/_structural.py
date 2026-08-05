@@ -245,7 +245,8 @@ class StructuralMechanism(TemporalMechanism):
             # neutral season and nothing has to be renormalized to switch it off.
             factor = (12.0 * pm.math.softmax(raw))[np.arange(n_total) % 12]
         elif kind == "fourier":
-            assert period is not None
+            if period is None:  # pragma: no cover - seasonal_form resolves it or raises
+                raise ValueError(f"{name!r}: Fourier seasonality resolved without a period")
             coefs = pm.Normal(site(name, "fourier"), mu=0.0, sigma=0.3, shape=2 * self.n_harmonics)
             season = pm.math.dot(_fourier_design(n_total, period, self.n_harmonics), coefs)
         factor = named("season_factor", factor)
