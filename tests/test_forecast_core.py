@@ -124,6 +124,26 @@ def test_result_is_frozen_and_its_draws_are_read_only() -> None:
         result.draws()[0, 0] = 5.0
 
 
+def test_the_result_owns_its_draws_without_freezing_the_callers_array() -> None:
+    """Copy on the way in: the caller keeps a writable array, the result keeps its own."""
+    mine = np.zeros((4, 3))
+    result = ForecastResult(series={"y": mine}, horizon=3)
+
+    assert mine.flags.writeable, "the caller's array must not be frozen underneath them"
+    mine[0, 0] = 99.0
+    assert result.draws()[0, 0] == 0.0, "the result must not see the caller's later edits"
+
+
+def test_a_view_passed_in_cannot_be_mutated_through_its_base() -> None:
+    """The converse hole: freezing a view would leave its base a writable back door."""
+    base = np.zeros((4, 3))
+    result = ForecastResult(series={"y": base[:, :]}, horizon=3)
+
+    assert base.flags.writeable
+    base[1, 1] = 7.0
+    assert result.draws()[1, 1] == 0.0
+
+
 # -- the baselines ------------------------------------------------------------
 
 
@@ -252,6 +272,26 @@ def test_baselines_refuse_what_they_cannot_read() -> None:
     )
     with pytest.raises(TypeError, match="not numeric"):
         Naive().fit(categorical)
+
+
+def test_a_baseline_cannot_be_handed_a_forged_fitted_state() -> None:
+    """The only way to a fitted model is fit, so its validation cannot be walked around."""
+    with pytest.raises(TypeError, match="_history"):
+        Naive(_history={"y": np.array([1.0, 2.0])})  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="_history"):
+        SeasonalNaive(12, _history={"y": np.array([1.0])})  # type: ignore[call-arg]
+    # Too short for SeasonalNaive, and fit is where that gets caught.
+    with pytest.raises(ValueError, match="needs 13"):
+        SeasonalNaive(12).fit(_series(np.arange(5.0)))
+
+
+def test_a_series_with_no_residual_gets_a_zero_width_interval() -> None:
+    """A perfectly periodic world has no observed noise, so the band collapses."""
+    exact = np.tile(np.array([1.0, 5.0, 3.0, 9.0]), 6)
+    result = SeasonalNaive(4).fit(_series(exact)).forecast(8, seed=0)
+    lo, hi = result.interval(level=0.9)
+    assert np.allclose(hi - lo, 0.0)
+    assert np.allclose(result.median(), np.tile(np.array([1.0, 5.0, 3.0, 9.0]), 2))
 
 
 def test_baselines_forecast_every_numeric_series() -> None:

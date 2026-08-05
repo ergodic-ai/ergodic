@@ -249,7 +249,13 @@ def mase(
 def coverage(
     actual: npt.NDArray[Any] | Any, samples: npt.NDArray[Any] | Any, level: float = 0.9
 ) -> float:
-    """The share of actuals inside the central ``level`` interval of the draws."""
+    """The share of actuals inside the central ``level`` interval of the draws.
+
+    NaN when the band cannot be formed anywhere it is needed, which is what the
+    error metrics already do with a NaN in the same place. Returning zero there
+    would read as "the forecast missed every step" and quietly drag an average
+    down, when the truth is that there was nothing to score.
+    """
     if not 0.0 < level < 1.0:
         raise ValueError(f"level must be in (0, 1), got {level}")
     truth = _actual(actual)
@@ -259,6 +265,12 @@ def coverage(
     tail = (1.0 - level) / 2.0
     lo = np.percentile(draws, tail * 100.0, axis=0)
     hi = np.percentile(draws, (1.0 - tail) * 100.0, axis=0)
+    if not (
+        bool(np.all(np.isfinite(lo)))
+        and bool(np.all(np.isfinite(hi)))
+        and bool(np.all(np.isfinite(truth)))
+    ):
+        return float("nan")
     return float(np.mean((truth >= lo) & (truth <= hi)))
 
 

@@ -16,8 +16,15 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from ergodic.data import Hierarchy, hts, timeseries
-from ergodic.forecast import ForecastResult, Naive, SeasonalNaive, backtest
+from ergodic.data import Hierarchy, hts, panel, tabular, timeseries
+from ergodic.forecast import (
+    BacktestFold,
+    BacktestReport,
+    ForecastResult,
+    Naive,
+    SeasonalNaive,
+    backtest,
+)
 from ergodic.forecast._backtest import _cutoffs
 
 if TYPE_CHECKING:
@@ -60,14 +67,33 @@ def test_cutoffs_refuse_a_history_that_is_too_short() -> None:
         _cutoffs(60, "expanding", 0, 3, 24)
 
 
-def test_cutoff_truncation_keeps_the_source_arithmetic() -> None:
-    """When the spacing does not divide evenly, the count wins over the last origin.
+def test_the_most_recent_origin_is_never_dropped() -> None:
+    """The freshest fold is the one worth most, so the count gives way, not the origin.
 
-    The ported rule places the origins, appends the last one when the stride
-    missed it, then truncates to ``n_splits``. Asking for more splits than the
-    stride supports therefore drops the final origin rather than the count.
+    The source counted origins forwards and truncated to ``n_splits``, which
+    could drop the last one. We count backwards from the last instead.
     """
-    assert _cutoffs(50, "expanding", 12, 5, 24) == [24, 27, 30, 33, 36]
+    assert _cutoffs(20, "expanding", 5, 3, 10) == [11, 13, 15]  # 15 was reachable
+    assert _cutoffs(50, "expanding", 12, 5, 24) == [26, 29, 32, 35, 38]
+
+
+def test_cutoffs_hold_their_contract_across_the_grid() -> None:
+    """Every accepted configuration ends on the last origin and respects its bounds."""
+    checked = 0
+    for n_rows in range(10, 130, 3):
+        for test_size in range(1, 20, 2):
+            for n_splits in range(1, 7):
+                min_train = 2 * test_size
+                try:
+                    cutoffs = _cutoffs(n_rows, "expanding", test_size, n_splits, min_train)
+                except ValueError:
+                    continue
+                checked += 1
+                assert cutoffs[-1] == n_rows - test_size, (n_rows, test_size, n_splits)
+                assert len(cutoffs) <= n_splits
+                assert sorted(set(cutoffs)) == cutoffs
+                assert min(cutoffs) >= min_train
+    assert checked > 500, checked
 
 
 def test_backtest_runs_the_folds_the_arithmetic_names() -> None:
@@ -107,17 +133,17 @@ class _Probe:
     last_value: float = 0.0
 
     def fit(self, data: TimeSeriesData, *, seed: int = 0) -> _Probe:
+        self.n_fits += 1
         self.recorder.fits.append(
             {
                 "seed": seed,
                 "n_rows": data.n_rows,
                 "max_time": float(data.times[-1]),
-                "fits_at_entry": self.n_fits,
-                "object": id(self),
+                "fits_at_entry": self.n_fits - 1,
+                "own_fits": self.n_fits,
                 "type": type(data).__name__,
             }
         )
-        self.n_fits += 1
         self.node = data.variables[0]
         self.last_value = float(data.column(self.node)[-1])
         return self
@@ -151,7 +177,8 @@ def test_each_fold_gets_its_own_copy_of_the_model() -> None:
     assert [record["fits_at_entry"] for record in probe.recorder.fits] == [0, 0, 0]
     assert probe.n_fits == 0, "the model handed in must come back unfitted"
     assert probe.last_value == 0.0
-    assert len({record["object"] for record in probe.recorder.fits}) == 3
+    # Each fold's copy fitted exactly once. A shared object would count up.
+    assert [record["own_fits"] for record in probe.recorder.fits] == [1, 1, 1]
     # And the fold records agree with what the probe was actually handed.
     assert [record["seed"] for record in probe.recorder.fits] == [0, 1, 2]
     assert probe.recorder.forecast_seeds == [1000, 1001, 1002]
@@ -196,6 +223,48 @@ def test_compare_marks_the_better_model_improved() -> None:
     # The direction flips for the accuracy family: bigger is better there.
     accuracy_row = frame[(frame["node"] == "y") & (frame["metric"] == "accuracy")].iloc[0]
     assert bool(accuracy_row["improved"]) is bool(accuracy_row["delta"] > 0)
+
+
+def test_compare_survives_a_metric_only_one_side_carries() -> None:
+    """A one-sided metric is reported as NaN rather than blowing the comparison up."""
+
+    def _report(metrics: dict[str, float]) -> BacktestReport:
+        fold = BacktestFold(
+            index=0,
+            cutoff=10,
+            horizon=2,
+            metrics={"y": metrics},
+            forecasts={"y": np.zeros((4, 2))},
+            actuals={"y": np.zeros(2)},
+        )
+        return BacktestReport(
+            model="stub",
+            mode="single",
+            test_size=2,
+            level=0.9,
+            folds=(fold,),
+            nodes=("y",),
+            metrics=tuple(metrics),
+        )
+
+    rich = _report({"mae": 1.0, "mase": 0.5})
+    plain = _report({"mae": 2.0})
+
+    frame = rich.compare(plain)
+    assert set(frame["metric"]) == {"mae", "mase"}
+    mae_row = frame[frame["metric"] == "mae"].iloc[0]
+    assert mae_row["delta"] == pytest.approx(-1.0)
+    assert bool(mae_row["improved"]) is True
+    mase_row = frame[frame["metric"] == "mase"].iloc[0]
+    assert mase_row["value"] == pytest.approx(0.5)
+    assert np.isnan(mase_row["other"])
+    assert np.isnan(mase_row["delta"])
+    assert bool(mase_row["improved"]) is False
+    # And the other way round, where this report is the one missing the metric.
+    flipped = plain.compare(rich)
+    flipped_row = flipped[flipped["metric"] == "mase"].iloc[0]
+    assert np.isnan(flipped_row["value"])
+    assert flipped_row["other"] == pytest.approx(0.5)
 
 
 def test_compare_judges_coverage_by_closeness_to_the_level() -> None:
@@ -303,6 +372,38 @@ def test_a_model_that_forecasts_nothing_scorable_raises() -> None:
 
     with pytest.raises(ValueError, match="nothing to score"):
         backtest(_Elsewhere(), _seasonal(12), test_size=12, n_splits=2)
+
+
+def test_a_forecast_node_with_no_column_is_recorded_not_dropped() -> None:
+    """An aggregate the data does not carry cannot be scored, but it is not invisible."""
+
+    class _WithAnExtra(_Probe):
+        def forecast(self, horizon: int, *, seed: int = 0) -> ForecastResult:
+            scored = super().forecast(horizon, seed=seed)
+            return ForecastResult(
+                series={**scored.series, "total": np.zeros((64, horizon))}, horizon=horizon
+            )
+
+    report = backtest(_WithAnExtra(), _seasonal(13), test_size=12, n_splits=2)
+    assert report.nodes == ("y",)
+    assert report.nodes_unscored == ("total",)
+    assert all(fold.nodes_unscored == ("total",) for fold in report.folds)
+
+
+def test_backtest_refuses_a_dataset_that_is_not_one_series() -> None:
+    """Row-slicing a panel would mix entities, so it is refused rather than scored."""
+    rng = np.random.default_rng(14)
+    rows = 40
+    entities = np.repeat(["north", "south"], rows // 2)
+    frame = {
+        "e": entities,
+        "t": np.tile(np.arange(rows // 2), 2),
+        "y": rng.normal(size=rows),
+    }
+    with pytest.raises(TypeError, match="mix entities"):
+        backtest(Naive(), panel(frame, entity="e", time="t"), test_size=4, n_splits=2)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="TimeSeriesData"):
+        backtest(Naive(), tabular({"y": rng.normal(size=20)}), test_size=4)  # type: ignore[arg-type]
 
 
 def test_deepcopy_of_the_recorder_is_shared_on_purpose() -> None:

@@ -16,12 +16,20 @@ stepping once per completed season for :class:`SeasonalNaive`.
 
 The models are immutable, like everything else here: :meth:`fit` returns a new
 fitted instance and leaves the original alone, which is what lets the backtester
-hand the same unfitted object to every fold.
+hand the same unfitted object to every fold. The fitted state is not a
+constructor argument, so the only way to get a fitted model is to fit one.
+
+One consequence of scaling the interval by the residual standard deviation: a
+series that repeats exactly, or never moves, has no residual, so the interval
+has zero width and the draws are the point path. That is the textbook answer to
+a world with no observed noise in it, not a bug, but it means coverage on such a
+series is all or nothing.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+import copy
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -83,10 +91,12 @@ class _Baseline:
     """Shared fit and forecast machinery for the three baselines."""
 
     n_draws: int = field(default=500, kw_only=True)
+    # Fitted state, deliberately not a constructor argument: a model that claims
+    # to be fitted has to have gone through fit and its validation.
     _history: Mapping[str, npt.NDArray[np.float64]] | None = field(
-        default=None, repr=False, kw_only=True
+        default=None, repr=False, init=False
     )
-    _start: Any | None = field(default=None, repr=False, kw_only=True)
+    _start: Any | None = field(default=None, repr=False, init=False)
 
     # -- the protocol --------------------------------------------------------
 
@@ -95,7 +105,10 @@ class _Baseline:
         history = _numeric_series(data)
         for name, values in history.items():
             self._check(name, values)
-        return replace(self, _history=history, _start=_next_label(data))
+        fitted = copy.copy(self)
+        object.__setattr__(fitted, "_history", history)
+        object.__setattr__(fitted, "_start", _next_label(data))
+        return fitted
 
     def forecast(self, horizon: int, *, seed: int = 0) -> ForecastResult:
         """Draw ``n_draws`` sample paths ``horizon`` steps past the fitted data."""

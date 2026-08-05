@@ -40,6 +40,10 @@ class ForecastResult:
     forecast). ``start`` is the label of the first forecast step when the data
     made it computable, else ``None``.
 
+    Each array is copied on the way in and frozen, so the result owns its draws:
+    the caller's array stays writable, and nothing the caller does to it
+    afterwards can reach inside the result.
+
     Draws are permissive about NaN: a masked observation window can legitimately
     leave one, and a metric that meets it says so rather than the constructor.
     """
@@ -63,7 +67,10 @@ class ForecastResult:
         cleaned: dict[str, npt.NDArray[np.float64]] = {}
         n_draws: int | None = None
         for name, draws in self.series.items():
-            arr = np.asarray(draws, dtype=np.float64)
+            # Copy before freezing: asarray would hand back the caller's own array,
+            # so setflags would freeze an object we do not own, and a view passed in
+            # would leave its base writable underneath us.
+            arr = np.array(draws, dtype=np.float64, copy=True)
             if arr.ndim != 2:
                 raise ValueError(f"series {name!r} must be 2-D (S, H), got shape {arr.shape}")
             if arr.shape[1] != self.horizon:

@@ -221,6 +221,23 @@ def test_coverage_is_exactly_the_constructed_fraction() -> None:
     assert coverage(np.full(horizon, 0.9500001), samples, level=0.9) == 0.0
 
 
+def test_coverage_is_nan_when_there_is_no_band_to_score_against() -> None:
+    """All-NaN draws mean nothing was forecast, which is not the same as missing.
+
+    The error metrics already return NaN there, and the report drops NaN folds
+    from its averages. Coverage returning 0.0 instead would read as a total miss
+    and quietly drag the average down.
+    """
+    actual = np.array([1.0, 2.0, 3.0])
+    empty = np.full((8, 3), np.nan)
+    assert np.isnan(coverage(actual, empty, level=0.9))
+    assert np.isnan(mae(actual, empty))
+    assert np.isnan(crps(actual, empty))
+    assert np.isnan(coverage(np.full(3, np.nan), _degenerate(actual), level=0.9))
+    table = compute_metrics(actual, empty)
+    assert all(np.isnan(v) for k, v in table.items() if k in {"mae", "crps", "coverage"})
+
+
 def test_coverage_rejects_a_level_outside_the_unit_interval() -> None:
     samples = _degenerate(np.array([1.0, 2.0]))
     with pytest.raises(ValueError, match="level must be"):

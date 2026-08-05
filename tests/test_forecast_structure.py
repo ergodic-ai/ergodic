@@ -10,6 +10,8 @@ by eye, plus the invariant that makes staging correct at all.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -210,18 +212,111 @@ def test_parent_edges_name_the_posteriors_a_stage_needs() -> None:
     assert edges["retail"] == {"retail": (("east", 1), ("south", 0))}
 
 
-def test_every_modeled_parent_sits_in_a_strictly_earlier_stage() -> None:
-    """The invariant that makes staged fitting correct, checked node by node."""
-    schedule = _hand_schedule()
+def _assert_invariant(schedule: TrainingSchedule, roles: dict[str, NodeRole]) -> None:
+    """Every parent a stage names is resolved by an earlier stage, and none is an aggregate."""
     index_of = {node: stage.index for stage in schedule.stages for node in stage.nodes}
     for stage in schedule.mcmc_stages:
         for node, parents in stage.parent_edges.items():
             for base, _lag in parents:
                 assert index_of[base] < index_of[node], (node, base)
-        # No edges inside a wave: every parent of every node in the stage is outside it.
-        for node in stage.nodes:
-            for base, _lag in stage.parent_edges.get(node, ()):
-                assert base not in stage.nodes
+                assert roles[base] is not NodeRole.AGGREGATE, (node, base)
+                assert base not in stage.nodes  # no edges inside a wave
+
+
+def test_every_modeled_parent_sits_in_a_strictly_earlier_stage() -> None:
+    """The invariant that makes staged fitting correct, on the hand graph."""
+    _assert_invariant(_hand_schedule(), _HAND_ROLES)
+    _assert_invariant(_hand_schedule(max_batch_size=999), _HAND_ROLES)
+
+
+def test_a_model_that_reads_an_aggregate_is_refused() -> None:
+    """The aggregate resolves last, so its posterior would not exist when the reader runs."""
+    graph = window_graph([("total", "share", 1)])
+    roles = {
+        "north": NodeRole.MODEL,
+        "south": NodeRole.MODEL,
+        "total": NodeRole.AGGREGATE,
+        "share": NodeRole.MODEL,
+    }
+    hierarchy = Hierarchy.tree({"total": ["north", "south"]})
+    with pytest.raises(ValueError, match="is an aggregate of its hierarchy children"):
+        TrainingSchedule.from_graph(graph, hierarchy, roles)
+
+
+def _fuzz_world(
+    rng: np.random.Generator,
+) -> tuple[list[tuple[str, str, int]], dict[str, NodeRole], Hierarchy | None]:
+    """A random window graph with random roles, sometimes with an aggregate in it."""
+    bases = ["a", "b", "c", "d", "e"]
+    roles: dict[str, NodeRole] = {}
+    hierarchy: Hierarchy | None = None
+    pool = list(bases)
+    if bool(rng.random() < 0.5):
+        kids = [str(k) for k in rng.choice(bases, size=2, replace=False)]
+        hierarchy = Hierarchy.tree({"agg": kids})
+        roles["agg"] = NodeRole.AGGREGATE
+        for kid in kids:
+            roles[kid] = NodeRole.MODEL
+        pool.append("agg")
+    for base in bases:
+        if base not in roles:
+            roles[base] = NodeRole.MODEL if rng.random() < 0.7 else NodeRole.SCENARIO
+
+    order = [str(node) for node in rng.permutation(pool)]
+    edges: list[tuple[str, str, int]] = []
+    used: set[frozenset[str]] = set()
+    for _ in range(int(rng.integers(2, 9))):
+        lag = int(rng.integers(0, 3))
+        if lag == 0:
+            left, right = sorted(int(i) for i in rng.choice(len(order), size=2, replace=False))
+            source, target = order[left], order[right]
+        else:
+            source = str(rng.choice(pool))
+            target = str(rng.choice(pool))
+            if source == target:
+                continue
+        pair = frozenset({f"{source}[{lag}]", f"{target}[0]"})
+        if len(pair) == 1 or pair in used:
+            continue
+        used.add(pair)
+        edges.append((source, target, lag))
+    return edges, roles, hierarchy
+
+
+def test_the_schedule_invariant_holds_or_the_schedule_refuses() -> None:
+    """Fuzz over random graphs and roles: either the invariant holds, or we said why."""
+    rng = np.random.default_rng(20260806)
+    accepted = refused_aggregate = refused_loop = 0
+    for _ in range(200):
+        edges, roles, hierarchy = _fuzz_world(rng)
+        if not edges:
+            continue
+        graph = window_graph(edges)
+        drives_aggregate = any(
+            roles.get(source) is NodeRole.AGGREGATE
+            and roles.get(target) is NodeRole.MODEL
+            and source != target
+            for source, target, _lag in edges
+        )
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                schedule = TrainingSchedule.from_graph(graph, hierarchy, roles)
+        except ValueError as error:
+            message = str(error)
+            if "is an aggregate of its hierarchy children" in message:
+                refused_aggregate += 1
+                assert drives_aggregate, edges
+            else:
+                assert "drive each other in a loop" in message, message
+                refused_loop += 1
+            continue
+        assert not drives_aggregate, ("an aggregate driver slipped through", edges)
+        accepted += 1
+        _assert_invariant(schedule, roles)
+    assert accepted > 50, accepted
+    assert refused_aggregate > 5, refused_aggregate
+    assert refused_loop > 5, refused_loop
 
 
 def test_a_big_batch_collapses_each_wave_into_one_stage() -> None:
@@ -285,9 +380,92 @@ def test_stage_of_and_summary_read_the_plan() -> None:
     assert "total = sum(east + north + south)" in text
 
 
-def test_a_cycle_among_modeled_nodes_raises() -> None:
-    """A cycle cannot come from a valid window graph, so the guard is belt and braces."""
-    cyclic = mixed(["a[t] -> b[t]", "b[t] -> c[t]", "c[t] -> a[t]"])
-    roles = {"a": NodeRole.MODEL, "b": NodeRole.MODEL, "c": NodeRole.MODEL}
-    with pytest.raises(ValueError, match="depend on each other in a cycle"):
-        TrainingSchedule.from_graph(cyclic, None, roles)
+def test_nodes_that_drive_each_other_are_refused_with_the_real_reason() -> None:
+    """Feedback across lags is an ordinary process, and staging still cannot serve it."""
+    feedback = window_graph([("x", "y", 1), ("y", "x", 1)])
+    roles = {"x": NodeRole.MODEL, "y": NodeRole.MODEL}
+    with pytest.raises(ValueError) as caught:
+        TrainingSchedule.from_graph(feedback, None, roles)
+    message = str(caught.value)
+    assert "drive each other in a loop" in message
+    assert "feedback across lags" in message.lower()
+    assert "joint multivariate mechanism" in message
+    # The graph itself is perfectly legal: there is no cycle in time.
+    assert validate_window_graph(feedback) is feedback
+
+    contemporaneous = mixed(["a[t] -> b[t]", "b[t] -> c[t]", "c[t] -> a[t]"])
+    with pytest.raises(ValueError, match="drive each other in a loop"):
+        TrainingSchedule.from_graph(
+            contemporaneous,
+            None,
+            {"a": NodeRole.MODEL, "b": NodeRole.MODEL, "c": NodeRole.MODEL},
+        )
+
+
+def test_a_cross_slice_edge_counts_whatever_marks_it_carries() -> None:
+    """Time orients a lagged edge, so an unresolved causal mark is not a blocker."""
+    for glyph in ("x[t-1] -> y[t]", "x[t-1] o-> y[t]", "x[t-1] --- y[t]", "x[t-1] o-o y[t]"):
+        schedule = TrainingSchedule.from_graph(
+            mixed([glyph]), None, {"x": NodeRole.MODEL, "y": NodeRole.MODEL}
+        )
+        stage = schedule.stage_of("y")
+        assert stage is not None
+        assert stage.parent_edges == {"y": (("x", 1),)}, glyph
+        assert schedule.n_unoriented_dropped == 0
+
+
+def test_a_same_slice_edge_counts_only_when_it_is_oriented() -> None:
+    """Inside one slice nothing says which way the arrow runs, so the pair is dropped."""
+    directed = TrainingSchedule.from_graph(
+        mixed(["x[t] -> y[t]"]), None, {"x": NodeRole.MODEL, "y": NodeRole.MODEL}
+    )
+    stage = directed.stage_of("y")
+    assert stage is not None
+    assert stage.parent_edges == {"y": (("x", 0),)}
+    assert directed.unoriented_dropped == ()
+
+    for glyph in ("x[t] --- y[t]", "x[t] o-o y[t]", "x[t] o-> y[t]"):
+        with pytest.warns(UserWarning, match="unoriented"):
+            schedule = TrainingSchedule.from_graph(
+                mixed([glyph]), None, {"x": NodeRole.MODEL, "y": NodeRole.MODEL}
+            )
+        assert schedule.unoriented_dropped == (("x", "y"),), glyph
+        assert schedule.n_unoriented_dropped == 1
+        assert all(stage.parent_edges == {} for stage in schedule.mcmc_stages), glyph
+
+
+def test_the_dropped_pairs_are_counted_and_named() -> None:
+    graph = mixed(["x[t] --- y[t]", "x[t] o-> z[t]", "w[t-1] -> z[t]"])
+    roles = dict.fromkeys(("x", "y", "z", "w"), NodeRole.MODEL)
+    with pytest.warns(UserWarning, match="x --- y, x --- z"):
+        schedule = TrainingSchedule.from_graph(graph, None, roles)
+    assert schedule.unoriented_dropped == (("x", "y"), ("x", "z"))
+    assert schedule.n_unoriented_dropped == 2
+    stage = schedule.stage_of("z")
+    assert stage is not None
+    assert stage.parent_edges == {"z": (("w", 1),)}
+
+
+def test_the_graph_cannot_name_a_variable_the_roles_do_not() -> None:
+    with pytest.raises(ValueError, match=r"no role: \['pmi'\]"):
+        TrainingSchedule.from_graph(
+            window_graph([("pmi", "sales", 1)]), None, {"sales": NodeRole.MODEL}
+        )
+
+
+def test_nested_aggregates_are_added_up_children_first() -> None:
+    """A three-level tree: r1 and r2 have to exist before all can sum them."""
+    hierarchy = Hierarchy.tree({"all": ["r1", "r2"], "r1": ["a", "b"], "r2": ["c", "d"]})
+    roles: dict[str, NodeRole] = dict.fromkeys(("a", "b", "c", "d"), NodeRole.MODEL)
+    roles.update(dict.fromkeys(("r1", "r2", "all"), NodeRole.AGGREGATE))
+
+    schedule = TrainingSchedule.from_graph(None, hierarchy, roles, max_batch_size=999)
+    final = schedule.stages[-1]
+    assert final.strategy is StageStrategy.AGGREGATE
+    assert final.nodes == ("r1", "r2", "all"), "alphabetical order would hide the dependency"
+    assert final.hierarchy_children["all"] == ("r1", "r2")
+    position = {node: i for i, node in enumerate(final.nodes)}
+    for parent, kids in final.hierarchy_children.items():
+        for kid in kids:
+            if kid in position:
+                assert position[kid] < position[parent]

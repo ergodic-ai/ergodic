@@ -62,6 +62,12 @@ class RatioScaler(Scaler):
     clips the transformed values from below, which keeps a positive-only
     likelihood away from zero; a value at or below ``floor * median`` therefore
     does not survive a round trip.
+
+    Two magnitude boundaries worth knowing. The guard against a zero divisor is
+    absolute (a fitted median at or below 1e-8 falls back to 1.0), so a series
+    genuinely living at that scale is left unscaled rather than blown up. And
+    the floor is relative to the median, so a series with a huge dynamic range
+    loses its smallest values to the floor.
     """
 
     floor: float = 0.01
@@ -111,6 +117,11 @@ class LogScaler(Scaler):
     ``offset`` keeps the log away from zero. A value at or below ``-offset``
     has no log, so :meth:`transform` refuses it rather than quietly returning
     negative infinity or NaN.
+
+    The round trip is exact to floating point only where the log is well
+    conditioned. Far below the offset, ``exp(log(x + offset)) - offset`` loses
+    the small difference between two large numbers, so relative accuracy decays
+    to roughly 1e-7 rather than the 1e-12 the other scalers hold.
     """
 
     offset: float = 1.0

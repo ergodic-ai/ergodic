@@ -12,9 +12,11 @@ never fitted, never mutated, and cannot carry state from one fold to the next.
 
 Cutoff arithmetic, in ``expanding`` mode: the last origin is ``T - test_size``,
 the first is ``max(min_train_size, last - (n_splits - 1) * test_size)``, and the
-origins in between are evenly spaced. ``single`` mode keeps the last origin
-only. Training is always the whole prefix ``[0, cutoff)``, so later folds see
-more history, never a sliding window.
+origins in between are evenly spaced. The origins are counted backwards from the
+last one, so the fold that scores the freshest data is always in the report even
+when the stride does not divide the span evenly. ``single`` mode keeps the last
+origin only. Training is always the whole prefix ``[0, cutoff)``, so later folds
+see more history, never a sliding window.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ..data import TimeSeriesData
 from ._metrics import compute_metrics
 
 if TYPE_CHECKING:
@@ -33,7 +36,6 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import pandas as pd
 
-    from ..data import TimeSeriesData
     from ._protocol import ForecastModel
 
 __all__ = ["BacktestFold", "BacktestReport", "backtest"]
@@ -74,11 +76,12 @@ def _cutoffs(
             f"not enough data for {n_splits} expanding splits: T={n_rows}, "
             f"test_size={test_size}, min_train_size={min_train_size}"
         )
-    step = max(1, (last - first) // max(n_splits - 1, 1))
-    cutoffs = list(range(first, last + 1, step))
-    if cutoffs[-1] != last:
-        cutoffs.append(last)
-    return cutoffs[:n_splits]
+    # Count backwards from the most recent origin. The last origin is the one
+    # that scores the freshest data, so it is the one that must never be lost;
+    # the source counted forwards and truncated, which could drop it.
+    stride = max(1, (last - first) // max(n_splits - 1, 1))
+    origins = {last - step * stride for step in range(n_splits)}
+    return sorted(o for o in origins if o >= first)
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,7 @@ class BacktestFold:
     actuals: Mapping[str, npt.NDArray[np.float64]] = field(repr=False)
     fit_seed: int = 0
     forecast_seed: int = 0
+    nodes_unscored: tuple[str, ...] = ()
 
     @property
     def nodes(self) -> tuple[str, ...]:
@@ -117,6 +121,7 @@ class BacktestReport:
     folds: tuple[BacktestFold, ...]
     nodes: tuple[str, ...]
     metrics: tuple[str, ...]
+    nodes_unscored: tuple[str, ...] = ()
 
     @property
     def cutoffs(self) -> tuple[int, ...]:
@@ -124,9 +129,11 @@ class BacktestReport:
         return tuple(fold.cutoff for fold in self.folds)
 
     def values(self, node: str, metric: str) -> tuple[float, ...]:
-        """One metric for one node, fold by fold."""
+        """One metric for one node, fold by fold. NaN where the fold did not carry it."""
         return tuple(
-            float(fold.metrics[node][metric]) for fold in self.folds if node in fold.metrics
+            float(fold.metrics[node].get(metric, float("nan")))
+            for fold in self.folds
+            if node in fold.metrics
         )
 
     def _mean(self, node: str, metric: str) -> float:
@@ -173,6 +180,10 @@ class BacktestReport:
         for the accuracy family, and closer to the nominal level for coverage.
         Comparing folds cut at different origins is on the caller; run both
         models through the same split to keep it fair.
+
+        A metric only one side carries (MASE, say, when one report was scored
+        without a training window) still gets a row, with NaN on the side that
+        lacks it and ``improved`` False. A one-sided metric is not a comparison.
         """
         import pandas as pd
 
@@ -229,7 +240,11 @@ def backtest(
         An unfitted model satisfying :class:`~ergodic.forecast.ForecastModel`.
         It is deep-copied per fold, so it comes back untouched.
     data
-        The history. Rows are already in time order.
+        The history, as a :class:`~ergodic.data.TimeSeriesData` or a
+        :class:`~ergodic.data.HierarchicalTSData`. Rows are already in time
+        order. Any forecast series that is not a column of ``data`` cannot be
+        scored and is recorded in ``nodes_unscored`` rather than dropped
+        silently.
     mode
         ``"expanding"`` for several folds, each training on everything before
         its origin, or ``"single"`` for one split at the end.
@@ -252,6 +267,13 @@ def backtest(
     -------
     BacktestReport
     """
+    if not isinstance(data, TimeSeriesData):
+        raise TypeError(
+            f"backtest reads a TimeSeriesData (or a HierarchicalTSData), got "
+            f"{type(data).__name__}. Rows of a panel are not one series, so a row "
+            "cutoff would mix entities and the folds would be meaningless; rows of a "
+            "tabular dataset carry no time order at all. Convert to a series first."
+        )
     if not 0.0 < level < 1.0:
         raise ValueError(f"level must be in (0, 1), got {level}")
     if min_train_size is None:
@@ -260,6 +282,7 @@ def backtest(
 
     columns = set(data.variables)
     folds: list[BacktestFold] = []
+    unscored: list[str] = []
     for index, cutoff in enumerate(cutoffs):
         fit_seed = seed + index
         forecast_seed = seed + 1000 + index
@@ -268,6 +291,8 @@ def backtest(
         result = fitted.forecast(test_size, seed=forecast_seed)
 
         scored = [node for node in result.nodes if node in columns]
+        skipped = tuple(node for node in result.nodes if node not in columns)
+        unscored += [node for node in skipped if node not in unscored]
         if not scored:
             raise ValueError(
                 f"none of the forecast series {list(result.nodes)} is a column of the data "
@@ -293,6 +318,7 @@ def backtest(
                 actuals=actuals,
                 fit_seed=fit_seed,
                 forecast_seed=forecast_seed,
+                nodes_unscored=skipped,
             )
         )
 
@@ -306,4 +332,5 @@ def backtest(
         folds=tuple(folds),
         nodes=nodes,
         metrics=tuple(names),
+        nodes_unscored=tuple(unscored),
     )
