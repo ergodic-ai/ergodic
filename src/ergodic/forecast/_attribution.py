@@ -47,7 +47,7 @@ from ._fit import forecast_node, posterior_draws, zero_sites
 from ._mechanism import SEASON
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
 
     import numpy.typing as npt
     import pandas as pd
@@ -287,7 +287,7 @@ class Attribution:
     def __len__(self) -> int:
         return len(self.nodes)
 
-    def __iter__(self) -> Iterable[NodeAttribution]:
+    def __iter__(self) -> Iterator[NodeAttribution]:
         return iter(self.nodes)
 
     def __getitem__(self, key: str | tuple[str, str]) -> NodeAttribution:

@@ -129,6 +129,18 @@ def forecast_or_skip(*args: Any, **kwargs: Any) -> ForecastResult:
         raise
 
 
+def view_of(result: ForecastResult, node: str) -> Any:
+    """One node's forecast view off the result, with the provenance asserted present."""
+    assert result.views is not None
+    return result.views[node]
+
+
+def fit_of(result: ForecastResult, node: str) -> Any:
+    """One node's fitted handle off the result, same reason."""
+    assert result.fits is not None
+    return result.fits[node]
+
+
 @dataclass(frozen=True)
 class OpaqueMechanism(StructuralMechanism):
     """A mechanism the pillar did not write.
@@ -389,18 +401,18 @@ def test_two_explain_calls_are_bitwise_identical(attributed: ForecastResult) -> 
 def test_a_replay_reuses_the_forecasts_own_seed(attributed: ForecastResult) -> None:
     from ergodic.forecast import forecast_node
 
-    recipe = attributed.views["y"].replay
+    recipe = view_of(attributed, "y").replay
     # sorted nodes are x1, x2, y, so y fits at SEED + 2 and forecasts a thousand
     # past that, which is the facade's rule and what a replay has to reuse.
     assert recipe.seed == SEED + 2 + 1000
     again = forecast_node(
-        attributed.fits["y"],
+        fit_of(attributed, "y"),
         recipe.horizon,
         parents=recipe.parents,
         frozen=recipe.frozen,
         seed=recipe.seed,
     )
-    assert np.array_equal(again.draws, attributed.views["y"].draws)
+    assert np.array_equal(again.draws, view_of(attributed, "y").draws)
 
 
 # -- the other paths ----------------------------------------------------------
@@ -429,7 +441,7 @@ def test_a_joint_fit_cannot_replay_one_node(joint_opaque: ForecastResult) -> Non
     # is no per-node call to run again. A mechanism that decomposes itself never
     # needs one; one that does not is refused with the reason rather than with a
     # forecast built from a different posterior.
-    assert joint_opaque.views["y"].replay is None
+    assert view_of(joint_opaque, "y").replay is None
     with pytest.raises(NotImplementedError, match="joint fit"):
         joint_opaque.explain(nodes="y")
 

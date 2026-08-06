@@ -101,7 +101,7 @@ def run(model: Any, data: TimeSeriesData) -> BacktestReport:
 
 
 @pytest.fixture(scope="module")
-def reports(sales: TimeSeriesData) -> dict[str, BacktestReport]:
+def bench(sales: TimeSeriesData) -> tuple[dict[str, BacktestReport], float]:
     """One table, three models: the truth, the same model told there is no season, and naive."""
     started = time.time()
     out = {
@@ -125,18 +125,28 @@ def reports(sales: TimeSeriesData) -> dict[str, BacktestReport]:
         ),
         "seasonal naive": run(SeasonalNaive(period=12), sales),
     }
-    out["elapsed"] = time.time() - started  # type: ignore[assignment]
-    return out
+    return out, time.time() - started
+
+
+@pytest.fixture(scope="module")
+def reports(bench: tuple[dict[str, BacktestReport], float]) -> dict[str, BacktestReport]:
+    return bench[0]
 
 
 def comparison(reports: dict[str, BacktestReport]) -> pd.DataFrame:
     """The three models side by side, mean over folds, one row each."""
-    rows = {
-        name: report.summary().loc["sales"]
-        for name, report in reports.items()
-        if isinstance(report, BacktestReport)
-    }
+    rows = {name: report.summary().loc["sales"] for name, report in reports.items()}
     return pd.DataFrame(rows).T[["crps", "mae", "mase", "coverage"]]
+
+
+def score(report: BacktestReport, metric: str, node: str = "sales") -> float:
+    """One metric's mean over the folds, read off the report rather than the frame.
+
+    The comparison table is what a person reads; this is what an assertion reads,
+    because a cell of a dataframe is typed as anything a cell can hold.
+    """
+    values = [value for value in report.values(node, metric) if np.isfinite(value)]
+    return float(np.mean(values))
 
 
 # -- criterion 6: the true spec wins the table --------------------------------
@@ -148,19 +158,20 @@ def test_the_true_spec_beats_the_wrong_one_and_the_naive_baseline(
 ) -> None:
     table = comparison(reports)
     assert list(table.index) == ["true spec", "no season", "seasonal naive"]
-    assert table.loc["true spec", "crps"] < table.loc["no season", "crps"]
-    assert table.loc["true spec", "crps"] < table.loc["seasonal naive", "crps"]
+    assert list(table.columns) == ["crps", "mae", "mase", "coverage"]
+    assert score(reports["true spec"], "crps") < score(reports["no season"], "crps")
+    assert score(reports["true spec"], "crps") < score(reports["seasonal naive"], "crps")
     # MASE is scaled by the in-sample seasonal naive error, so under one means
     # the forecast is worth more than repeating last year's month.
-    assert table.loc["true spec", "mase"] < 1.0
+    assert score(reports["true spec"], "mase") < 1.0
 
 
 @requires_pymc
 def test_the_comparison_reads_the_same_way_pairwise(reports: dict[str, BacktestReport]) -> None:
     pairwise = reports["true spec"].compare(reports["seasonal naive"])
-    crps = pairwise[pairwise["metric"] == "crps"].iloc[0]
-    assert bool(crps["improved"])
-    assert crps["value"] < crps["other"]
+    row = pairwise[pairwise["metric"] == "crps"].iloc[0]
+    assert bool(row["improved"])
+    assert float(row["delta"]) < 0.0
 
 
 # -- criterion 7: seeds, diagnostics, and the cost ----------------------------
@@ -179,7 +190,7 @@ def test_the_folds_carry_the_samplers_own_report(reports: dict[str, BacktestRepo
     report = reports["true spec"]
     frame = report.diagnostics()
     assert len(frame) == N_SPLITS
-    assert list(frame["cutoff"]) == list(report.cutoffs)
+    assert [int(value) for value in frame["cutoff"]] == list(report.cutoffs)
     assert set(frame["worst_node"]) == {"sales"}
     for fold in report.folds:
         assert fold.diagnostics is not None
@@ -209,15 +220,16 @@ def test_a_fold_is_exactly_what_the_facade_would_have_produced(
     )
     assert np.array_equal(again.draws("sales"), fold.forecasts["sales"])
     assert fold.diagnostics is not None
+    assert again.diagnostics is not None
     assert fold.diagnostics.min_ess == pytest.approx(again.diagnostics["sales"].min_ess)
 
 
 @requires_pymc
-def test_the_whole_table_fits_the_budget(reports: dict[str, BacktestReport]) -> None:
+def test_the_whole_table_fits_the_budget(bench: tuple[dict[str, BacktestReport], float]) -> None:
     # Two Bayesian models over two folds each: four NUTS runs plus their
     # predictive passes. The docs quote the cost model as folds times MCMC
     # nodes, and this is that arithmetic held to a number.
-    assert float(reports["elapsed"]) < 180.0  # type: ignore[arg-type]
+    assert bench[1] < 180.0
 
 
 @requires_pymc
