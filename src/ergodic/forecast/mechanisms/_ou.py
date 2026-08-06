@@ -38,12 +38,19 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._mechanism import TemporalMechanism, auto_scaler, parent_path, require_pymc
+from .._mechanism import (
+    SEASON,
+    TemporalMechanism,
+    auto_scaler,
+    parent_path,
+    regression_keys,
+    require_pymc,
+)
 from .._scalers import Scaler
 from ._structural import _fourier_design
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     import numpy.typing as npt
 
@@ -128,6 +135,67 @@ class CausalOU(TemporalMechanism):
         if self.scaler is not None:
             return self.scaler.fit(values)
         return auto_scaler(values)
+
+    # -- the decomposition ---------------------------------------------------
+
+    def baseline_label(self) -> str:
+        """A mean-reverting level has no slope, so calling it a trend would mislead."""
+        return "Level and reversion"
+
+    def factors(self, node: str, components: Mapping[str, Array]) -> tuple[str, ...] | None:
+        """Seasonality first, then one key per driver, same as the structural workhorse."""
+        needed = (self.site(node, "mu"), self.site(node, "trend"))
+        if any(name not in components for name in needed):
+            return None
+        keys = regression_keys(node, components)
+        kind, _period = self.seasonal_form()
+        seasonal = kind is not None and self.site(node, "season_factor") in components
+        return ((SEASON,) if seasonal else ()) + keys
+
+    def compose(
+        self,
+        node: str,
+        components: Mapping[str, Array],
+        posterior: Mapping[str, Array],
+        *,
+        active: Collection[str],
+    ) -> Array:
+        """The mean path with only ``active`` factors on, per draw.
+
+        A driver here does not add to the level, it moves the attractor the level
+        walks toward, so its contribution reaches the series through the whole
+        reversion recursion rather than landing in one step. That recursion is
+        **linear in the attractor**, which is what makes the decomposition exact:
+
+            level = own_dynamics + sum_b pull(reg_b)
+
+        where ``pull`` is the same first-order filter the scan runs
+        (``B_t = (1 - kappa) B_{t-1} + kappa reg_t``, starting at zero) and
+        ``own_dynamics`` is everything else (the initial level, the baseline
+        attractor ``mu0``, and the innovations). Switching a driver off subtracts
+        its filtered pull from the recorded level, and the parts add back up to
+        the level the model actually walked.
+
+        Writing that filter here restates one line of :meth:`build` in numpy,
+        which is a real risk (the two could drift apart). It is guarded rather
+        than trusted: composing with every factor on has to reproduce the model's
+        own ``mu``, and :meth:`~ergodic.forecast.ForecastResult.explain` measures
+        exactly that gap as ``closure_error``.
+        """
+        on = frozenset(active)
+        level = np.asarray(components[self.site(node, "trend")], dtype=np.float64)
+        keys = regression_keys(node, components)
+        if any(key not in on for key in keys):
+            kappa = np.asarray(posterior[self.site(node, "kappa")], dtype=np.float64).ravel()
+            for key in keys:
+                if key not in on:
+                    shift = np.asarray(components[self.site(node, f"reg_{key}")], dtype=np.float64)
+                    level = level - _pull(shift, kappa)
+        total = level
+        if SEASON in on:
+            total = total + np.asarray(components[self.site(node, "season")])
+            total = total * np.asarray(components[self.site(node, "season_factor")])
+        return np.asarray(total, dtype=np.float64)
 
     # -- the model -----------------------------------------------------------
 
@@ -253,3 +321,26 @@ class CausalOU(TemporalMechanism):
         if self.robust:
             return pm.StudentT(site, nu=nu, **kwargs)
         return pm.Normal(site, **kwargs)
+
+
+def _pull(shift: Array, kappa: Array) -> Array:
+    """One driver's attractor shift, filtered into level space, ``(S, n)``.
+
+    ``B_t = (1 - kappa) B_{t-1} + kappa shift_t`` from zero, per draw. Vectorized
+    across draws and walked forward in time, because the recursion is exactly
+    that: the level only ever learns about a driver through where it was heading
+    one step ago.
+    """
+    rate = np.asarray(kappa, dtype=np.float64)
+    values = np.asarray(shift, dtype=np.float64)
+    if rate.shape[0] != values.shape[0]:
+        raise ValueError(
+            f"kappa carries {rate.shape[0]} draws and the driver term {values.shape[0]}; "
+            "both come from the same posterior, so they have to match"
+        )
+    out = np.empty_like(values)
+    carry = np.zeros(values.shape[0], dtype=np.float64)
+    for step in range(values.shape[1]):
+        carry = (1.0 - rate) * carry + rate * values[:, step]
+        out[:, step] = carry
+    return out

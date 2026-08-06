@@ -37,7 +37,7 @@ from .._mechanism import TemporalMechanism, require_pymc
 from .._scalers import RatioScaler, Scaler
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     import numpy.typing as npt
 
@@ -70,6 +70,15 @@ class Bass(TemporalMechanism):
     Parents are not read. A driver that moves adoption is a real thing to want and
     it is a different model (the hybrid correction the plan defers), so passing
     one raises rather than being ignored.
+
+    Sites, since the naming contract is load-bearing: the free variables are
+    ``{node}_p``, ``{node}_q``, ``{node}_M`` and ``{node}_sigma_obs``, and a
+    forecasting model also records two deterministics, ``{node}_mu`` (the
+    incremental adoption path, which is the mean the likelihood reads) and
+    ``{node}_cumulative`` (the share of the market adopted by each step, which is
+    what the recursion actually carries). Nothing else registers a
+    ``cumulative``; it is named here because anything reading a trace by name,
+    an attribution replay above all, has to know what is in it.
     """
 
     launch_index: int = 0
@@ -116,6 +125,34 @@ class Bass(TemporalMechanism):
         positive = finite[finite > 0.0]
         anchor = float(np.mean(positive)) if positive.size else 1.0
         return RatioScaler(floor=0.0, median=anchor if abs(anchor) > 1e-8 else 1.0)
+
+    # -- the decomposition ---------------------------------------------------
+
+    def baseline_label(self) -> str:
+        """Nothing here is a trend: the whole path is the diffusion curve."""
+        return "Diffusion"
+
+    def factors(self, node: str, components: Mapping[str, Array]) -> tuple[str, ...] | None:
+        """No factors at all, which is a real answer rather than a refusal.
+
+        Pure diffusion has no drivers and no season, so the whole mean path is
+        baseline. Saying so beats falling through to replay, which would spend a
+        sampler to discover the same thing.
+        """
+        if self.site(node, "mu") not in components:
+            return None
+        return ()
+
+    def compose(
+        self,
+        node: str,
+        components: Mapping[str, Array],
+        posterior: Mapping[str, Array],
+        *,
+        active: Collection[str],
+    ) -> Array:
+        """The adoption path itself, whatever is switched on, since nothing can be off."""
+        return np.asarray(components[self.site(node, "mu")], dtype=np.float64)
 
     def peak_step(self, p: float, q: float) -> float:
         """Where the incremental-adoption curve peaks: ``ln(q / p) / (p + q)``, plus the launch."""

@@ -8,13 +8,14 @@ By [ergodic.ai](https://ergodic.ai).
 
 ## What's inside
 
-`ergodic` is organized around three pillars, all built on two shared objects.
+`ergodic` is organized around its pillars, all built on two shared objects.
 
 | Subpackage | Focus |
 | --- | --- |
 | [`ergodic.discovery`](src/ergodic/discovery) | Causal discovery: learn causal structure (DAGs) from data. |
 | [`ergodic.inference`](src/ergodic/inference) | Causal inference: estimate causal effects from data and a causal model. |
 | [`ergodic.process`](src/ergodic/process) | Process mining and intelligence: discover and analyze processes from event logs. |
+| [`ergodic.forecast`](src/ergodic/forecast) | Forecasting: Bayesian trajectories with causal structure in them. |
 
 The shared objects are written and tested: `ergodic.graph` (a mixed-graph family covering DAG, ADMG, MAG, CPDAG, and PAG), `ergodic.knowledge` (`DomainKnowledge` for prior constraints), `ergodic.identification` (graph to estimand: adjustment, front-door, instruments; on a CPDAG, MAG, or PAG the generalized adjustment criterion answers for every graph in the class), and `ergodic.data` (typed datasets: tabular, time series, panel, hierarchical, event log).
 
@@ -24,7 +25,9 @@ Causal discovery is built on two pluggable ingredients: a conditional independen
 
 Process intelligence reads event logs. The descriptive layer recovers the daily workflow (`process_map` with provenance-tracked simplification, `performance` with a waiting/service split when lifecycle data exists, `variant_table`, and a composable filter vocabulary that says whether it drops events or cases), and the causal layer asks what the tools above can't: `case_table` encodes a log into one row per case with timestamp-gated features, workload confounders, and auto-built `DomainKnowledge` tiers, feeding `discover` and `estimate_effect` unchanged, and `kpi_panel` aggregates a log into the panel that `did`, `event_study`, and `synthetic_control` consume, so a process change becomes a natural experiment. The model layer goes past the map: `discover_model` is an inductive miner that cuts the log into a block-structured process tree and a workflow net that is sound by construction (`is_sound` verifies any net by reachability), `conformance` checks the log against a model by token replay and optimal alignments, and `decision_points` with `decision_table` read an exclusive split causally: the branch taken is a treatment, the adjusters are measured at the moment the case reveals its branch, and positivity ships as a first-class report.
 
-New to causal inference? The docs open with a learn series: ten notebook guides that teach the ideas from zero on commercial examples (Simpson's paradox, bad controls, doubly robust estimation, uplift targeting, instruments and the front door, structure discovery, quasi-experiments with difference-in-differences and synthetic control, process mining over event logs with the maps drawn for real, causal process intelligence, and decision points in a mined process model), each one a simulation with the true answer written in the code and executed live when the docs build. See the [docs](https://ergodic.ai) for the series and the reference guides.
+Forecasting points the same machinery forward. `forecast(data, horizon)` fits a Bayesian mechanism per series and returns posterior trajectories, not a point with an error bar bolted on: a damped trend, a season, and one regression term per driver, composed so the fitted forecast can be taken apart again. Series that add up are made to agree through a reconciliation menu that costs no refitting (`bottom_up`, `top_down`, `middle_out`, and the MinT projection, with trust weights), drivers ride the same window graph temporal discovery returns (staged fitting hands each node's whole posterior down to its children, joint fitting keeps the cross-node correlation), and a driver whose future is genuinely known arrives through `scenario=`, which pins a path and says plainly that it makes no causal claim (`do=` waits for identification on the window graph). `backtest` scores any of it at rolling origins against naive baselines in one table with MASE, CRPS, and coverage, carrying each fold's sampler diagnostics, and `ForecastResult.explain()` returns the attribution waterfall: a baseline bar, a seasonality bar, and one bar per driver, each with a credible interval, adding up to the total. PyMC is optional (`pip install ergodic[forecast]`).
+
+New to causal inference? The docs open with a learn series: eleven notebook guides that teach the ideas from zero on commercial examples (Simpson's paradox, bad controls, doubly robust estimation, uplift targeting, instruments and the front door, structure discovery, quasi-experiments with difference-in-differences and synthetic control, process mining over event logs with the maps drawn for real, causal process intelligence, decision points in a mined process model, and forecasting a product hierarchy with its drivers), each one a simulation with the true answer written in the code and executed live when the docs build. See the [docs](https://ergodic.ai) for the series and the reference guides.
 
 ## Installation
 

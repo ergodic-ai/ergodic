@@ -320,6 +320,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assumptions, and `proportion_mediated` (flagged when the total effect is near
   zero). Binary treatment and a discrete mediator; held to a planted linear world
   where NDE and NIE recover the structural coefficients.
+- Forecasting (`ergodic.forecast`), v1: `forecast(data, horizon)` fits a Bayesian
+  `TemporalMechanism` per series and returns a distribution-shaped `ForecastResult`
+  (per-node draws, `median`, `interval`, `to_frame`, provenance, and per-node
+  sampler diagnostics). The mechanism zoo is `StructuralMechanism` (a damped local
+  linear trend times a season plus a regression on graph parents, composed from
+  those pieces rather than fused), `CausalOU` (drivers move the long-run attractor,
+  so the transient answers "when" and not just "how much"), `Bass` (the diffusion
+  S-curve), and `ScenarioMechanism`; mechanisms are auto-assigned from the schema
+  with the seasonal period read off the time index, and count or categorical
+  columns raise at a named seam. Hierarchies reconcile without refitting through
+  `reconcile(result, hierarchy, method=...)`: `bottom_up`, `top_down` (historical or
+  per-draw forecast proportions), `middle_out`, and the `mint` projection (diagonal
+  posterior weights or `mint_shrink`, with `trust={node: w}`), each coherent to
+  machine epsilon read relative to the size of each parent. Drivers ride a window
+  graph over lagged names, exactly what `discover(..., method="pcmci")` returns:
+  staged fitting walks the `TrainingSchedule` and hands each node's whole forecast
+  posterior down to its children by injecting it into the child's trace, joint
+  fitting puts every node in one model and keeps the cross-node correlation, and
+  `fit="auto"` picks between them. `scenario=` pins a known future (an array, a
+  scalar, or `"hold"`) and states that it makes no causal claim; pinning an
+  endogenous node is refused by name and points at the `do=` that waits for
+  identification on window graphs. `backtest(model, data, ...)` scores anything that
+  fits a series and forecasts a horizon at rolling origins, with `Naive`,
+  `SeasonalNaive`, and `Drift` baselines, fifteen metrics including MASE and CRPS,
+  per-fold seeds, and the sampler's own report aggregated per fold;
+  `forecast_model(**options)` wraps the facade as a backtestable model.
+  `ForecastResult.explain()` returns the attribution waterfall: a baseline bar, a
+  seasonality bar, and one bar per driver over any `Window` of the horizon, each
+  carrying posterior draws and a credible interval, summing to the total with a
+  reported `closure_error`. The structural engine recomposes the mechanism's own
+  recorded pieces and costs no sampling; the replay engine (for a mechanism that
+  does not expose them) zeroes the factor's sites in a copy of the trace and
+  forecasts again on the stored seed. pymc is optional, `pip install
+  ergodic[forecast]`, and the bare install never imports it.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
