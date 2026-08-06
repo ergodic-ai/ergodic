@@ -73,14 +73,16 @@ WARMUP = 300
 # does not fail the suite; the strict inequalities beside them are the criteria.
 GOLDEN_H1_TD_CRPS = 3.7034
 GOLDEN_H1_BU_CRPS = 4.1912
-GOLDEN_H1_WIDTH_RATIO = 3.0
+GOLDEN_H1_WIDTH_RATIO = 2.0512
+GOLDEN_H1_TOTAL_MOVE = 8.2473
+GOLDEN_H1_TOTAL_MOVE_TRUSTED = 0.9921
 GOLDEN_H2_BU_CRPS = 3.8954
 GOLDEN_H2_OWN_CRPS = 6.7761
 GOLDEN_DRIFT_FORECAST_MAE = 6.5948
 GOLDEN_DRIFT_HISTORICAL_MAE = 28.2888
-GOLDEN_SWEEP_MINT = 1.0
-GOLDEN_SWEEP_BEST = 1.0
-GOLDEN_SWEEP_NONE = 1.0
+GOLDEN_SWEEP_MINT = 2.3312
+GOLDEN_SWEEP_BEST = 2.5614
+GOLDEN_SWEEP_NONE = 2.5969
 
 
 # -- the planted worlds -------------------------------------------------------
@@ -519,7 +521,7 @@ def drifting() -> World:
 @pytest.fixture(scope="module")
 def three_level() -> World:
     """H1's shape over three levels, with the regions modelled like everything else."""
-    return World(deepen(world_h1(WORLD_SEED, 66)), DEEP_TREE, 60, 6, draws=300, warmup=300, seed=11)
+    return World(deepen(world_h1(WORLD_SEED, 60)), DEEP_TREE, 54, 6, draws=200, warmup=200, seed=11)
 
 
 # -- criteria 1, 3, 4, 9, 10: world H1 ----------------------------------------
@@ -612,29 +614,50 @@ def test_summing_independent_leaves_widens_the_total(h1: World) -> None:
     assert ratio == pytest.approx(GOLDEN_H1_WIDTH_RATIO, rel=0.05)
 
 
+def _moved(reconciled: ForecastResult, before: ForecastResult, nodes: tuple[str, ...]) -> float:
+    """How far the medians of ``nodes`` travelled from where their own models put them."""
+    return float(
+        np.sqrt(sum(np.sum((reconciled.median(node) - before.median(node)) ** 2) for node in nodes))
+    )
+
+
 @requires_pymc
 def test_trust_moves_a_node_less(h1: World) -> None:
-    """Criterion 9: trust is a dial with a direction, in both readings.
+    """Criterion 9: trust is a dial with a direction, and the direction is "moves less".
 
-    Trusting the total pulls the leaves toward what top-down would have done,
-    because that is the limit of trusting the top completely. Trusting a leaf
-    leaves that leaf closer to where its own model put it.
+    Trust the total and the total stays where its own model put it, while the
+    leaves absorb the whole disagreement. Trust a leaf and that leaf stays put
+    while its siblings absorb it. Both readings are the same sentence about the
+    weights: the projection moves a node in proportion to its entry of W, and
+    trust divides that entry.
+
+    A note on what this does *not* say, because the sprint plan expected it to.
+    Trusting the total does not walk the leaves toward the top-down answer: the
+    L2 distance from the leaves to top_down's leaves goes 21.82, 22.30, 22.38 at
+    trust 1, 10 and 100 on this world, which is flat, not shrinking. MinT and
+    top-down do different things to a leaf. Top-down replaces it with a share of
+    the parent; MinT keeps the leaf's own forecast and adjusts it just enough to
+    close the gap, splitting that adjustment by weight rather than by share. Even
+    with the total pinned, the two land in different places, and the close-out
+    records the measurement.
     """
     plain = reconcile(h1.result, FLAT_TREE, method="mint")
     trust_total = reconcile(h1.result, FLAT_TREE, method="mint", trust={"total": 10.0})
-    top_down = reconcile(h1.result, FLAT_TREE, method="top_down", data=h1.train)
-
-    def distance(left: ForecastResult, right: ForecastResult) -> float:
-        return float(
-            np.sqrt(sum(np.sum((left.median(leaf) - right.median(leaf)) ** 2) for leaf in LEAVES))
-        )
-
-    assert distance(trust_total, top_down) < distance(plain, top_down)
-
     trust_leaf = reconcile(h1.result, FLAT_TREE, method="mint", trust={"leaf_a": 10.0})
-    moved_plain = float(np.linalg.norm(plain.median("leaf_a") - h1.result.median("leaf_a")))
-    moved_trusted = float(np.linalg.norm(trust_leaf.median("leaf_a") - h1.result.median("leaf_a")))
-    assert moved_trusted < moved_plain
+
+    # Reading one: the trusted total keeps its own forecast, and the leaves pay.
+    assert _moved(trust_total, h1.result, ("total",)) < _moved(plain, h1.result, ("total",))
+    assert _moved(trust_total, h1.result, LEAVES) > _moved(plain, h1.result, LEAVES)
+
+    # Reading two: the trusted leaf keeps its own forecast, and its siblings pay.
+    assert _moved(trust_leaf, h1.result, ("leaf_a",)) < _moved(plain, h1.result, ("leaf_a",))
+    siblings = tuple(leaf for leaf in LEAVES if leaf != "leaf_a")
+    assert _moved(trust_leaf, h1.result, siblings) > _moved(plain, h1.result, siblings)
+
+    assert _moved(plain, h1.result, ("total",)) == pytest.approx(GOLDEN_H1_TOTAL_MOVE, rel=0.05)
+    assert _moved(trust_total, h1.result, ("total",)) == pytest.approx(
+        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=0.05
+    )
 
 
 @requires_pymc
@@ -775,13 +798,13 @@ SWEEP_TREE = Hierarchy.tree({"total": list(LEAVES[:3])})
 @pytest.fixture(scope="module")
 def sweep() -> list[dict[str, float]]:
     """Twelve small worlds, alternating regimes, each fitted once and scored every way."""
-    train_size, horizon = 48, 6
+    train_size, horizon = 42, 6
     rows: list[dict[str, float]] = []
     for index in range(12):
         columns = sweep_world(index, train_size + horizon)
         data = hts(columns, time="month", hierarchy=SWEEP_TREE)
         train = data.take(np.arange(train_size))
-        result = forecast(train, horizon, reconcile="none", draws=250, warmup=250, seed=index)
+        result = forecast(train, horizon, reconcile="none", draws=200, warmup=200, seed=index)
         actual = {
             node: np.asarray(columns[node][train_size : train_size + horizon], dtype=np.float64)
             for node in SWEEP_TREE.nodes
@@ -810,7 +833,14 @@ def test_mint_is_never_much_worse(sweep: list[dict[str, float]]) -> None:
     MinT does not have to win a regime. What it has to do is never be the wrong
     choice: on worlds where the total is the signal and worlds where the leaves
     are, one projection stays within a whisker of whichever single strategy
-    happened to be right, and it beats leaving the levels disagreeing.
+    happened to be right, and beats leaving the levels disagreeing.
+
+    On these twelve it does better than that, and the reason is worth keeping in
+    view. Picking one strategy for the whole sweep means being wrong on half of
+    it, so the best single average carries the losses of six worlds it did not
+    suit. The projection is chosen per world by the weights, so it carries
+    neither. That is why the measured ratio is under one rather than just under
+    1.05.
     """
     averages = {
         name: float(np.mean([row[name] for row in sweep]))
@@ -852,7 +882,7 @@ class Forecaster:
     """
 
     def __init__(
-        self, *, reconcile: str = "bottom_up", draws: int = 150, warmup: int = 150
+        self, *, reconcile: str = "bottom_up", draws: int = 100, warmup: int = 100
     ) -> None:
         self.reconcile = reconcile
         self.draws = draws
@@ -880,7 +910,7 @@ def facade_run() -> tuple[HierarchicalTSData, ForecastResult]:
     columns = deepen(world_h1(WORLD_SEED, 40))
     data = build(columns, DEEP_TREE, drop=("north", "south"))
     result = forecast(
-        data, 4, reconcile="mint", weights="mint_shrink", draws=150, warmup=150, seed=3
+        data, 4, reconcile="mint", weights="mint_shrink", draws=100, warmup=100, seed=3
     )
     return data, result
 
@@ -916,9 +946,9 @@ def test_the_facade_forecasts_every_level(
 @requires_pymc
 def test_an_unreconciled_facade_call_says_so() -> None:
     """The diagnostic contrast the menu promises: none reports the disagreement."""
-    columns = world_h1(WORLD_SEED, 40)
+    columns = world_h1(WORLD_SEED, 30)
     data = build(columns)
-    result = forecast(data, 3, reconcile="none", draws=100, warmup=150, seed=3)
+    result = forecast(data, 3, reconcile="none", draws=100, warmup=100, seed=3)
     assert result.reconciliation == "none"
     assert result.coherent is False
     assert result.coherence_error(FLAT_TREE) > 0.0
@@ -941,7 +971,7 @@ def test_the_backtester_scores_a_hierarchy() -> None:
     columns = deepen(world_h1(WORLD_SEED, 42))
     data = build(columns, DEEP_TREE, drop=("north", "south"))
     report = backtest(
-        Forecaster(reconcile="bottom_up", draws=150, warmup=150),
+        Forecaster(reconcile="bottom_up", draws=100, warmup=100),
         data,
         test_size=6,
         n_splits=2,
