@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._mechanism import TemporalMechanism, auto_scaler, require_pymc
+from .._mechanism import TemporalMechanism, auto_scaler, parent_path, require_pymc
 from .._scalers import Scaler
 
 if TYPE_CHECKING:
@@ -224,13 +224,7 @@ class StructuralMechanism(TemporalMechanism):
                     f"parent {base!r} of {name!r} ends in '_fc', which is the suffix that "
                     "marks a freshly simulated site; rename the variable"
                 )
-            values = np.asarray(parents[base], dtype=np.float64)
-            if values.shape != (n_total,):
-                raise ValueError(
-                    f"parent {base!r} of {name!r} has shape {values.shape}, expected "
-                    f"({n_total},) = T + horizon; a parent arrives lag-aligned and "
-                    "with its future already resolved"
-                )
+            values = parent_path(parents[base], node=name, base=base, n_total=n_total)
             beta = pm.Normal(site(name, f"beta_{base}"), mu=0.0, sigma=self.reg_scale)
             contribution = named(f"reg_{base}", beta * values)
             reg = reg + contribution

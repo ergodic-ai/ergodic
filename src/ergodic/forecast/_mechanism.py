@@ -43,6 +43,8 @@ __all__ = [
     "assign_mechanisms",
     "auto_scaler",
     "infer_period",
+    "is_symbolic",
+    "parent_path",
     "require_pymc",
 ]
 
@@ -84,6 +86,45 @@ def auto_scaler(values: Array) -> Scaler:
     return ZScoreScaler().fit(finite)
 
 
+def is_symbolic(value: Any) -> bool:
+    """True when ``value`` is a pytensor variable rather than data.
+
+    Duck-typed on purpose: this module is imported by the bare install, which has
+    no pytensor to check against. A pytensor variable carries both a ``type`` and
+    an ``owner``; a numpy array carries neither.
+    """
+    return hasattr(value, "type") and hasattr(value, "owner")
+
+
+def parent_path(values: Any, *, node: str, base: str, n_total: int) -> Any:
+    """Validate one parent column and hand it back in a form the model can multiply.
+
+    A parent arrives lag-aligned over ``T + horizon`` steps, and it arrives in one
+    of two forms. Data (a numpy array) is the ordinary case: a driver whose future
+    is known, or the whole training window. A **tensor** is the staged and joint
+    case: a driver whose future is a random variable of this very model, either a
+    frozen parent's injected ``{base}_fc`` draws or an upstream node's own mean
+    path. Both are length ``T + horizon`` and nothing downstream needs to know
+    which one it got.
+    """
+    if is_symbolic(values):
+        shape = tuple(values.type.shape)
+        if len(shape) != 1 or (shape[0] is not None and int(shape[0]) != n_total):
+            raise ValueError(
+                f"parent {base!r} of {node!r} is a tensor of shape {shape}, expected "
+                f"({n_total},) = T + horizon"
+            )
+        return values
+    array = np.asarray(values, dtype=np.float64)
+    if array.shape != (n_total,):
+        raise ValueError(
+            f"parent {base!r} of {node!r} has shape {array.shape}, expected "
+            f"({n_total},) = T + horizon; a parent arrives lag-aligned and with its "
+            "future already resolved"
+        )
+    return array
+
+
 @dataclass(frozen=True)
 class TemporalMechanism:
     """The contract: own a scale, build a mean path, register named sites.
@@ -96,8 +137,13 @@ class TemporalMechanism:
       steps happen to hold. A mechanism must index down to the observed steps
       before it writes a likelihood; masked steps never enter, and nothing is
       imputed on the way in.
-    - ``parents``: base name to scaled, lag-aligned array of length
-      ``T + horizon``. Empty until the driver sprint fills it.
+    - ``parents``: design name to scaled, lag-aligned path of length
+      ``T + horizon``. Either a numpy array (a driver whose future is known) or a
+      tensor of this model (a frozen parent's injected draws, or an upstream
+      node's own mean path in a joint fit). :func:`parent_path` validates both
+      and a mechanism should route every parent through it. The design name is
+      the parent's variable name when it drives this node at one lag, and
+      ``{base}_lag{k}`` for the extra lags when it drives at several.
     - ``mask``: boolean ``(T,)``, True where the series was observed.
     - ``horizon``: zero for a fitting model, ``H`` for a forecasting one. A
       forecasting model adds fresh innovation sites whose names end in ``_fc``,
