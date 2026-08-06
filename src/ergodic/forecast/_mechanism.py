@@ -29,7 +29,7 @@ import numpy as np
 from ._scalers import IdentityScaler, RatioScaler, Scaler, ZScoreScaler
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     import numpy.typing as npt
 
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     Array = npt.NDArray[np.float64]
 
 __all__ = [
+    "SEASON",
     "ScenarioMechanism",
     "TemporalMechanism",
     "assign_mechanisms",
@@ -45,8 +46,15 @@ __all__ = [
     "infer_period",
     "is_symbolic",
     "parent_path",
+    "regression_keys",
     "require_pymc",
 ]
+
+#: The factor key for seasonality in the attribution contract. Driver factors are
+#: named by their design key, so a driver column called ``"season"`` would collide
+#: with this one; :meth:`TemporalMechanism.factors` refuses that rather than
+#: silently merging the two bars.
+SEASON = "season"
 
 
 def require_pymc() -> Any:
@@ -84,6 +92,24 @@ def auto_scaler(values: Array) -> Scaler:
     if bool(np.all(finite > 0.0)):
         return RatioScaler().fit(finite)
     return ZScoreScaler().fit(finite)
+
+
+def regression_keys(node: str, components: Mapping[str, Array]) -> tuple[str, ...]:
+    """The design keys behind a node's ``{node}_reg_{key}`` deterministics, sorted.
+
+    This is the naming contract read backwards: a forecast model registers one
+    such deterministic per driver, so the drivers of a fitted node can be
+    recovered from what it recorded, without asking the graph again.
+    """
+    prefix = f"{node}_reg_"
+    keys = sorted(str(name)[len(prefix) :] for name in components if str(name).startswith(prefix))
+    if SEASON in keys:
+        raise ValueError(
+            f"{node!r} has a driver whose design key is {SEASON!r}, which is the key "
+            "seasonality uses in an attribution, so the two bars would be the same bar. "
+            "Rename the column."
+        )
+    return tuple(keys)
 
 
 def is_symbolic(value: Any) -> bool:
@@ -193,6 +219,60 @@ class TemporalMechanism:
         raise NotImplementedError(
             f"{type(self).__name__} does not implement build(); a temporal mechanism "
             "has to register its own sites and return its mean path"
+        )
+
+    # -- the decomposition contract (what .explain() reads) -------------------
+
+    def baseline_label(self) -> str:
+        """What to call the part of the forecast that is nobody's driver."""
+        return "Level and trend"
+
+    def factors(self, node: str, components: Mapping[str, Array]) -> tuple[str, ...] | None:
+        """The switchable pieces of this node's mean path, in composition order.
+
+        ``None``, the default, means this mechanism cannot be taken apart from its
+        own deterministics, so :meth:`~ergodic.forecast.ForecastResult.explain`
+        falls back to the replay engine: it zeroes a factor's sites in a copy of
+        the trace and forecasts again. A mechanism that *can* be decomposed
+        returns its factor keys instead, which costs no sampling at all.
+
+        The keys are :data:`SEASON` for the seasonal term and the design key for
+        each driver, ordered seasonality first and then drivers by name. The order
+        is what ``method="sequential"`` walks. An empty tuple is a real answer: it
+        says the whole mean path is baseline, which is what a pure diffusion curve
+        is.
+
+        Read the ``components`` rather than the mechanism's own settings, because
+        the question is what this *forecast* recorded, and a subclass that hides
+        its deterministics has to fall through to replay.
+        """
+        return None
+
+    def compose(
+        self,
+        node: str,
+        components: Mapping[str, Array],
+        posterior: Mapping[str, Array],
+        *,
+        active: Collection[str],
+    ) -> Array:
+        """The mean path with only ``active`` factors switched on, ``(S, T + H)``.
+
+        The identity elements are the pinned parameterization: a season switched
+        off is a factor of exactly one and an additive term of exactly zero, and a
+        driver switched off contributes zero. ``compose`` with every factor active
+        must reproduce the model's own ``mu`` deterministic, which is not an
+        assumption: :meth:`~ergodic.forecast.ForecastResult.explain` measures the
+        gap and reports it as ``closure_error``, so a composition rule that drifts
+        away from ``build`` shows up as a number rather than as silence.
+
+        ``posterior`` carries the fitted sites for a mechanism whose composition
+        needs a parameter as well as the recorded pieces (the reversion rate of a
+        mean-reverting level, say).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement compose(); a mechanism that "
+            "returns factors() has to be able to rebuild its own mean path"
         )
 
 

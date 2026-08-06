@@ -32,11 +32,18 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._mechanism import TemporalMechanism, auto_scaler, parent_path, require_pymc
+from .._mechanism import (
+    SEASON,
+    TemporalMechanism,
+    auto_scaler,
+    parent_path,
+    regression_keys,
+    require_pymc,
+)
 from .._scalers import Scaler
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     import numpy.typing as npt
 
@@ -131,6 +138,50 @@ class StructuralMechanism(TemporalMechanism):
         if self.scaler is not None:
             return self.scaler.fit(values)
         return auto_scaler(values)
+
+    # -- the decomposition ---------------------------------------------------
+
+    def factors(self, node: str, components: Mapping[str, Array]) -> tuple[str, ...] | None:
+        """Seasonality first, then one key per driver. ``None`` when nothing was recorded.
+
+        A forecast made by this mechanism records every piece it composed, so the
+        decomposition is exact and costs no sampling. A subclass that suppresses
+        the deterministics lands here with nothing to read and falls through to
+        the replay engine, which is the intended escape hatch rather than a
+        failure.
+        """
+        needed = (self.site(node, "mu"), self.site(node, "trend"))
+        if any(name not in components for name in needed):
+            return None
+        keys = regression_keys(node, components)
+        kind, _period = self.seasonal_form()
+        seasonal = kind is not None and self.site(node, "season_factor") in components
+        return ((SEASON,) if seasonal else ()) + keys
+
+    def compose(
+        self,
+        node: str,
+        components: Mapping[str, Array],
+        posterior: Mapping[str, Array],
+        *,
+        active: Collection[str],
+    ) -> Array:
+        """``(trend + active drivers + season) * season_factor``, per draw.
+
+        Switching a piece off sets it to its neutral value rather than
+        renormalizing anything: the additive terms go to zero and the
+        multiplicative factor to one. That is why the monthly form is written as
+        ``12 * softmax(raw)``, which is exactly one when ``raw`` is zero.
+        """
+        on = frozenset(active)
+        total = np.asarray(components[self.site(node, "trend")], dtype=np.float64)
+        for key in regression_keys(node, components):
+            if key in on:
+                total = total + np.asarray(components[self.site(node, f"reg_{key}")])
+        if SEASON in on:
+            total = total + np.asarray(components[self.site(node, "season")])
+            total = total * np.asarray(components[self.site(node, "season_factor")])
+        return np.asarray(total, dtype=np.float64)
 
     # -- the model -----------------------------------------------------------
 

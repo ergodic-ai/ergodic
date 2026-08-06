@@ -45,9 +45,10 @@ exists.
 
 from __future__ import annotations
 
-from ._backtest import BacktestFold, BacktestReport, backtest
+from ._attribution import Attribution, FactorContribution, NodeAttribution, Window, attribute
+from ._backtest import BacktestFold, BacktestReport, FoldDiagnostics, backtest
 from ._baselines import Drift, Naive, SeasonalNaive
-from ._facade import forecast, schedule
+from ._facade import Forecaster, forecast, forecast_model, schedule
 from ._fit import (
     FrozenParent,
     JointFit,
@@ -56,6 +57,7 @@ from ._fit import (
     NodeFit,
     NodeForecast,
     ParentColumn,
+    ReplayRecipe,
     align_draws,
     fit_joint,
     fit_node,
@@ -64,13 +66,17 @@ from ._fit import (
     in_sample_median,
     inject_futures,
     lag_align,
+    posterior_draws,
+    zero_sites,
 )
 from ._mechanism import (
+    SEASON,
     ScenarioMechanism,
     TemporalMechanism,
     assign_mechanisms,
     auto_scaler,
     infer_period,
+    regression_keys,
 )
 from ._metrics import (
     accuracy,
@@ -122,21 +128,27 @@ __all__ = [
     "FIT_STRATEGIES",
     "PROPORTION_RULES",
     "RECONCILE_METHODS",
+    "SEASON",
     "WEIGHT_RULES",
+    "Attribution",
     "BacktestFold",
     "BacktestReport",
     "Bass",
     "CausalOU",
     "Drift",
+    "FactorContribution",
     "FitStrategy",
+    "FoldDiagnostics",
     "ForecastModel",
     "ForecastResult",
+    "Forecaster",
     "FrozenParent",
     "IdentityScaler",
     "JointFit",
     "JointNode",
     "LogScaler",
     "Naive",
+    "NodeAttribution",
     "NodeDiagnostics",
     "NodeFit",
     "NodeForecast",
@@ -145,6 +157,7 @@ __all__ = [
     "ParentColumn",
     "PosteriorStore",
     "RatioScaler",
+    "ReplayRecipe",
     "Scaler",
     "ScenarioMechanism",
     "SeasonalNaive",
@@ -153,11 +166,13 @@ __all__ = [
     "StructuralMechanism",
     "TemporalMechanism",
     "TrainingSchedule",
+    "Window",
     "ZScoreScaler",
     "accuracy",
     "accuracy_full",
     "align_draws",
     "assign_mechanisms",
+    "attribute",
     "auto_scaler",
     "backtest",
     "bases",
@@ -170,6 +185,7 @@ __all__ = [
     "fit_node",
     "forecast",
     "forecast_joint",
+    "forecast_model",
     "forecast_node",
     "historical_shares",
     "in_sample_median",
@@ -184,7 +200,9 @@ __all__ = [
     "mcmc_node_count",
     "mint_weights",
     "node_roles",
+    "posterior_draws",
     "reconcile",
+    "regression_keys",
     "resolve_strategy",
     "rmse",
     "rolling_accuracy",
@@ -198,4 +216,5 @@ __all__ = [
     "split_lag",
     "validate_window_graph",
     "window_graph",
+    "zero_sites",
 ]

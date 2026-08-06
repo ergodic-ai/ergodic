@@ -21,13 +21,14 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     import numpy.typing as npt
     import pandas as pd
 
     from ..data import Hierarchy
     from ..graph import MixedGraph
+    from ._attribution import Attribution
 
 __all__ = ["FitStrategy", "ForecastResult", "coherence_gap"]
 
@@ -94,6 +95,15 @@ class ForecastResult:
     #: draws. A joint fit gives every node the same trace, which is what a joint
     #: fit is. ``None`` for a model that does no sampling.
     fits: Mapping[str, Any] | None = None
+    #: Per-node horizon views (a ``NodeForecast`` each): the predictive draws plus
+    #: every deterministic the forecasting model recorded, on the mechanism's own
+    #: scaled space. :meth:`explain` reads them, which is why an attribution on
+    #: the structural path costs no sampling at all.
+    views: Mapping[str, Any] | None = None
+    #: The label of each forecast step, when the data's index made it computable.
+    #: This is the axis a :class:`~ergodic.forecast.Window` resolves a date
+    #: against; ``start`` is its first entry.
+    index: tuple[Any, ...] | None = None
     #: Per-node sampler diagnostics, one record each (divergences, minimum bulk
     #: ESS, r-hat when there is more than one chain). A model that does no
     #: sampling leaves it None.
@@ -190,6 +200,64 @@ class ForecastResult:
         lo = np.percentile(draws, tail * 100.0, axis=0)
         hi = np.percentile(draws, (1.0 - tail) * 100.0, axis=0)
         return np.asarray(lo, dtype=np.float64), np.asarray(hi, dtype=np.float64)
+
+    # -- the decomposition ---------------------------------------------------
+
+    def explain(
+        self,
+        *,
+        windows: Any | None = None,
+        nodes: str | Sequence[str] | None = None,
+        method: str = "sequential",
+        reduce: str = "sum",
+        max_replays: int = 200,
+    ) -> Attribution:
+        """Take the forecast apart: baseline, seasonality, and one bar per driver.
+
+        Returns an :class:`~ergodic.forecast.Attribution`, one
+        :class:`~ergodic.forecast.NodeAttribution` per node and window, each a
+        waterfall whose bars carry posteriors and add up to the window's total.
+
+        Parameters
+        ----------
+        windows
+            One :class:`~ergodic.forecast.Window` or several. The default is a
+            single window over the whole horizon. A window's bounds are integer
+            steps or labels on the result's own time axis.
+        nodes
+            Which series to explain; every modelled one by default. A node that
+            is an aggregate of its children, or whose path was supplied through
+            ``scenario=``, has no model of its own and is refused by name.
+        method
+            ``"sequential"`` switches the factors on one at a time in composition
+            order, so each bar is what that factor added given the ones before
+            it. ``"loo"`` switches each one off from the full model instead and
+            books what no single factor owns as an ``Interaction`` bar. Both
+            close on the total; they answer different questions.
+        reduce
+            ``"sum"`` for a flow (units, revenue), ``"mean"`` for a rate.
+            Applied per draw over the window.
+        max_replays
+            The ceiling on posterior-predictive passes, which only a mechanism
+            that cannot decompose itself ever spends.
+
+        Notes
+        -----
+        The bars explain the model's **mean path**. The result's own draws also
+        carry observation noise, and on a reconciled result they carry whatever
+        the reconciliation moved, so ``total`` and ``forecast_total`` are both
+        reported rather than assumed equal.
+        """
+        from ._attribution import attribute
+
+        return attribute(
+            self,
+            windows=windows,
+            nodes=nodes,
+            method=method,
+            reduce=reduce,
+            max_replays=max_replays,
+        )
 
     # -- the hierarchy -------------------------------------------------------
 

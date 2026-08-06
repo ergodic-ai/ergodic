@@ -37,8 +37,9 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from ._protocol import ForecastModel
+    from ._result import ForecastResult
 
-__all__ = ["BacktestFold", "BacktestReport", "backtest"]
+__all__ = ["BacktestFold", "BacktestReport", "FoldDiagnostics", "backtest"]
 
 # Metrics where a bigger number is a better forecast. Everything else is an
 # error measure, so lower is better, except coverage, which is judged by how
@@ -85,6 +86,34 @@ def _cutoffs(
 
 
 @dataclass(frozen=True)
+class FoldDiagnostics:
+    """What the sampler reported over one fold, reduced to the two numbers that matter.
+
+    A backtest refits everything at every origin, so it is the one place a
+    sampling problem can hide behind a decent-looking score: an early fold that
+    barely converged still contributes its metrics. Carrying the worst
+    divergence share and the smallest effective sample size across the fold's
+    nodes puts that where it can be read, which is what
+    :attr:`BacktestFold.diagnostics` is for. It is information rather than a
+    verdict: nothing here fails a fold, exactly as a single fit warns and
+    continues.
+    """
+
+    n_nodes: int
+    divergences: int
+    max_divergence_share: float
+    min_ess: float
+    worst_node: str
+
+    def __repr__(self) -> str:
+        return (
+            f"FoldDiagnostics({self.n_nodes} node(s): worst divergence share "
+            f"{self.max_divergence_share:.2%}, min_ess={self.min_ess:.0f} on "
+            f"{self.worst_node})"
+        )
+
+
+@dataclass(frozen=True)
 class BacktestFold:
     """One train-test split: where it was cut, what was forecast, how it scored."""
 
@@ -97,6 +126,9 @@ class BacktestFold:
     fit_seed: int = 0
     forecast_seed: int = 0
     nodes_unscored: tuple[str, ...] = ()
+    #: The fold's sampler diagnostics, when the model carried any. ``None`` for a
+    #: model that does no sampling, which is every baseline.
+    diagnostics: FoldDiagnostics | None = None
 
     @property
     def nodes(self) -> tuple[str, ...]:
@@ -171,6 +203,42 @@ class BacktestReport:
                         }
                     )
         return pd.DataFrame(rows)
+
+    def diagnostics(self) -> pd.DataFrame:
+        """One row per fold: how the sampler behaved where the score came from.
+
+        Empty for a model that does no sampling. Read it beside
+        :meth:`summary`: a fold whose divergence share is high or whose effective
+        sample size is small is a fold whose metrics are worth less, and that is
+        invisible in the scores themselves.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "fold": fold.index,
+                "cutoff": fold.cutoff,
+                "n_nodes": fold.diagnostics.n_nodes,
+                "divergences": fold.diagnostics.divergences,
+                "max_divergence_share": fold.diagnostics.max_divergence_share,
+                "min_ess": fold.diagnostics.min_ess,
+                "worst_node": fold.diagnostics.worst_node,
+            }
+            for fold in self.folds
+            if fold.diagnostics is not None
+        ]
+        return pd.DataFrame(
+            rows,
+            columns=[
+                "fold",
+                "cutoff",
+                "n_nodes",
+                "divergences",
+                "max_divergence_share",
+                "min_ess",
+                "worst_node",
+            ],
+        )
 
     def compare(self, other: BacktestReport) -> pd.DataFrame:
         """This report against another, metric by metric, with the direction applied.
@@ -319,13 +387,16 @@ def backtest(
                 fit_seed=fit_seed,
                 forecast_seed=forecast_seed,
                 nodes_unscored=skipped,
+                diagnostics=_fold_diagnostics(result),
             )
         )
 
     nodes = tuple(folds[0].metrics)
     names: Sequence[str] = tuple(next(iter(folds[0].metrics.values())))
     return BacktestReport(
-        model=type(model).__name__,
+        # A model may name itself, which is what lets two configurations of one
+        # class sit in the same comparison table and be told apart.
+        model=str(getattr(model, "name", "") or type(model).__name__),
         mode=mode,
         test_size=test_size,
         level=level,
@@ -333,4 +404,29 @@ def backtest(
         nodes=nodes,
         metrics=tuple(names),
         nodes_unscored=tuple(unscored),
+    )
+
+
+def _fold_diagnostics(result: ForecastResult) -> FoldDiagnostics | None:
+    """Reduce a fold's per-node sampler records to one line, or ``None`` if it has none.
+
+    Read duck-typed rather than by import: this module has no engine dependency
+    and never should, and a diagnostics record is just a thing with a divergence
+    share and an effective sample size on it.
+    """
+    records = list((result.diagnostics or {}).values())
+    usable = [
+        record
+        for record in records
+        if hasattr(record, "divergence_share") and hasattr(record, "min_ess")
+    ]
+    if not usable:
+        return None
+    worst = min(usable, key=lambda record: float(record.min_ess))
+    return FoldDiagnostics(
+        n_nodes=len(usable),
+        divergences=int(sum(int(record.divergences) for record in usable)),
+        max_divergence_share=float(max(float(record.divergence_share) for record in usable)),
+        min_ess=float(worst.min_ess),
+        worst_node=str(getattr(worst, "node", "")),
     )

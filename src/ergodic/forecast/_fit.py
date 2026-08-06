@@ -51,6 +51,7 @@ __all__ = [
     "NodeFit",
     "NodeForecast",
     "ParentColumn",
+    "ReplayRecipe",
     "align_draws",
     "fit_joint",
     "fit_node",
@@ -59,6 +60,8 @@ __all__ = [
     "in_sample_median",
     "inject_futures",
     "lag_align",
+    "posterior_draws",
+    "zero_sites",
 ]
 
 #: A divergence share above this fraction of the draws earns a warning.
@@ -161,19 +164,44 @@ class NodeFit:
 
 
 @dataclass(frozen=True)
+class ReplayRecipe:
+    """Everything :func:`forecast_node` needs to run one forecast again, unchanged.
+
+    A replay attribution zeroes a factor's sites in a copy of the trace and asks
+    for the same forecast back, so it has to be able to reproduce the call: the
+    same horizon, the same driver paths, the same handoffs, and above all the
+    same seed. With the seed held the fresh innovations come out identical, so
+    differencing two replays leaves the factor's effect and nothing else, rather
+    than the factor's effect plus a new draw of the noise.
+
+    ``None`` on a :class:`NodeForecast` means the forecast cannot be reproduced
+    on its own, which is what a joint fit is: one predictive pass produces every
+    node at once, and there is no per-node call to repeat.
+    """
+
+    horizon: int
+    seed: int
+    parents: Mapping[str, Array] = field(default_factory=dict)
+    frozen: tuple[FrozenParent, ...] = ()
+
+
+@dataclass(frozen=True)
 class NodeForecast:
     """One node's horizon: predictive draws in the data's own units, plus the pieces.
 
     ``draws`` is ``(S, H)`` on the original scale. ``components`` holds the
     model's deterministics (the trend, the season, the regression, one array per
     driver) as they came out of the posterior-predictive pass, on the scaled
-    space the mechanism works in. The attribution sprint reads them; nothing else
-    does yet.
+    space the mechanism works in. :meth:`ForecastResult.explain` reads them, which
+    is what makes an attribution cost no sampling on the structural path.
+    ``replay`` is the recipe for running this same forecast again, which is what
+    the fallback path needs.
     """
 
     node: str
     draws: Array
     components: Mapping[str, Array]
+    replay: ReplayRecipe | None = None
 
 
 # -- the lag-shift design -----------------------------------------------------
@@ -425,6 +453,15 @@ def forecast_node(
         else dict(fit.parents)
     )
     t_len = fit.n_obs
+    # Capture the recipe before the handoffs turn their columns into tensors of
+    # this model: what a replay needs is the data paths plus the handoffs
+    # themselves, from which the tensors get rebuilt exactly the same way.
+    recipe = ReplayRecipe(
+        horizon=int(horizon),
+        seed=int(seed),
+        parents={key: np.asarray(value, dtype=np.float64) for key, value in paths.items()},
+        frozen=handoffs,
+    )
     with pm.Model() as model:
         for handoff in handoffs:
             # The prior here is never used: the audit below refuses to run the
@@ -471,6 +508,7 @@ def forecast_node(
         node=fit.node,
         draws=np.asarray(fit.scaler.inverse(scaled_draws), dtype=np.float64),
         components=components,
+        replay=recipe,
     )
 
 
@@ -509,6 +547,47 @@ def inject_futures(trace: Any, futures: Mapping[str, Array]) -> Any:
             array.reshape(n_chain, n_draw, int(array.shape[1])),
         )
     return augmented
+
+
+def zero_sites(trace: Any, names: Iterable[str]) -> Any:
+    """Set the named sites to zero in a copy of a trace, leaving everything else alone.
+
+    This is how the replay engine switches a factor off. Zero is the neutral
+    value by construction under the pinned parameterization: a coefficient of
+    zero contributes nothing, and a zeroed ``season_raw`` gives
+    ``12 * softmax(0)``, which is exactly one, so the seasonal factor lands on
+    its identity rather than near it. The Fourier form is additive, so zeroing
+    its coefficients removes the term outright.
+
+    The trace handed in is never touched. A name that is not in the posterior
+    raises, because silently zeroing nothing would hand back a bar of zero for a
+    factor that is still fully switched on.
+    """
+    import xarray as xr
+
+    posterior = _posterior_of(trace)
+    wanted = list(dict.fromkeys(str(name) for name in names))
+    missing = [name for name in wanted if name not in posterior.data_vars]
+    if missing:
+        raise KeyError(
+            f"the trace has no site(s) {missing}, so they cannot be zeroed; it holds "
+            f"{sorted(str(name) for name in posterior.data_vars)}"
+        )
+    augmented = posterior.copy()
+    for name in wanted:
+        augmented[name] = xr.zeros_like(posterior[name])
+    return augmented
+
+
+def posterior_draws(trace: Any) -> dict[str, Array]:
+    """Every posterior site as ``(S, ...)`` draws, the chains stacked onto one axis.
+
+    The flat view a decomposition reads: a mechanism whose composition rule needs
+    a fitted parameter as well as the recorded pieces looks it up here by site
+    name.
+    """
+    posterior = _posterior_of(trace)
+    return {str(name): _flatten_draws(posterior[name]) for name in posterior.data_vars}
 
 
 def in_sample_median(

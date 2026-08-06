@@ -31,6 +31,7 @@ and it is deliberate: the facade is what people reach for.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -69,7 +70,7 @@ if TYPE_CHECKING:
 
     Array = npt.NDArray[np.float64]
 
-__all__ = ["forecast", "schedule"]
+__all__ = ["Forecaster", "forecast", "forecast_model", "schedule"]
 
 #: Fitting strategies that reach the independent per-series path.
 _INDEPENDENT_FITS = ("auto", "independent")
@@ -433,17 +434,20 @@ def _assemble(
     schedule: TrainingSchedule | None = None,
 ) -> ForecastResult:
     """Wrap the draws in a result, and reconcile the levels when there is a hierarchy."""
+    index = _horizon_index(data, horizon)
     if not isinstance(data, HierarchicalTSData):
         return ForecastResult(
             series=series,
             horizon=horizon,
             kind="draws",
-            start=_next_label(data),
+            start=index[0] if index else None,
             mechanisms=assigned,
             graph=graph,
             schedule=schedule,
             strategy=strategy,
             fits=dict(fits),
+            views=dict(views),
+            index=index,
             diagnostics=diagnostics,
         )
 
@@ -453,12 +457,14 @@ def _assemble(
         series={node: series[node] for node in _hierarchy_order(tree, tuple(series))},
         horizon=horizon,
         kind="draws",
-        start=_next_label(data),
+        start=index[0] if index else None,
         mechanisms=assigned,
         graph=graph,
         schedule=schedule,
         strategy=strategy,
         fits=dict(fits),
+        views=dict(views),
+        index=index,
         diagnostics=diagnostics,
         # Always, not only when MinT-shrink asks: it costs one median over draws
         # of a path the predictive pass already produced, and carrying it is what
@@ -595,20 +601,134 @@ def _residual_variance(
     return out
 
 
-def _next_label(data: TimeSeriesData) -> Any:
-    """The time label one step past the end of the data, or ``None`` when unclear.
+@dataclass(frozen=True)
+class Forecaster:
+    """The facade as a model the backtester can drive.
 
-    The step is the median spacing of the index, which is right for a regular
-    series and honest about being a guess for anything else.
+    :func:`forecast` fits and forecasts in one call, and
+    :class:`~ergodic.forecast.ForecastModel` splits those in two, so this holds
+    the configuration and the training data between them. Everything
+    :func:`forecast` accepts except ``data`` and ``horizon`` goes in ``options``
+    and is passed through unchanged.
+
+    The seed discipline lines up with the harness's own by construction. A fold
+    fits at ``seed + fold`` and forecasts at ``seed + 1000 + fold``; this reads
+    the fit seed, and the facade derives each node's predictive seed as that node's
+    fit seed plus a thousand. So a single-series backtest's recorded
+    ``forecast_seed`` is exactly the seed the predictive pass ran on, and a
+    multi-series one keeps the same offset per node.
+    """
+
+    options: Mapping[str, Any] = field(default_factory=dict)
+    name: str = "Forecaster"
+    data: TimeSeriesData | None = field(default=None, repr=False)
+    seed: int = 0
+
+    def fit(self, data: TimeSeriesData, *, seed: int = 0) -> Forecaster:
+        """Take the training window and the fold's seed; nothing samples yet."""
+        if not isinstance(data, TimeSeriesData):
+            raise TypeError(
+                f"a Forecaster fits a TimeSeriesData (or a HierarchicalTSData), got "
+                f"{type(data).__name__}"
+            )
+        return replace(self, data=data, seed=int(seed))
+
+    def forecast(self, horizon: int, *, seed: int = 0) -> ForecastResult:
+        """Fit the stored window and continue it ``horizon`` steps.
+
+        The ``seed`` argument is part of the protocol and is deliberately not
+        read: this model does its fitting here, so the seed that matters is the
+        one :meth:`fit` was given, and the predictive pass runs at that seed plus
+        a thousand per node, which is the same convention the harness uses.
+        """
+        if self.data is None:
+            raise ValueError("this Forecaster is not fitted; call fit(data) first")
+        return forecast(self.data, horizon, seed=self.seed, **dict(self.options))
+
+    def __repr__(self) -> str:
+        body = ", ".join(f"{key}={value!r}" for key, value in sorted(self.options.items()))
+        return f"{self.name}({body})"
+
+
+def forecast_model(*, name: str = "Forecaster", **options: Any) -> Forecaster:
+    """The Bayesian forecaster as a backtestable model: configuration now, data later.
+
+    ``backtest(forecast_model(mechanisms=..., draws=300), data, test_size=6)`` is
+    the whole pattern. Every keyword :func:`forecast` takes except ``data`` and
+    ``horizon`` is accepted here and passed through, and a keyword it does not
+    take is refused now rather than at the first fold, which matters when a fold
+    costs a NUTS run.
+
+    ``name`` is what the backtest report calls it, so two configurations of the
+    same model can be told apart in one table.
+    """
+    import inspect
+
+    allowed = {
+        key
+        for key, value in inspect.signature(forecast).parameters.items()
+        if key not in ("data", "horizon") and value.kind is not value.VAR_KEYWORD
+    }
+    unknown = sorted(set(options) - allowed)
+    if unknown:
+        raise TypeError(f"forecast() takes no argument(s) {unknown}; it accepts {sorted(allowed)}")
+    return Forecaster(options=dict(options), name=name)
+
+
+def _horizon_index(data: TimeSeriesData, horizon: int) -> tuple[Any, ...] | None:
+    """The label of every forecast step, or ``None`` when the index does not imply one.
+
+    Two rules, and the first one is better. When the dataset declares a ``freq``,
+    the labels are that calendar offset stepped forward, so month-ends stay
+    month-ends. Without one the step is the median spacing of the index, which is
+    right for a regular series and drifts on a calendar (a month is not a fixed
+    number of days), so a dataset built with ``timeseries(frame, time=...,
+    freq="ME")`` gets labels a date window can be trusted against and one built
+    without still gets something readable.
     """
     times = np.asarray(data.times)
     if times.size < 2:
         return None
+    steps = np.arange(1, int(horizon) + 1)
+    if data.freq and times.dtype.kind == "M":
+        labels = _calendar_index(times[-1], data.freq, int(horizon))
+        if labels is not None:
+            return labels
     if times.dtype.kind == "M":
         seconds = times.astype("datetime64[s]").astype(np.int64)
         step = int(np.median(np.diff(seconds)))
-        return times[-1].astype("datetime64[s]") + np.timedelta64(step, "s")
+        last = times[-1].astype("datetime64[s]")
+        return tuple(last + np.timedelta64(step, "s") * int(k) for k in steps)
     if times.dtype.kind in "iuf":
         values = times.astype(np.float64)
-        return values[-1] + float(np.median(np.diff(values)))
+        step_size = float(np.median(np.diff(values)))
+        return tuple(float(values[-1]) + step_size * int(k) for k in steps)
     return None
+
+
+def _calendar_index(last: Any, freq: str, horizon: int) -> tuple[Any, ...] | None:
+    """``horizon`` labels past ``last`` on the calendar offset ``freq``, or ``None``.
+
+    ``None`` when pandas cannot read the frequency string, in which case the
+    caller falls back to plain spacing rather than raising: a label is a
+    convenience for reading a window, not something worth failing a forecast
+    over.
+    """
+    import pandas as pd
+
+    try:
+        offset = pd.tseries.frequencies.to_offset(freq)
+    except (ValueError, TypeError):
+        return None
+    if offset is None:
+        return None
+    origin = pd.Timestamp(last)
+    return tuple(
+        np.datetime64((origin + offset * step).to_datetime64()) for step in range(1, horizon + 1)
+    )
+
+
+def _next_label(data: TimeSeriesData) -> Any:
+    """The time label one step past the end of the data, or ``None`` when unclear."""
+    index = _horizon_index(data, 1)
+    return index[0] if index else None
