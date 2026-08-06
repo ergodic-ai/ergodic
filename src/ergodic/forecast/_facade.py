@@ -186,11 +186,20 @@ def forecast(
                 "to reconcile across levels."
             )
     else:
-        # Both checks happen before anything samples: neither a typo nor a tree
-        # this pillar cannot reconcile should cost five NUTS runs first.
+        # All three checks happen before anything samples: neither a typo, nor a
+        # tree this pillar cannot reconcile, nor a leaf nothing will forecast
+        # should cost five NUTS runs first.
         _require_sum(data.hierarchy)
         if reconcile is not None and reconcile not in RECONCILE_METHODS:
             raise ValueError(f"reconcile must be one of {RECONCILE_METHODS}, got {reconcile!r}")
+        modelless = [leaf for leaf in data.hierarchy.leaves if leaf not in data.variables]
+        if modelless:
+            raise ValueError(
+                f"the hierarchy's leaves {modelless} are not modelled columns of this dataset, "
+                "and a leaf has no children to be aggregated from, so nothing would forecast "
+                "them. Include the columns (an excluded column is not modelled) or build the "
+                "hierarchy without those leaves."
+            )
 
     nodes = data.variables
     if not nodes:

@@ -394,6 +394,19 @@ def test_flat_data_refuses_a_strategy() -> None:
         forecast(data, 3, weights="mint_shrink", draws=10, warmup=10)
 
 
+def test_a_leaf_nothing_will_model_is_refused_before_sampling() -> None:
+    """A leaf that is not a modelled column has no children to be summed from either.
+
+    The reachable way in is an excluded column: ``hts`` checks the leaves against
+    the frame, and the schema can still drop one afterwards. Without this the run
+    would sample every other node and then fail on a missing key.
+    """
+    columns = world_h1(WORLD_SEED, 24)
+    data = hts(columns, time="month", hierarchy=FLAT_TREE, exclude=["leaf_d"])
+    with pytest.raises(ValueError, match="not modelled columns"):
+        forecast(data, 3, draws=10, warmup=10)
+
+
 def test_a_gap_in_the_tree_names_the_gap() -> None:
     """Criterion 11: a result that does not cover the hierarchy raises and lists what is missing."""
     result = synthetic_draws()
