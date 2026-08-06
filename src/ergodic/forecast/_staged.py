@@ -69,16 +69,32 @@ if TYPE_CHECKING:
     Array = npt.NDArray[np.float64]
 
 __all__ = [
+    "AUTO_JOINT_MAX_NODES",
+    "FIT_STRATEGIES",
     "NodeState",
     "PosteriorStore",
     "StagedRun",
     "build_schedule",
     "design_keys",
+    "mcmc_node_count",
     "node_roles",
     "resolve_scenarios",
+    "resolve_strategy",
     "run_joint",
     "run_staged",
 ]
+
+#: Every value ``fit=`` takes.
+FIT_STRATEGIES = ("auto", "independent", "staged", "joint")
+
+#: ``fit="auto"`` fits a graph jointly at or below this many modeled nodes.
+#:
+#: The joint model keeps the posterior correlation between nodes, and it costs one
+#: sampler over everything at once. Four is where that stops being the cheaper
+#: trade on the models this pillar fits; past it, staging is what makes a graph
+#: affordable, and what it drops is the between-node correlation rather than the
+#: handoff.
+AUTO_JOINT_MAX_NODES = 4
 
 #: The suffix that separates the extra lags of a parent that drives at several.
 _LAG_SUFFIX = "_lag"
@@ -329,6 +345,35 @@ def _one_path(node: str, value: Any, data: TimeSeriesData, horizon: int) -> Arra
     return array
 
 
+def mcmc_node_count(roles: Mapping[str, NodeRole]) -> int:
+    """How many nodes a sampler will have to fit, which is what ``fit="auto"`` reads.
+
+    Read off the roles rather than off the schedule, because the schedule needs to
+    know which strategy is running before it can be built (a joint plan lifts the
+    hierarchy rule that a staged one enforces) and the count cannot wait for it.
+    Every ``MODEL`` node lands in exactly one MCMC stage, so the two agree.
+    """
+    return sum(1 for role in roles.values() if role is NodeRole.MODEL)
+
+
+def resolve_strategy(requested: str, graph: MixedGraph | None, n_mcmc: int) -> str:
+    """Turn ``fit=`` into the strategy that will actually run.
+
+    ``"auto"`` is independent without a graph (with nothing shared, a joint model
+    is a bigger sampler for the same answer), and with one it is joint at or under
+    :data:`AUTO_JOINT_MAX_NODES` modeled nodes and staged above it.
+    """
+    if requested not in FIT_STRATEGIES:
+        raise ValueError(f"fit must be one of {FIT_STRATEGIES}, got {requested!r}")
+    if requested != "auto":
+        return requested
+    if graph is None:
+        # Staged over an empty graph is one independent fit per node, which is what
+        # this reduces to; it is spelled "staged" so the scenario path has a home.
+        return "staged"
+    return "joint" if n_mcmc <= AUTO_JOINT_MAX_NODES else "staged"
+
+
 def build_schedule(
     data: TimeSeriesData,
     graph: MixedGraph | None,
@@ -337,12 +382,15 @@ def build_schedule(
     given: Mapping[str, TemporalMechanism] | None = None,
     scenario: Mapping[str, Any] | None = None,
     hierarchy: Hierarchy | None = None,
+    fit: str = "auto",
     max_batch_size: int = 1,
-) -> tuple[TrainingSchedule, dict[str, NodeRole]]:
-    """Roles from the mechanisms, then the schedule from the graph. The order of every run.
+) -> tuple[TrainingSchedule, dict[str, NodeRole], str]:
+    """Roles, then the strategy, then the schedule. The order of every run.
 
-    Returns both, because everything downstream needs the roles too and computing
-    them twice is how the two would drift apart.
+    All three come back, because the strategy is what decides one of the
+    schedule's own rules (a joint plan may carry a hierarchy parent that models
+    itself, a staged plan may not), and because everything downstream needs the
+    roles. Computing any of them twice is how two of them drift apart.
     """
     roles = node_roles(
         data,
@@ -352,9 +400,16 @@ def build_schedule(
         scenario=scenario,
         hierarchy=hierarchy,
     )
+    strategy = resolve_strategy(fit, graph, mcmc_node_count(roles))
     checked = None if graph is None else validate_window_graph(graph)
-    plan = TrainingSchedule.from_graph(checked, hierarchy, roles, max_batch_size=max_batch_size)
-    return plan, roles
+    plan = TrainingSchedule.from_graph(
+        checked,
+        hierarchy,
+        roles,
+        max_batch_size=max_batch_size,
+        staged=strategy != "joint",
+    )
+    return plan, roles, strategy
 
 
 def _graph_parents(graph: MixedGraph | None) -> dict[str, tuple[tuple[str, int], ...]]:

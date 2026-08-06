@@ -668,6 +668,73 @@ def test_staged_fitting_composes_with_bottom_up_reconciliation() -> None:
 # -- the pieces, on their own -------------------------------------------------
 
 
+def test_a_hierarchy_parent_with_its_own_column_is_a_joint_fit() -> None:
+    """A modeled parent is a staging limit, not a graph limit, and the message says which.
+
+    Staged fitting adds the aggregates up last, so a parent that carries its own
+    model has no wave it could run in. A joint fit has no waves at all, so it
+    fits the parent and its children together and the reconciliation menu applies
+    to the result afterwards exactly as it does on the independent path. The
+    refusal names that way out, and this checks the way out actually works rather
+    than only that the sentence exists.
+    """
+    n, train, horizon = 44, 36, 3
+    tree = Hierarchy.tree({"total": ["leaf_a", "leaf_b"]})
+    driver, first = d1_world(3301, n)
+    _, second = d1_world(3302, n)
+    stamps = np.array(
+        [np.datetime64("2016-01-01") + np.timedelta64(31 * i, "D") for i in range(train)]
+    )
+    columns: dict[str, Any] = {
+        "month": stamps,
+        "pmi": driver[:train],
+        "leaf_a": first[:train],
+        "leaf_b": (0.7 * second)[:train],
+    }
+    columns["total"] = columns["leaf_a"] + columns["leaf_b"]
+    data = hts(columns, time="month", hierarchy=tree)
+    graph = window_graph([("pmi", "leaf_a", 1)])
+
+    for fit in ("staged", "joint"):
+        with pytest.raises(ValueError, match="hierarchy parent with role model") as raised:
+            schedule(data, graph, fit="staged")
+        assert "fit='joint'" in str(raised.value)
+        if fit == "staged":
+            with pytest.raises(ValueError, match="hierarchy parent with role model"):
+                forecast(data, horizon, graph=graph, fit="staged", draws=10, warmup=10)
+
+    # The advice is real: the joint plan carries the parent as a model node.
+    plan = schedule(data, graph, fit="joint")
+    assert set(plan.all_nodes) == {"pmi", "leaf_a", "leaf_b", "total"}
+    assert plan.num_mcmc_stages == 4
+
+    result = forecast_or_skip(
+        data, horizon, graph=graph, fit="joint", draws=150, warmup=150, seed=1
+    )
+    assert result.strategy is not None
+    assert result.strategy.strategy == "joint"
+    assert result.fits is not None
+    assert "total" in result.fits, "the parent was aggregated rather than modeled"
+    assert result.coherence_error(tree) <= 1e-8
+    assert result.coherent is True
+
+    # And the parent really was fitted on its own: its unreconciled draws
+    # disagree with its children's sum, which is the disagreement reconciliation
+    # exists to settle. An aggregated parent could not disagree at all.
+    unreconciled = forecast_or_skip(
+        data,
+        horizon,
+        graph=graph,
+        fit="joint",
+        reconcile="none",
+        draws=150,
+        warmup=150,
+        seed=1,
+    )
+    assert unreconciled.coherent is False
+    assert unreconciled.coherence_error(tree) > 1e-6
+
+
 def test_both_strategies_are_bitwise_deterministic() -> None:
     """The same call twice gives the same draws, handoff and all.
 

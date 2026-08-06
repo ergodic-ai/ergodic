@@ -46,7 +46,15 @@ from ._reconcile import (
 )
 from ._reconcile import reconcile as reconcile_result
 from ._result import FitStrategy, ForecastResult
-from ._staged import build_schedule, resolve_scenarios, run_joint, run_staged
+from ._staged import (
+    AUTO_JOINT_MAX_NODES,
+    FIT_STRATEGIES,
+    build_schedule,
+    mcmc_node_count,
+    resolve_scenarios,
+    run_joint,
+    run_staged,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -67,18 +75,8 @@ __all__ = ["forecast", "schedule"]
 _INDEPENDENT_FITS = ("auto", "independent")
 #: Strategies that read the graph.
 _GRAPH_FITS = ("staged", "joint")
-#: Every value ``fit=`` takes.
-_FIT_STRATEGIES = ("auto", "independent", "staged", "joint")
 #: The strategies that read the training window for their shares.
 _NEEDS_DATA = ("top_down", "middle_out")
-#: ``fit="auto"`` fits a graph jointly at or below this many modeled nodes.
-#:
-#: The joint model keeps the posterior correlation between nodes, and it costs
-#: one sampler over everything at once. Four is where that stops being the
-#: cheaper trade on the models this pillar fits; past it, staging is what makes a
-#: graph affordable, and what it drops is the between-node correlation rather
-#: than the handoff.
-AUTO_JOINT_MAX_NODES = 4
 
 
 def forecast(
@@ -199,8 +197,8 @@ def forecast(
         )
     if int(horizon) < 1:
         raise ValueError(f"horizon must be >= 1, got {horizon}")
-    if fit not in _FIT_STRATEGIES:
-        raise ValueError(f"fit must be one of {_FIT_STRATEGIES}, got {fit!r}")
+    if fit not in FIT_STRATEGIES:
+        raise ValueError(f"fit must be one of {FIT_STRATEGIES}, got {fit!r}")
     if graph is None and fit in _GRAPH_FITS and scenario is None:
         raise ValueError(
             f"fit={fit!r} is about several series reading each other, and no graph says "
@@ -344,13 +342,14 @@ def _through_the_graph(
     is really an intervention, a driver whose future nobody supplied, a hierarchy
     parent that wants its own model under staged fitting.
     """
-    plan, roles = build_schedule(
+    plan, roles, chosen = build_schedule(
         data,
         graph,
         assigned,
         given=given,
         scenario=scenario,
         hierarchy=tree,
+        fit=requested,
     )
     paths = resolve_scenarios(
         data,
@@ -360,14 +359,7 @@ def _through_the_graph(
         roles=roles,
         scenario=scenario,
     )
-    n_mcmc = sum(len(stage.nodes) for stage in plan.mcmc_stages)
-    if requested == "auto":
-        # With no graph there is nothing for a joint model to share, so staging
-        # (which is then one independent fit per node) is the cheaper identical
-        # answer.
-        chosen = "joint" if graph is not None and n_mcmc <= AUTO_JOINT_MAX_NODES else "staged"
-    else:
-        chosen = requested
+    n_mcmc = mcmc_node_count(roles)
 
     run: StagedRun
     if chosen == "joint":
@@ -492,6 +484,7 @@ def schedule(
     mechanisms: Mapping[str, TemporalMechanism] | None = None,
     *,
     scenario: Mapping[str, Any] | None = None,
+    fit: str = "auto",
 ) -> TrainingSchedule:
     """The plan :func:`forecast` would follow, without fitting anything.
 
@@ -504,9 +497,13 @@ def schedule(
 
     It refuses everything the forecast would refuse about the *structure*: a
     graph naming a column that is not there, a hierarchy parent that wants its
-    own model, a model node reading an aggregate, nodes that drive each other in
-    a loop. What it cannot see is anything about the horizon, so a missing
-    scenario path is still the forecast's to catch.
+    own model under staged fitting, a model node reading an aggregate, nodes that
+    drive each other in a loop. What it cannot see is anything about the horizon,
+    so a missing scenario path is still the forecast's to catch.
+
+    ``fit`` matters here for one reason: a joint plan may carry a hierarchy
+    parent that models itself and a staged plan may not, so passing the same
+    ``fit`` the forecast will get is what makes this the plan that actually runs.
     """
     if not isinstance(data, TimeSeriesData):
         raise TypeError(
@@ -515,13 +512,14 @@ def schedule(
         )
     tree = data.hierarchy if isinstance(data, HierarchicalTSData) else None
     assigned = assign_mechanisms(data, mechanisms)
-    plan, _roles = build_schedule(
+    plan, _roles, _strategy = build_schedule(
         data,
         graph,
         assigned,
         given=mechanisms,
         scenario=scenario,
         hierarchy=tree,
+        fit=fit,
     )
     return plan
 

@@ -781,11 +781,19 @@ def _audit_sites(model: Any, trace: Any, *, injected: Iterable[str] = ()) -> Non
     the trace, and it flips rule 3 into rule 1 for exactly those names: a
     ``{base}_fc`` that was injected has to be there, at the right shape, because
     being replayed is the point of it. Every other ``_fc`` site stays
-    required-fresh. The two sets come from one place (the frozen parents the
-    forecast model was built from), so they cannot drift apart: a handoff the
-    caller forgot to write would be a name declared, not injected, and rule 2
-    would let it sample from its prior, which is why the caller never assembles
-    this list by hand.
+    required-fresh.
+
+    **That is a caller invariant, and it is the one thing here that can be
+    undone from outside.** :func:`forecast_node` derives the declared sites and
+    the injected list from the same tuple of :class:`FrozenParent` records, in
+    one pass, which is what makes them impossible to disagree. Anyone who
+    separates the two (declaring a site in one place and assembling the injected
+    names in another) re-opens exactly the hole this function exists to close: a
+    handoff that was declared but not written would be a ``_fc`` name absent from
+    both the trace and this list, rule 2 would wave it through as
+    required-fresh, and the child would forecast against a driver drawn from a
+    standard normal prior without anything saying so. Never build this list by
+    hand.
     """
     posterior = _posterior_of(trace)
     held = {str(name): tuple(int(s) for s in posterior[name].shape[2:]) for name in posterior}

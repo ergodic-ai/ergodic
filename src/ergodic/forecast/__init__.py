@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from ._backtest import BacktestFold, BacktestReport, backtest
 from ._baselines import Drift, Naive, SeasonalNaive
-from ._facade import AUTO_JOINT_MAX_NODES, forecast, schedule
+from ._facade import forecast, schedule
 from ._fit import (
     FrozenParent,
     JointFit,
@@ -56,11 +56,13 @@ from ._fit import (
     NodeFit,
     NodeForecast,
     ParentColumn,
+    align_draws,
     fit_joint,
     fit_node,
     forecast_joint,
     forecast_node,
     in_sample_median,
+    inject_futures,
     lag_align,
 )
 from ._mechanism import (
@@ -102,12 +104,22 @@ from ._reconcile import (
 from ._result import FitStrategy, ForecastResult
 from ._scalers import IdentityScaler, LogScaler, RatioScaler, Scaler, ZScoreScaler
 from ._schedule import NodeRole, Stage, StageStrategy, TrainingSchedule
-from ._staged import NodeState, PosteriorStore, design_keys, node_roles
+from ._staged import (
+    AUTO_JOINT_MAX_NODES,
+    FIT_STRATEGIES,
+    NodeState,
+    PosteriorStore,
+    design_keys,
+    mcmc_node_count,
+    node_roles,
+    resolve_strategy,
+)
 from ._structure import bases, max_lag, split_lag, validate_window_graph, window_graph
 from .mechanisms import Bass, CausalOU, StructuralMechanism
 
 __all__ = [
     "AUTO_JOINT_MAX_NODES",
+    "FIT_STRATEGIES",
     "PROPORTION_RULES",
     "RECONCILE_METHODS",
     "WEIGHT_RULES",
@@ -144,6 +156,7 @@ __all__ = [
     "ZScoreScaler",
     "accuracy",
     "accuracy_full",
+    "align_draws",
     "assign_mechanisms",
     "auto_scaler",
     "backtest",
@@ -161,15 +174,18 @@ __all__ = [
     "historical_shares",
     "in_sample_median",
     "infer_period",
+    "inject_futures",
     "lag_align",
     "mae",
     "mape",
     "mape_full",
     "mase",
     "max_lag",
+    "mcmc_node_count",
     "mint_weights",
     "node_roles",
     "reconcile",
+    "resolve_strategy",
     "rmse",
     "rolling_accuracy",
     "rolling_accuracy_3",
