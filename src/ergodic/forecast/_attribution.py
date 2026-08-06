@@ -47,7 +47,7 @@ from ._fit import forecast_node, posterior_draws, zero_sites
 from ._mechanism import SEASON
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     import numpy.typing as npt
     import pandas as pd
