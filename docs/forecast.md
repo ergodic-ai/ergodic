@@ -146,6 +146,8 @@ trusted = reconcile(raw, tree, method="mint", trust={"total": 10.0})
 
 The workflow that follows from all this is `forecast(..., reconcile="none")` once and then `reconcile(result, tree, method=...)` as often as you like. A reconciled result cannot be un-reconciled, because bottom-up overwrites the parents' draws with the sum, which is the point.
 
+Note the difference between the string `"none"` and the default, which is `None`. The default means "whatever suits the data": bottom-up when the data is hierarchical, and nothing at all when it is flat. The string is a request, and a request only makes sense where there is a hierarchy to reconcile, so any explicit `reconcile=` on flat data raises rather than being ignored.
+
 ## Drivers, scenarios, and what is not an intervention
 
 Give `forecast` a window graph and the series stop being independent.
@@ -204,7 +206,9 @@ schedule(flat, window_graph([("promo", "retail", 0)]), scenario={"promo": plan})
 
 One more difference is worth knowing because it looks like a bug and is not. Staged regresses a child on its parent's *observed* history; joint regresses it on the parent's *latent mean path*. When the driver's own mechanism cannot represent the driver's movement, those are different estimands and the coefficients differ. A near-white-noise driver gets read as observation noise by its own trend model, so the mean path it hands the joint model is smoothed and the child's coefficient rises to compensate. Staged is stable across that whole range because it never smooths.
 
-Two shapes are refused rather than approximated: a node that reads a hierarchy aggregate under staged fitting, and two nodes that drive each other. The second needs a joint multivariate mechanism, which is future work; the refusal says so.
+There is one more thing joint can do that staged cannot, and it is not a matter of taste. A hierarchy parent that carries its own column wants to be modelled *and* to be the sum of its children. Under staged fitting the aggregates are added up last, so a parent that models itself has no wave to run in and is refused, with the three ways out named: fit it jointly, drop the parent's column, or forecast without the graph and reconcile afterwards. One model over every node has no wave order to violate, so it fits a parent and its children together quite happily, and the reconciliation menu then applies to the result exactly as before.
+
+Two shapes are refused whichever way you fit: a node that reads a hierarchy aggregate as a driver, and two nodes that drive each other. The second needs a joint multivariate mechanism, which is future work; the refusal says so.
 
 ## Backtesting
 
