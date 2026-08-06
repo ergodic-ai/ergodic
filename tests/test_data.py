@@ -12,9 +12,11 @@ import pandas as pd
 import pytest
 
 from ergodic.data import (
+    HierarchicalTSData,
     Hierarchy,
     Ordinal,
     SchemaInferenceWarning,
+    TimeSeriesData,
     event_log,
     hts,
     panel,
@@ -209,6 +211,38 @@ def test_take_validates_positions() -> None:
     with pytest.raises(ValueError, match="one-dimensional"):
         ds.take([[0, 1]])  # type: ignore[list-item]
     assert ds.take([]).n_rows == 0
+
+
+def test_take_keeps_the_shape_it_was_called_on() -> None:
+    """A prefix of a time series is still a time series, hierarchy and all.
+
+    The backtester slices its training folds with ``take``, so the subclass,
+    the index columns, the frequency, and the hierarchy all have to survive.
+    """
+    times = np.arange(12)
+    series = timeseries(
+        {"t": times, "y": np.arange(12.0), "label": ["a", "b"] * 6}, time="t", freq="MS"
+    )
+    prefix = series.take(np.arange(8))
+    assert type(prefix) is TimeSeriesData
+    assert (prefix.time, prefix.freq) == ("t", "MS")
+    assert prefix.schema == series.schema
+    assert prefix.variables == series.variables
+    assert prefix.n_rows == 8
+    assert prefix.times.tolist() == list(range(8))
+    assert prefix.codes("label").tolist() == [0, 1] * 4
+
+    north, south = np.arange(12.0), np.arange(12.0) * 2.0
+    tree = hts(
+        {"t": times, "north": north, "south": south, "total": north + south},
+        time="t",
+        hierarchy=Hierarchy.tree({"total": ["north", "south"]}),
+    )
+    cut = tree.take(np.arange(8))
+    assert type(cut) is HierarchicalTSData
+    assert cut.hierarchy == tree.hierarchy
+    assert cut.is_coherent()
+    assert cut.aggregate("total").tolist() == (north + south)[:8].tolist()
 
 
 def test_select_subset_and_leaves_original() -> None:
