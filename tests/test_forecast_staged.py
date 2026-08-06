@@ -668,6 +668,41 @@ def test_staged_fitting_composes_with_bottom_up_reconciliation() -> None:
 # -- the pieces, on their own -------------------------------------------------
 
 
+def test_both_strategies_are_bitwise_deterministic() -> None:
+    """The same call twice gives the same draws, handoff and all.
+
+    S2 pinned this for the independent path; a staged run adds a whole second
+    mechanism for it to go wrong in (a parent's draws are transformed, aligned,
+    written into a trace copy, and replayed), and a joint run adds a bigger model.
+    Both are exact, and the medians below are pinned loosely enough that another
+    machine's floating point does not fail the suite.
+    """
+    x, y = d1_world(WORLD_SEED, 52)
+    data = monthly({"x": x, "y": y}, 48)
+    options: dict[str, Any] = {
+        "graph": D1_GRAPH,
+        "draws": 150,
+        "warmup": 150,
+        "chains": 1,
+        "seed": 9,
+    }
+    first = forecast_or_skip(data, 4, fit="staged", **options)
+    second = forecast_or_skip(data, 4, fit="staged", **options)
+    for node in first.nodes:
+        assert np.array_equal(first.draws(node), second.draws(node))
+    assert first.median("y") == pytest.approx(
+        [104.05099, 106.755923, 111.066536, 111.7587], rel=0.005
+    )
+
+    third = forecast_or_skip(data, 4, fit="joint", **options)
+    fourth = forecast_or_skip(data, 4, fit="joint", **options)
+    for node in third.nodes:
+        assert np.array_equal(third.draws(node), fourth.draws(node))
+    assert third.median("y") == pytest.approx(
+        [104.246123, 107.567608, 111.453376, 112.218051], rel=0.005
+    )
+
+
 def test_lag_align_front_pads_with_the_first_value() -> None:
     """The documented padding rule, and the arithmetic of the shift."""
     history = np.array([10.0, 11.0, 12.0, 13.0])
