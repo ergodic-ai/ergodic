@@ -199,8 +199,6 @@ A driver needs a future before a child can be forecast, and there are exactly tw
 Propagation is not a figure of speech. Take the retail channel and its driver on their own, and forecast them twice on the same seeds, once with the driver pinned and once with it forecast by its own mechanism:
 
 ```python
-from ergodic.forecast import window_graph
-
 flat = timeseries(frame[["t", "retail", "promo"]], time="t", freq="ME")
 g = window_graph([("promo", "retail", 0)])
 
@@ -238,8 +236,6 @@ forecast(flat, 6, graph=g, scenario={"retail": np.full(6, 300.0)})
 With a graph, fitting has two shapes, and `schedule()` shows you the plan before you spend a sampler on it.
 
 ```python
-from ergodic.forecast import schedule
-
 plan = np.full(6, 12.0)  # the promo calendar, already signed off
 
 schedule(flat, g, scenario={"promo": plan})
