@@ -94,6 +94,19 @@ data
 raw = forecast(data, HOLDOUT, reconcile="none", draws=300, warmup=300, seed=0)
 raw
 
+# %% [markdown]
+# The sampler complained, and the complaints are printed rather than swallowed: a few draws
+# diverged and the effective sample size is small. That is the pillar warning and carrying
+# on, deliberately, because a backtest that refits over dozens of folds has to be able to
+# finish and a diagnostic is information about a fit rather than a verdict on it. The usual
+# cause on this model is that a wandering level and observation noise explain much the same
+# movement, so the two mix slowly; more draws is the usual fix, and 300 is a docs budget
+# rather than a recommendation. The diagnostics ride on every result, and the backtest
+# further down reads them fold by fold.
+
+# %%
+raw.diagnostics["retail"]
+
 # %%
 raw.to_frame().head(4)
 
@@ -124,7 +137,6 @@ for node, ax in zip(("retail", "total"), axes, strict=True):
     draw_fan(node, ax)
 axes[0].legend(fontsize=8, frameon=False)
 fig.tight_layout()
-fig.show()
 
 # %% [markdown]
 # Both bands widen with the horizon, which is the model simulating fresh innovations rather
@@ -348,7 +360,6 @@ ax.set_xticklabels([bar.name for bar in bars] + ["total"], fontsize=9)
 ax.set_ylabel("retail units, next six months")
 ax.set_title("what the forecast is made of")
 fig.tight_layout()
-fig.show()
 
 # %% [markdown]
 # The bars are cut in composition order: seasonality first, then the drivers. Asking the
