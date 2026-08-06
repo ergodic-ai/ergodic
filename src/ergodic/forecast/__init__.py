@@ -38,14 +38,21 @@ from __future__ import annotations
 
 from ._backtest import BacktestFold, BacktestReport, backtest
 from ._baselines import Drift, Naive, SeasonalNaive
-from ._facade import forecast
+from ._facade import AUTO_JOINT_MAX_NODES, forecast, schedule
 from ._fit import (
+    FrozenParent,
+    JointFit,
+    JointNode,
     NodeDiagnostics,
     NodeFit,
     NodeForecast,
+    ParentColumn,
+    fit_joint,
     fit_node,
+    forecast_joint,
     forecast_node,
     in_sample_median,
+    lag_align,
 )
 from ._mechanism import (
     ScenarioMechanism,
@@ -83,28 +90,39 @@ from ._reconcile import (
     mint_weights,
     reconcile,
 )
-from ._result import ForecastResult
+from ._result import FitStrategy, ForecastResult
 from ._scalers import IdentityScaler, LogScaler, RatioScaler, Scaler, ZScoreScaler
 from ._schedule import NodeRole, Stage, StageStrategy, TrainingSchedule
+from ._staged import NodeState, PosteriorStore, design_keys, node_roles
 from ._structure import bases, max_lag, split_lag, validate_window_graph, window_graph
-from .mechanisms import StructuralMechanism
+from .mechanisms import Bass, CausalOU, StructuralMechanism
 
 __all__ = [
+    "AUTO_JOINT_MAX_NODES",
     "PROPORTION_RULES",
     "RECONCILE_METHODS",
     "WEIGHT_RULES",
     "BacktestFold",
     "BacktestReport",
+    "Bass",
+    "CausalOU",
     "Drift",
+    "FitStrategy",
     "ForecastModel",
     "ForecastResult",
+    "FrozenParent",
     "IdentityScaler",
+    "JointFit",
+    "JointNode",
     "LogScaler",
     "Naive",
     "NodeDiagnostics",
     "NodeFit",
     "NodeForecast",
     "NodeRole",
+    "NodeState",
+    "ParentColumn",
+    "PosteriorStore",
     "RatioScaler",
     "Scaler",
     "ScenarioMechanism",
@@ -125,18 +143,23 @@ __all__ = [
     "constraint_matrix",
     "coverage",
     "crps",
+    "design_keys",
+    "fit_joint",
     "fit_node",
     "forecast",
+    "forecast_joint",
     "forecast_node",
     "historical_shares",
     "in_sample_median",
     "infer_period",
+    "lag_align",
     "mae",
     "mape",
     "mape_full",
     "mase",
     "max_lag",
     "mint_weights",
+    "node_roles",
     "reconcile",
     "rmse",
     "rolling_accuracy",
@@ -145,6 +168,7 @@ __all__ = [
     "rolling_mape",
     "rolling_mape_3",
     "rolling_mape_6",
+    "schedule",
     "smape",
     "split_lag",
     "validate_window_graph",
