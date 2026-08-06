@@ -67,9 +67,14 @@ PROPORTION_RULES = ("historical", "forecast")
 #: Where ``mint`` gets the diagonal of its weight matrix.
 WEIGHT_RULES = ("posterior", "mint_shrink")
 
-#: Coherence counts as reached below this absolute gap. Reconciliation is exact
-#: arithmetic, so what is left is rounding: a sum of float64 terms at the scale
-#: of the data, which stays around 1e-12 for a business series.
+#: Coherence counts as reached below this **relative** gap. Reconciliation is
+#: exact arithmetic, so what is left is rounding, and rounding is relative: four
+#: float64 numbers near 1e9 cannot be added to better than about 1e-7 in
+#: absolute terms, while the same sum near 200 lands around 1e-13. An absolute
+#: tolerance would therefore call a perfectly reconciled forecast of a large
+#: series incoherent, purely for being large. What is measured against this is
+#: the gap over the size of the parent, which sits at machine epsilon (~1e-16)
+#: at every scale.
 COHERENCE_TOL = 1e-8
 #: A sibling sum this close to zero cannot carry a share, so that draw and step
 #: fall back to the historical split.
@@ -217,8 +222,10 @@ def mint_weights(
     variance at that step straight off its unreconciled draws, so a node that
     already says it is unsure gets moved further and nothing extra has to be
     estimated. ``"mint_shrink"`` reads the node's in-sample one-step residual
-    variance, the classic MinT weighting, which is flat across the horizon and
-    comes either from ``residual_var`` or from the result's own
+    second moment (the mean of the squared residuals, uncentered, which is the
+    ``E[e e']`` MinT is written against, so a biased fit pays for its bias), the
+    classic MinT weighting. It is flat across the horizon and comes either from
+    ``residual_var`` or from the result's own
     :attr:`~ergodic.forecast.ForecastResult.residual_var`, since it is a property
     of the fit rather than of the draws.
 
@@ -433,6 +440,23 @@ def reconcile(
     forecasts can be reconciled several ways without refitting anything, and the
     unreconciled version stays available through ``method="none"``.
 
+    Comparing strategies therefore means looping over methods *with their own
+    options*, because an option a strategy does not read raises rather than being
+    ignored::
+
+        recipes = [
+            ("bottom_up", {}),
+            ("top_down", {"data": data}),
+            ("mint", {"weights": "mint_shrink"}),
+        ]
+        table = {
+            method: reconcile(unreconciled, tree, method=method, **options)
+            for method, options in recipes
+        }
+
+    One shared option dict across every method is the thing that will not work,
+    and the refusal says which option the strategy did not read.
+
     Parameters
     ----------
     result
@@ -508,9 +532,10 @@ def reconcile(
         series = _mint(series, hierarchy, nodes, diagonal)
 
     merged = {node: series.get(node, result.draws(node)) for node in result.nodes}
-    # Measured, not assumed. `none` changes nothing and still reports honestly,
-    # which is how criterion 2 sees an incoherent set for what it is.
-    error = coherence_gap(merged, hierarchy)
+    # Measured, not assumed, and measured relative to the size of each parent.
+    # `none` changes nothing and still reports honestly, which is how criterion 2
+    # sees an incoherent set for what it is.
+    error = coherence_gap(merged, hierarchy, relative=True)
     return replace(
         result,
         series=merged,

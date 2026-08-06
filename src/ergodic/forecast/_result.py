@@ -62,11 +62,14 @@ class ForecastResult:
     diagnostics: Mapping[str, Any] | None = None
     reconciliation: str | None = None
     coherent: bool | None = None
-    #: Each node's in-sample one-step residual variance, when the fits computed
-    #: it. It rides along so the whole reconciliation menu stays available after
-    #: the fact: MinT-shrink weights are a property of the fit rather than of the
-    #: draws, and without them here an unreconciled result could not be
-    #: reconciled that way without sampling everything again.
+    #: Each node's in-sample one-step residual second moment, when the fits
+    #: computed it: the mean of the squared residuals, uncentered, which is what
+    #: MinT wants (its W estimates ``E[e e']``, not the spread of e around its own
+    #: mean, so a biased fit is charged for its bias). It rides along so the whole
+    #: reconciliation menu stays available after the fact: MinT-shrink weights are
+    #: a property of the fit rather than of the draws, and without them here an
+    #: unreconciled result could not be reconciled that way without sampling
+    #: everything again.
     residual_var: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
@@ -152,19 +155,26 @@ class ForecastResult:
 
     # -- the hierarchy -------------------------------------------------------
 
-    def coherence_error(self, hierarchy: Hierarchy) -> float:
+    def coherence_error(self, hierarchy: Hierarchy, *, relative: bool = True) -> float:
         """The worst gap between a parent and its children, over every draw and step.
 
         Zero means the forecast keeps the hierarchy's arithmetic promise exactly.
-        The number is absolute rather than relative, in the units of the series,
-        so read it against the size of the total: a residual of 1e-12 on a series
-        near 200 is float64 rounding, and anything a reconciliation strategy
-        leaves behind should look like that.
+        The default reading is **relative**: the gap divided by the size of the
+        parent it belongs to, so the number means the same thing on a series in
+        units and on the same series in billions. That is the honest contract,
+        because the residual reconciliation leaves behind is rounding, and
+        rounding is relative: adding four float64 numbers near 1e9 cannot do
+        better than about 1e-7 absolute, and calling that incoherent would be
+        wrong. Anything a strategy leaves should read as machine epsilon here,
+        around 1e-16, whatever the series is measured in.
+
+        Pass ``relative=False`` for the gap in the units of the series, which is
+        what to look at when a real disagreement needs sizing.
 
         Every node of the tree has to be in the result, since a missing one is a
         gap that cannot be measured rather than a gap of zero.
         """
-        return coherence_gap(self.series, hierarchy)
+        return coherence_gap(self.series, hierarchy, relative=relative)
 
     def to_frame(self, level: float = 0.9) -> pd.DataFrame:
         """A tidy frame: one row per node and step, with the median and the band."""
@@ -194,8 +204,19 @@ class ForecastResult:
         return f"ForecastResult({self.kind}: {body})"
 
 
-def coherence_gap(series: Mapping[str, npt.NDArray[np.float64]], hierarchy: Hierarchy) -> float:
+def coherence_gap(
+    series: Mapping[str, npt.NDArray[np.float64]],
+    hierarchy: Hierarchy,
+    *,
+    relative: bool = True,
+) -> float:
     """The largest ``|parent - aggregate(children)|`` over parents, draws, and steps.
+
+    Relative by default: each parent's gap is divided by its own size, so a
+    branch is judged against itself rather than against the biggest number in the
+    tree, and the answer does not change when the series changes units. The
+    divisor is floored at one, which keeps the reading absolute for a series that
+    lives near zero, where a relative gap would be noise over noise.
 
     Free-standing so a set of draws can be measured before it is wrapped in a
     result, which is what the reconciliation layer does on its way out.
@@ -212,6 +233,9 @@ def coherence_gap(series: Mapping[str, npt.NDArray[np.float64]], hierarchy: Hier
         kids = hierarchy.children_of(parent)
         stacked = np.stack([np.asarray(series[kid], dtype=np.float64) for kid in kids], axis=0)
         expected = stacked.mean(axis=0) if hierarchy.aggregation == "mean" else stacked.sum(axis=0)
-        gap = np.max(np.abs(np.asarray(series[parent], dtype=np.float64) - expected))
-        worst = max(worst, float(gap))
+        top = np.asarray(series[parent], dtype=np.float64)
+        gap = float(np.max(np.abs(top - expected)))
+        if relative:
+            gap /= max(1.0, float(np.max(np.abs(top))))
+        worst = max(worst, gap)
     return worst

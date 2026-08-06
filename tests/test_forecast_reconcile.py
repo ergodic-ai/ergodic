@@ -204,24 +204,34 @@ def build(
     return hts(kept, time="month", hierarchy=tree)
 
 
-def synthetic_draws(seed: int = 3, n_draws: int = 200, horizon: int = 6) -> ForecastResult:
-    """An incoherent set of draws over the flat tree, for the algebra that needs no fit."""
+def synthetic_draws(
+    seed: int = 3, n_draws: int = 200, horizon: int = 6, scale: float = 200.0
+) -> ForecastResult:
+    """An incoherent set of draws over the flat tree, for the algebra that needs no fit.
+
+    ``scale`` is the size of the total, which matters: every reconciliation
+    residual is rounding, and rounding grows with the numbers being added.
+    """
     rng = np.random.default_rng(seed)
     shares = {"leaf_a": 0.4, "leaf_b": 0.3, "leaf_c": 0.2, "leaf_d": 0.1}
-    series = {"total": 200.0 + rng.normal(0.0, 8.0, (n_draws, horizon))}
+    series = {"total": scale + rng.normal(0.0, 0.04 * scale, (n_draws, horizon))}
     for leaf, share in shares.items():
-        scale = 200.0 * share
-        series[leaf] = scale + rng.normal(0.0, 0.08 * scale, (n_draws, horizon))
+        size = scale * share
+        series[leaf] = size + rng.normal(0.0, 0.08 * size, (n_draws, horizon))
+    variance = scale**2 * 1e-4
     return ForecastResult(
         series=series,
         horizon=horizon,
-        residual_var={"total": 4.0, **{leaf: 1.0 + i for i, leaf in enumerate(shares)}},
+        residual_var={
+            "total": variance,
+            **{leaf: variance * (1.0 + i) / 4.0 for i, leaf in enumerate(shares)},
+        },
     )
 
 
-def training_frame(seed: int = 5, n: int = 36) -> HierarchicalTSData:
+def training_frame(seed: int = 5, n: int = 36, scale: float = 200.0) -> HierarchicalTSData:
     """A short coherent history, enough for historical shares."""
-    return build(world_h1(seed, n))
+    return build(world_h1(seed, n, level0=scale))
 
 
 # -- the algebra: criteria 1, 2, 8 and 11 without a sampler --------------------
@@ -253,12 +263,10 @@ def test_the_constraint_matrix_reads_parent_minus_children() -> None:
     assert np.allclose(rows @ coherent, 0.0)
 
 
-def test_every_strategy_reaches_coherence(  # criterion 1
-) -> None:
-    """Criterion 1: coherence_error <= 1e-8 after every strategy except none."""
-    result = synthetic_draws()
-    data = training_frame()
-    for method, options in (
+#: Every strategy with the options it reads, which is also the loop a caller
+#: writes to compare them: an option a strategy ignores raises by design.
+def recipes(data: HierarchicalTSData) -> tuple[tuple[str, dict[str, Any]], ...]:
+    return (
         ("bottom_up", {}),
         ("top_down", {"data": data}),
         ("top_down", {"data": data, "proportions": "forecast"}),
@@ -267,11 +275,46 @@ def test_every_strategy_reaches_coherence(  # criterion 1
         ("mint", {}),
         ("mint", {"weights": "posterior", "trust": {"total": 10.0}}),
         ("mint", {"weights": "mint_shrink"}),
-    ):
+    )
+
+
+def test_every_strategy_reaches_coherence(  # criterion 1
+) -> None:
+    """Criterion 1: coherence_error <= 1e-8 after every strategy except none."""
+    result = synthetic_draws()
+    data = training_frame()
+    for method, options in recipes(data):
         out = reconcile(result, FLAT_TREE, method=method, **options)
         assert out.coherence_error(FLAT_TREE) <= 1e-8, out.reconciliation
         assert out.coherent is True
         assert out.reconciliation is not None and out.reconciliation.startswith(method)
+
+
+def test_coherence_survives_a_large_scale() -> None:
+    """Criterion 1 again, on a series near 1e9, where an absolute tolerance breaks.
+
+    Reconciliation is exact arithmetic and what it leaves behind is float64
+    rounding, which is relative. Four numbers near a billion cannot be added to
+    better than about 1e-7 in absolute terms, so a fixed absolute tolerance of
+    1e-8 would call a perfect projection incoherent for no reason except that the
+    series is large. This test holds both halves of that sentence: every strategy
+    is coherent on the relative reading, and at least one strategy's absolute gap
+    is bigger than the tolerance an absolute contract would have used.
+    """
+    result = synthetic_draws(scale=2.5e9)
+    data = training_frame(scale=2.5e9)
+    absolute: list[float] = []
+    for method, options in recipes(data):
+        out = reconcile(result, FLAT_TREE, method=method, **options)
+        assert out.coherence_error(FLAT_TREE) <= 1e-8, (out.reconciliation, "relative")
+        assert out.coherent is True, out.reconciliation
+        absolute.append(out.coherence_error(FLAT_TREE, relative=False))
+    assert max(absolute) > 1e-8
+    # And the relative gap really is epsilon rather than merely under tolerance.
+    assert (
+        reconcile(result, FLAT_TREE, method="top_down", data=data).coherence_error(FLAT_TREE)
+        < 1e-14
+    )
 
 
 def test_none_reports_the_incoherence_it_found() -> None:  # criterion 2
@@ -280,7 +323,9 @@ def test_none_reports_the_incoherence_it_found() -> None:  # criterion 2
     out = reconcile(result, FLAT_TREE, method="none")
     assert out.reconciliation == "none"
     assert out.coherent is False
-    assert out.coherence_error(FLAT_TREE) > 1.0
+    # Percent-scale disagreement, which is a real one: the tolerance is 1e-8.
+    assert out.coherence_error(FLAT_TREE) > 1e-3
+    assert out.coherence_error(FLAT_TREE, relative=False) > 1.0
     for node in FLAT_TREE.nodes:
         assert np.array_equal(out.draws(node), result.draws(node))
 
@@ -583,7 +628,10 @@ def test_coherence_holds_on_real_draws(h1: World) -> None:
         )
         assert out.coherent is True
     assert h1.result.coherent is False
-    assert h1.result.coherence_error(FLAT_TREE) > 1.0
+    # A real disagreement between the levels' own models, not rounding: the
+    # relative tolerance is 1e-8 and this is percent-scale.
+    assert h1.result.coherence_error(FLAT_TREE) > 1e-3
+    assert h1.result.coherence_error(FLAT_TREE, relative=False) > 1.0
 
 
 @requires_pymc
@@ -609,11 +657,14 @@ def test_top_down_wins_where_the_total_is_the_signal(h1: World) -> None:
 def test_every_strategy_keeps_the_total_calibrated(h1: World) -> None:
     """Criterion 4: reconciling does not break the top level's calibration.
 
-    The pooled number is read against a floor and a ceiling of one. Twelve steps
-    of one seeded world resolve coverage to a twelfth, so an upper bound below one
-    would be asking a coin to land on its edge; what the criterion is really
-    after, that no strategy's band collapses, is the floor. The sharpness half of
-    the story is measured separately, below.
+    The floor is the criterion's real content: no strategy's band may collapse.
+    The ceiling is structural rather than pooled, because twelve steps of one
+    seeded world resolve coverage to a twelfth and an upper bound below one would
+    be asking a coin to land on its edge. So the ceiling is stated as arithmetic
+    that cannot drift with a seed: believing the top leaves the top exactly as its
+    own model had it, and the projection is a convex blend of the top's model and
+    the leaf sum, which pins its band between the two by construction. Magnitude,
+    the thing a seed *can* move, is measured separately below.
     """
     strategies = {
         "bottom_up": reconcile(h1.result, FLAT_TREE, method="bottom_up"),
@@ -628,8 +679,24 @@ def test_every_strategy_keeps_the_total_calibrated(h1: World) -> None:
         inside = np.mean((actual >= low) & (actual <= high))
         assert inside >= 0.75, f"{name} covers {inside:.2f} of the total's holdout"
         covered.append(inside)
-    pooled = float(np.mean(covered))
-    assert 0.75 <= pooled <= 1.0
+    assert float(np.mean(covered)) >= 0.75
+
+    # Ceiling one: top_down keeps the root's own draws, so its band is the
+    # unreconciled band and reconciliation cannot have widened it.
+    assert np.array_equal(strategies["top_down"].draws("total"), h1.result.draws("total"))
+
+    # Ceiling two: MinT's total is (1 - w) * own + w * leaf-sum with w in (0, 1),
+    # so every draw sits between the two, and so does every quantile of them.
+    own = h1.result.draws("total")
+    summed = strategies["bottom_up"].draws("total")
+    blended = strategies["mint"].draws("total")
+    assert np.all(blended >= np.minimum(own, summed) - 1e-9)
+    assert np.all(blended <= np.maximum(own, summed) + 1e-9)
+    low_mint, high_mint = strategies["mint"].interval("total", level=0.9)
+    low_bu, high_bu = strategies["bottom_up"].interval("total", level=0.9)
+    low_own, high_own = strategies["none"].interval("total", level=0.9)
+    width = high_mint - low_mint
+    assert np.all(width <= np.maximum(high_bu - low_bu, high_own - low_own) + 1e-9)
 
 
 @requires_pymc

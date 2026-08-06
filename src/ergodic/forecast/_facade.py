@@ -305,7 +305,11 @@ def _residual_variance(
     fits: Mapping[str, NodeFit],
     views: Mapping[str, NodeForecast],
 ) -> dict[str, float]:
-    """Each node's in-sample one-step residual variance, the MinT-shrink diagonal.
+    """Each node's in-sample one-step residual second moment, the MinT-shrink diagonal.
+
+    The mean of the squared residuals, uncentered on purpose: MinT's W estimates
+    ``E[e e']``, so a fit that sits systematically above its series is charged
+    for that, where a centered variance would forgive it.
 
     A modeled node compares its own series against its posterior-median fitted
     path. A node that exists only as an aggregate has no fit, so its fitted path
