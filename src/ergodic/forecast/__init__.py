@@ -1,24 +1,52 @@
 # SPDX-License-Identifier: Apache-2.0
 """Forecasting: Bayesian trajectories with causal structure in them.
 
-The pillar is built in layers, and this is the layer that needs no sampler: the
-result object every model returns (:class:`ForecastResult`), the metrics
-(:func:`compute_metrics` and the functions behind it), the naive baselines
-(:class:`Naive`, :class:`SeasonalNaive`, :class:`Drift`), the rolling-origin
-harness (:func:`backtest`), the window-graph builder (:func:`window_graph`), the
-staged-fitting plan (:class:`TrainingSchedule`), and the per-node scalers.
+:func:`forecast` is the entry point: a typed time series and a horizon in, a
+:class:`ForecastResult` out, with a posterior behind every step rather than a
+point and an error bar bolted on. Underneath it, a
+:class:`TemporalMechanism` per series holds that series' structural equation.
+The one built so far, :class:`StructuralMechanism`, is a damped local linear
+trend with a season and a regression on parents, composed from those pieces so a
+fitted forecast can be taken apart again.
+
+The rest of the pillar needs no sampler: the result object every model returns,
+the metrics, the naive baselines that give a backtest an honest floor, the
+rolling-origin harness itself, the window-graph builder, the staged-fitting plan,
+and the per-node scalers.
 
 Two ideas hold it together. Predictive structure is a plain DAG over lagged node
 names, which is exactly what temporal discovery already returns, so a discovered
 graph feeds a forecast with no translation. And any object that fits a series and
 forecasts a horizon (:class:`ForecastModel`) can be backtested, so a baseline,
 the Bayesian forecaster, and somebody else's model all land in one table.
+
+pymc is imported inside the methods that sample, so the bare install never loads
+it; ``pip install ergodic[forecast]`` adds it. Sampling runs through PyMC's JAX
+backend when jax and numpyro are installed, which the engine spike measured at
+about four times the C backend on this model.
+
+A note on the name, because this pillar is the one place in the package where a
+name is shadowed. ``ergodic.forecast`` at the top level is the *function*:
+``from ergodic import forecast`` gives something callable. This subpackage is
+reached with ``from ergodic.forecast import backtest``, which goes through the
+import system and is unaffected. But ``import ergodic.forecast as mod`` binds the
+function rather than the module, because Python prefers the attribute when one
+exists.
 """
 
 from __future__ import annotations
 
 from ._backtest import BacktestFold, BacktestReport, backtest
 from ._baselines import Drift, Naive, SeasonalNaive
+from ._facade import forecast
+from ._fit import NodeDiagnostics, NodeFit, NodeForecast, fit_node, forecast_node
+from ._mechanism import (
+    ScenarioMechanism,
+    TemporalMechanism,
+    assign_mechanisms,
+    auto_scaler,
+    infer_period,
+)
 from ._metrics import (
     accuracy,
     accuracy_full,
@@ -43,6 +71,7 @@ from ._result import ForecastResult
 from ._scalers import IdentityScaler, LogScaler, RatioScaler, Scaler, ZScoreScaler
 from ._schedule import NodeRole, Stage, StageStrategy, TrainingSchedule
 from ._structure import bases, max_lag, split_lag, validate_window_graph, window_graph
+from .mechanisms import StructuralMechanism
 
 __all__ = [
     "BacktestFold",
@@ -53,21 +82,33 @@ __all__ = [
     "IdentityScaler",
     "LogScaler",
     "Naive",
+    "NodeDiagnostics",
+    "NodeFit",
+    "NodeForecast",
     "NodeRole",
     "RatioScaler",
     "Scaler",
+    "ScenarioMechanism",
     "SeasonalNaive",
     "Stage",
     "StageStrategy",
+    "StructuralMechanism",
+    "TemporalMechanism",
     "TrainingSchedule",
     "ZScoreScaler",
     "accuracy",
     "accuracy_full",
+    "assign_mechanisms",
+    "auto_scaler",
     "backtest",
     "bases",
     "compute_metrics",
     "coverage",
     "crps",
+    "fit_node",
+    "forecast",
+    "forecast_node",
+    "infer_period",
     "mae",
     "mape",
     "mape_full",
