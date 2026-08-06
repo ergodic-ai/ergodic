@@ -211,7 +211,9 @@ def node_roles(
     tree_nodes = set(hierarchy.nodes) if hierarchy is not None else set()
     graph_bases = {split_lag(node)[0] for node in graph.nodes} if graph is not None else set()
 
-    missing = sorted(graph_bases - columns)
+    # A hierarchy node with no column is not missing, it is an aggregate, and the
+    # schedule has a better sentence for what goes wrong when one drives a model.
+    missing = sorted(graph_bases - columns - tree_nodes)
     if missing:
         raise ValueError(
             f"the window graph names {missing}, which the data has no column for. A driver "

@@ -134,7 +134,7 @@ def test_the_attractor_coefficient_is_recovered(
     d3_result: ForecastResult, d3_truth: tuple[Array, Array]
 ) -> None:
     """Criterion 6: the posterior mean of beta lands within 0.3 of the planted 1.0."""
-    from ergodic.forecast import auto_scaler
+    from ergodic.forecast import ZScoreScaler, auto_scaler
 
     assert d3_result.fits is not None
     child_scale = float(d3_result.fits["y"].scaler.median)
@@ -142,7 +142,9 @@ def test_the_attractor_coefficient_is_recovered(
     # The scale its coefficient is written against is the automatic one on its own
     # history, which is a public function of the data rather than a second guess.
     driver, _ = d3_truth
-    driver_scale = float(auto_scaler(driver[:D3_TRAIN]).std)
+    driver_scaler = auto_scaler(driver[:D3_TRAIN])
+    assert isinstance(driver_scaler, ZScoreScaler)
+    driver_scale = float(driver_scaler.std)
     beta = float(np.mean(posterior(d3_result, "y", "y_beta_z"))) * child_scale / driver_scale
     assert abs(beta - BETA_OU) <= 0.3, f"attractor beta {beta:.4f}, planted {BETA_OU}"
     # The rest of the attractor comes back too, which is what makes beta readable.

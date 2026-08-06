@@ -5,14 +5,23 @@
 :class:`ForecastResult` out, with a posterior behind every step rather than a
 point and an error bar bolted on. Underneath it, a
 :class:`TemporalMechanism` per series holds that series' structural equation.
-The one built so far, :class:`StructuralMechanism`, is a damped local linear
-trend with a season and a regression on parents, composed from those pieces so a
-fitted forecast can be taken apart again.
+:class:`StructuralMechanism` is the workhorse, a damped local linear trend with a
+season and a regression on parents, composed from those pieces so a fitted
+forecast can be taken apart again; :class:`CausalOU` puts the drivers in the
+long-run attractor instead, and :class:`Bass` is the S-curve for a launch with no
+history to extrapolate.
+
+Give :func:`forecast` a window graph and the series read each other. Staged
+fitting runs one node at a time in the order :func:`schedule` lays out, handing
+each node's whole forecast posterior down to its children rather than a path; a
+small graph is fitted jointly instead, so the nodes keep their joint posterior.
+A driver whose future is known arrives through ``scenario=``, and one with
+neither a mechanism nor a scenario is refused rather than quietly frozen.
 
 The rest of the pillar needs no sampler: the result object every model returns,
 the metrics, the naive baselines that give a backtest an honest floor, the
 rolling-origin harness itself, the window-graph builder, the staged-fitting plan,
-and the per-node scalers.
+the reconciliation menu, and the per-node scalers.
 
 Two ideas hold it together. Predictive structure is a plain DAG over lagged node
 names, which is exactly what temporal discovery already returns, so a discovered

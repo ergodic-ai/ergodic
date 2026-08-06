@@ -484,9 +484,12 @@ def inject_futures(trace: Any, futures: Mapping[str, Array]) -> Any:
 
     Each ``(S, H)`` array is folded back onto the trace's own ``(chain, draw)``
     grid in the order :func:`_flatten_draws` unfolded it, so draw ``s`` of the
-    parent lands on draw ``s`` of the child. That pairing is the whole point: it
-    is what makes the child's band carry the parent's uncertainty instead of
-    averaging it away.
+    parent lands on draw ``s`` of the child. Under staged fitting those two
+    posteriors are independent by construction, so the pairing is a coupling of
+    two exchangeable samples rather than a joint draw, and any pairing would do.
+    What matters is that there *is* one: the child's forecast is then evaluated
+    once per parent draw, which is what carries the parent's whole distribution
+    into the child's band instead of averaging it away.
     """
     posterior = _group_dataset(trace, "posterior")
     augmented = posterior.copy()

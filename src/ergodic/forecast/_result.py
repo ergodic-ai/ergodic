@@ -8,8 +8,9 @@ posterior or bootstrap draws. The accessors read the cloud: :meth:`median` is th
 point path, :meth:`interval` the equal-tailed band, :meth:`draws` the raw sample.
 
 Provenance fields (the mechanisms, the window graph, the training schedule, the
-sampler diagnostics, the reconciliation strategy) default to ``None`` and get
-filled by the later sprints. A baseline fills none of them.
+fit strategy and the fits behind it, the sampler diagnostics, the reconciliation
+strategy) default to ``None`` and get filled by whatever produced the draws. A
+baseline fills none of them.
 """
 
 from __future__ import annotations

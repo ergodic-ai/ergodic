@@ -6,9 +6,18 @@ mechanism per column, reads the time index to find a seasonal period, fits each
 series, and continues it forward, handing back a :class:`ForecastResult` with the
 draws and the provenance to explain where they came from.
 
+Give it a ``graph`` and the series stop being independent. A window graph says
+which series drive which, :func:`schedule` turns that into an order, and the fit
+runs either one node at a time with each posterior handed down (staged) or every
+node in one model (joint). A driver with its own mechanism is simply forecast and
+its uncertainty propagates; a driver whose future is known arrives through
+``scenario=``; a driver with neither is refused before anything samples.
+
 The signature is the finished one. Everything it will eventually accept is
-already a keyword, and the parts that are not built yet refuse by name instead of
-being absent, so no working call ever has to change shape later.
+already a keyword, so no working call ever has to change shape later. The one
+thing still missing is ``do=``, which is intervention rather than assumption and
+waits for identification on window graphs; ``scenario=`` says by name when a
+request is really that.
 
 One name, two things, and the function wins. ``ergodic.forecast`` at the top
 level is this function, so ``from ergodic import forecast`` gives something
@@ -104,6 +113,13 @@ def forecast(
     and a node that exists only as an aggregate is summed from its children. The
     levels are then made to agree by the strategy ``reconcile`` names, and the
     unreconciled version stays available through ``reconcile="none"``.
+
+    Given a ``graph``, the series read each other. Each node's parents enter its
+    regression as lag-shifted columns of their own history, and when the node is
+    forecast, a parent that was itself forecast hands its whole posterior across
+    rather than a path: draw for matching draw, so the child's band carries the
+    driver's uncertainty. :func:`schedule` shows the order this will run in
+    before any of it runs.
 
     Parameters
     ----------
