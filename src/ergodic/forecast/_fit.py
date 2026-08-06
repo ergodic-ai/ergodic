@@ -520,6 +520,13 @@ def inject_futures(trace: Any, futures: Mapping[str, Array]) -> Any:
     touched: a fitted posterior is a record, and one node's handoff must not
     change what another node replays.
 
+    It reads a full sampler result or a bare posterior Dataset, through
+    :func:`_posterior_of`, and both shapes really occur: the ordinary staged
+    handoff passes the trace the fit returned, while an attribution replay passes
+    the Dataset :func:`zero_sites` handed back. Everything else on this path
+    (:func:`_audit_sites`, :func:`posterior_draws`) already took both, so taking
+    only one here made a node with a frozen parent unexplainable by replay.
+
     Each ``(S, H)`` array is folded back onto the trace's own ``(chain, draw)``
     grid in the order :func:`_flatten_draws` unfolded it, so draw ``s`` of the
     parent lands on draw ``s`` of the child. Under staged fitting those two
@@ -529,7 +536,7 @@ def inject_futures(trace: Any, futures: Mapping[str, Array]) -> Any:
     once per parent draw, which is what carries the parent's whole distribution
     into the child's band instead of averaging it away.
     """
-    posterior = _group_dataset(trace, "posterior")
+    posterior = _posterior_of(trace)
     augmented = posterior.copy()
     n_chain = int(posterior.sizes["chain"])
     n_draw = int(posterior.sizes["draw"])

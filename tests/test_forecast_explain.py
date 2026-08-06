@@ -196,6 +196,27 @@ def opaque(world_data: TimeSeriesData) -> ForecastResult:
 
 
 @pytest.fixture(scope="module")
+def staged_frozen_opaque(world_data: TimeSeriesData) -> ForecastResult:
+    """A staged handoff and an opaque mechanism at once: the two features crossed.
+
+    The driver is modelled rather than pinned, so the child's forecast carries a
+    real frozen parent (an injected ``x1_fc`` site), and the child's mechanism
+    hides its pieces, so the attribution has to replay. Every other test picks one
+    of those two; this is the pair.
+    """
+    return forecast_or_skip(
+        world_data.select(["y", "x1"]),
+        H,
+        graph=window_graph([("x1", "y", 0)]),
+        mechanisms={"y": OpaqueMechanism(period=12)},
+        fit="staged",
+        draws=200,
+        warmup=200,
+        seed=SEED,
+    )
+
+
+@pytest.fixture(scope="module")
 def seasonless() -> ForecastResult:
     """A world with no season at all, fitted with a monthly one anyway."""
     data = timeseries(two_driver_world(amplitude=0.0), time="t", freq="ME")
@@ -352,6 +373,28 @@ def test_replay_finds_its_factors_by_the_naming_contract(opaque: ForecastResult)
 def test_the_replay_budget_is_a_ceiling(opaque: ForecastResult) -> None:
     with pytest.raises(ValueError, match="max_replays"):
         opaque.explain(max_replays=2)
+
+
+@requires_pymc
+def test_replay_works_through_a_staged_handoff(staged_frozen_opaque: ForecastResult) -> None:
+    """The crossing case: a replayed node whose parent's future is a posterior.
+
+    A replay rebuilds the child's forecast from a *zeroed copy* of its trace,
+    which is a bare posterior rather than a full sampler result, and that copy
+    then has to carry the parent's injected future through the same handoff the
+    original forecast used. Both halves work on their own; this is the test that
+    they work together, and it is the one the suite was missing, because
+    criterion 3 pins the drivers with ``scenario=`` so its bar values stay
+    computable and a pinned driver needs no handoff at all.
+    """
+    record = staged_frozen_opaque.explain()["y"]
+    assert record.engine == "replay"
+    assert [bar.name for bar in record.factors] == ["season", "x1"]
+    # Three cumulative states for two factors, and the bars still telescope onto
+    # the forecast the result actually holds.
+    assert record.n_replays == 3
+    assert abs(record.closure_error) < 0.02 * abs(record.total)
+    assert view_of(staged_frozen_opaque, "y").replay.frozen[0].base == "x1"
 
 
 @requires_pymc
