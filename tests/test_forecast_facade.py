@@ -208,15 +208,17 @@ def test_a_hierarchy_is_read_rather_than_refused() -> None:
     assert result.coherent is True
 
 
-def test_a_graph_points_at_the_driver_sprint() -> None:
+def test_a_graph_needs_its_variables_to_be_columns() -> None:
+    """The seam S2 held open, now live: a graph is read, and it has to name real series."""
     from ergodic import dag
 
-    with pytest.raises(NotImplementedError, match="S4"):
+    with pytest.raises(ValueError, match=r"names \['pmi'\]"):
         forecast(monthly(), 3, graph=dag(["pmi[t-1] -> sales[t]"]))
 
 
-def test_a_scenario_points_at_the_driver_sprint() -> None:
-    with pytest.raises(NotImplementedError, match="S4"):
+def test_a_scenario_needs_its_node_to_be_a_column() -> None:
+    """The seam S2 held open, now live: a pinned path has to belong to a series."""
+    with pytest.raises(ValueError, match=r"scenario= names \['pmi'\]"):
         forecast(monthly(), 3, scenario={"pmi": "hold"})
 
 
@@ -228,9 +230,12 @@ def test_reconciling_flat_data_is_a_value_error() -> None:
         forecast(monthly(), 3, reconcile="mint")
 
 
-def test_staged_fitting_points_at_the_driver_sprint() -> None:
-    with pytest.raises(NotImplementedError, match="S4"):
+def test_staged_fitting_needs_a_graph_to_stage() -> None:
+    """The seam S2 held open, now live: staging is about several series reading each other."""
+    with pytest.raises(ValueError, match="no graph says"):
         forecast(monthly(), 3, fit="staged")
+    with pytest.raises(ValueError, match="no graph says"):
+        forecast(monthly(), 3, fit="joint")
     with pytest.raises(ValueError, match="fit must be one of"):
         forecast(monthly(), 3, fit="magic")
 
