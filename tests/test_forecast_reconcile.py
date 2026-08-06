@@ -451,6 +451,30 @@ def test_the_strategies_check_their_own_options() -> None:
         reconcile(result, FLAT_TREE, method="top_down")
 
 
+def test_a_weight_of_zero_pins_a_node() -> None:
+    """A weight of zero is trust taken to its limit: that node does not move at all.
+
+    The correction each node gets is its own weight times a shared solve, so a
+    zero weight is a hard pin rather than a strong preference. It is worth having
+    a test on it, because it is also the one way the projection can be asked to
+    do something impossible, which the next test covers.
+    """
+    result = synthetic_draws()
+    residuals = {"total": 4.0, "leaf_a": 2.0, "leaf_b": 1.0, "leaf_c": 1.0, "leaf_d": 0.0}
+    out = reconcile(result, FLAT_TREE, method="mint", weights="mint_shrink", residual_var=residuals)
+    assert np.array_equal(out.draws("leaf_d"), result.draws("leaf_d"))
+    assert not np.allclose(out.draws("leaf_a"), result.draws("leaf_a"))
+    assert out.coherence_error(FLAT_TREE) <= 1e-8
+
+
+def test_all_weights_zero_says_nothing_can_move() -> None:
+    """Pin everything and the levels cannot be squared up; the message names the parent."""
+    result = synthetic_draws()
+    residuals = dict.fromkeys(FLAT_TREE.nodes, 0.0)
+    with pytest.raises(ValueError, match="nothing can move"):
+        reconcile(result, FLAT_TREE, method="mint", weights="mint_shrink", residual_var=residuals)
+
+
 def test_mint_shrink_without_residuals_says_where_they_come_from() -> None:
     """The shrink weights are a property of the fit, so a bare result cannot supply them."""
     bare = ForecastResult(

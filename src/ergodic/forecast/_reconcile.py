@@ -217,9 +217,10 @@ def mint_weights(
     variance at that step straight off its unreconciled draws, so a node that
     already says it is unsure gets moved further and nothing extra has to be
     estimated. ``"mint_shrink"`` reads the node's in-sample one-step residual
-    variance, the classic MinT weighting, which is constant across the horizon
-    and has to be supplied because it is a property of the fit rather than of the
-    draws.
+    variance, the classic MinT weighting, which is flat across the horizon and
+    comes either from ``residual_var`` or from the result's own
+    :attr:`~ergodic.forecast.ForecastResult.residual_var`, since it is a property
+    of the fit rather than of the draws.
 
     ``trust`` divides a node's entry, so a node you trust ten times as much moves
     about a tenth as far. That is the ``ForecastBelief.trust`` idea from the
@@ -352,12 +353,25 @@ def _mint(
     sides it gets.
     """
     matrix = constraint_matrix(hierarchy, nodes)
+    parents = _root_down(hierarchy)
     block = _stack(series, nodes)
     out = np.array(block, dtype=np.float64, copy=True)
     for step in range(block.shape[1]):
         weights = diagonal[step]
         weighted = matrix * weights[None, :]
-        chol = _factor(weighted @ matrix.T)
+        gram = weighted @ matrix.T
+        # A node moves in proportion to its weight, so a constraint whose every
+        # node has weight zero is one that nothing is allowed to fix. Saying so
+        # beats handing back a projection that quietly did not project.
+        stuck = [parents[row] for row in range(gram.shape[0]) if gram[row, row] <= 0.0]
+        if stuck:
+            raise ValueError(
+                f"every node under {stuck} has weight zero at step {step + 1}, so nothing can "
+                "move and the levels cannot be made to agree. A weight of zero means the "
+                "forecast is beyond question: check for a residual variance of zero, or trust "
+                "so large it rounds the weight away."
+            )
+        chol = _factor(gram)
         current = block[:, step, :]
         # One refinement pass. The first solve leaves a residual violation of the
         # order of the conditioning (and of the jitter, when a degenerate weight

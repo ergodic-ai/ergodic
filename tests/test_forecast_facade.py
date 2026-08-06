@@ -184,8 +184,15 @@ def test_the_base_contract_refuses_to_be_used_directly() -> None:
 # -- criterion 13: the facade's refusals --------------------------------------
 
 
-def test_a_hierarchy_points_at_reconciliation() -> None:
-    """A HierarchicalTSData needs the level machinery, and says so."""
+@requires_pymc
+def test_a_hierarchy_is_read_rather_than_refused() -> None:
+    """S2 refused a HierarchicalTSData and pointed at S3. S3 arrived.
+
+    The refusal is gone and the shape of what replaced it is pinned here: a
+    hierarchy is accepted, every level is forecast, and the result says which
+    strategy squared the levels up. The reconciliation criteria themselves live in
+    ``test_forecast_reconcile.py``; this is the seam S2 left behind.
+    """
     stamps = np.array(
         [np.datetime64("2019-01-01") + np.timedelta64(31 * i, "D") for i in range(24)]
     )
@@ -195,8 +202,10 @@ def test_a_hierarchy_points_at_reconciliation() -> None:
         time="month",
         hierarchy={"total": ["north", "south"]},
     )
-    with pytest.raises(NotImplementedError, match="S3"):
-        forecast(data, 3)
+    result = forecast(data, 3, draws=100, warmup=100, seed=2)
+    assert set(result.nodes) == {"total", "north", "south"}
+    assert result.reconciliation == "bottom_up"
+    assert result.coherent is True
 
 
 def test_a_graph_points_at_the_driver_sprint() -> None:
