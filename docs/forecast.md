@@ -16,11 +16,44 @@ The **hierarchy** is the arithmetic of the business. Retail plus wholesale is th
 
 The **window graph** is the causal one. It is a plain DAG over lagged node names, `promo[t] -> retail[t]`, `pmi[t-2] -> demand[t]`. Multiple lags between the same pair become edges between different node pairs, so one edge per pair still holds. This is exactly what `discover(data, method="pcmci")` returns, and `DomainKnowledge` applies to it unchanged.
 
-Here is the running example: a coffee roaster with two channels, four years of monthly history, and a marketing calendar.
+Here is the running example, and it runs: a coffee roaster with two channels, four years of monthly history, and a marketing calendar. Every number quoted on this page comes out of this world, so it is written down rather than assumed, and the whole page can be typed in order.
 
 ```python
 import numpy as np
 import pandas as pd
+
+rng = np.random.default_rng(7)
+n_months = 48
+month = np.arange(n_months)
+
+# The marketing calendar: campaign bursts on their own rhythm, planned ahead.
+promo = np.empty(n_months)
+promo[0] = 10.0
+for m in range(1, n_months):
+    promo[m] = 10.0 + 0.5 * (promo[m - 1] - 10.0) + rng.normal(0.0, 2.5)
+
+# Retail: a growing level, a Christmas-heavy season, 2.5 units per point of promo.
+retail_season = 1.0 + 0.18 * np.sin(2.0 * np.pi * (month + 4) / 12.0)
+retail = (120.0 + 0.9 * month + 2.5 * promo) * retail_season + rng.normal(0.0, 4.0, n_months)
+
+# Wholesale: bigger, flatter, mildly seasonal, and nothing to do with the promo.
+wholesale_season = 1.0 + 0.06 * np.sin(2.0 * np.pi * (month + 7) / 12.0)
+wholesale = (240.0 + 1.6 * month) * wholesale_season + rng.normal(0.0, 6.0, n_months)
+
+frame = pd.DataFrame(
+    {
+        "t": pd.date_range("2022-01-31", periods=n_months, freq="ME"),
+        "retail": retail,
+        "wholesale": wholesale,
+        "total": retail + wholesale,
+        "promo": promo,
+    }
+)
+```
+
+The hierarchy is the two channels and their total; the driver rides along as an ordinary column.
+
+```python
 from ergodic import forecast, hts, timeseries
 from ergodic.data import Hierarchy
 
@@ -90,6 +123,8 @@ Four mechanisms ship.
 **`StructuralMechanism`** is the workhorse: a damped local linear trend, a season, and a regression on the node's graph parents, composed as `(trend + regression + season) * season_factor`. Damping is what stops a twelve-step extrapolation running away on a slope the last few points happened to suggest. The season is twelve monthly factors when the period is twelve and Fourier terms otherwise:
 
 ```python
+from ergodic.forecast import StructuralMechanism
+
 StructuralMechanism(period=12).seasonal_form()               # ('monthly', 12)
 StructuralMechanism(period=7, n_harmonics=3).seasonal_form() # ('fourier', 7)
 ```
@@ -161,13 +196,24 @@ graph = window_graph([("promo", "retail", 0), ("promo", "wholesale", 2)])
 
 A driver needs a future before a child can be forecast, and there are exactly two honest ways to have one. A driver that is a modelled column is simply forecast, and its whole posterior propagates into the child. A driver whose future is genuinely known, a published rate or a marketing calendar that is already signed off, arrives through `scenario=`. There is no third way: a driver with neither is refused before anything samples, rather than being silently held flat.
 
-Propagation is not a figure of speech. On the same world and the same seeds, the child's band is meaningfully wider when the driver is forecast than when it is pinned:
+Propagation is not a figure of speech. Take the retail channel and its driver on their own, and forecast them twice on the same seeds, once with the driver pinned and once with it forecast by its own mechanism:
 
 ```python
+from ergodic.forecast import window_graph
+
+flat = timeseries(frame[["t", "retail", "promo"]], time="t", freq="ME")
+g = window_graph([("promo", "retail", 0)])
+
 pinned = forecast(flat, 6, graph=g, scenario={"promo": np.full(6, 12.0)},
                   fit="staged", draws=300, warmup=300, seed=0)
 modelled = forecast(flat, 6, graph=g, fit="staged", draws=300, warmup=300, seed=0)
-# mean 90% band width for retail: 19.87 pinned, 31.64 with the driver forecast
+
+def band_width(result, node):
+    lo, hi = result.interval(node, level=0.9)
+    return float(np.mean(hi - lo))
+
+band_width(pinned, "retail"), band_width(modelled, "retail")
+# (19.87, 31.64)
 ```
 
 That ratio, 1.59 here, is a property of the world rather than a constant: how much of the child's variance the driver carries, and how fast the driver's own band opens. Measured elsewhere in the package's tests it runs from about 1.06 to 1.73. What is invariant is the direction. Pinning a driver hides its uncertainty, and the narrower band is a claim you are making, not a discovery.
@@ -177,7 +223,7 @@ That ratio, 1.59 here, is a property of the world rather than a constant: how mu
 **`scenario=` makes no causal claim.** It pins a path and trusts the fitted regressions downstream. That is exactly right for something exogenous or already decided, and quietly wrong for something the business sets in response to what it sees, like a price that moves with demand. The pillar refuses to blur the two:
 
 ```python
-forecast(flat, 6, graph=graph, scenario={"retail": np.full(6, 300.0)})
+forecast(flat, 6, graph=g, scenario={"retail": np.full(6, 300.0)})
 # ValueError: scenario={'retail': ...} pins a node the graph says is driven by promo[t].
 # scenario= is for a node whose future is exogenous or already known, and it makes no
 # causal claim [...] Pinning an endogenous node is an intervention, which needs the
@@ -192,7 +238,11 @@ forecast(flat, 6, graph=graph, scenario={"retail": np.full(6, 300.0)})
 With a graph, fitting has two shapes, and `schedule()` shows you the plan before you spend a sampler on it.
 
 ```python
-schedule(flat, window_graph([("promo", "retail", 0)]), scenario={"promo": plan})
+from ergodic.forecast import schedule
+
+plan = np.full(6, 12.0)  # the promo calendar, already signed off
+
+schedule(flat, g, scenario={"promo": plan})
 # TrainingSchedule: 2 stages, 1 by mcmc
 #   Stage 0 [resolved ]: promo
 #   Stage 1 [mcmc     ]: retail
@@ -218,6 +268,7 @@ A forecast that has never been scored against a baseline is a story. `backtest` 
 from ergodic import backtest
 from ergodic.forecast import SeasonalNaive, forecast_model
 
+flat_total = timeseries(frame[["t", "total"]], time="t", freq="ME")
 model = forecast_model(name="structural", draws=300, warmup=300)
 report = backtest(model, flat_total, test_size=6, n_splits=2, seed=4, m=12)
 report
@@ -262,6 +313,8 @@ That last table exists because a backtest is the one place a sampling problem ca
 `explain()` takes the forecast apart into a baseline, a seasonality bar, and one bar per driver, each with a posterior behind it.
 
 ```python
+driven = pinned  # the staged fit above: retail, with the promo calendar pinned
+
 attribution = driven.explain()
 attribution["retail"]
 # NodeAttribution(retail over horizon: total 1,112 = Level and trend +997.3,

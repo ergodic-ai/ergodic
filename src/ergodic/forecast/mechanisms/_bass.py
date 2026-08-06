@@ -70,6 +70,15 @@ class Bass(TemporalMechanism):
     Parents are not read. A driver that moves adoption is a real thing to want and
     it is a different model (the hybrid correction the plan defers), so passing
     one raises rather than being ignored.
+
+    Sites, since the naming contract is load-bearing: the free variables are
+    ``{node}_p``, ``{node}_q``, ``{node}_M`` and ``{node}_sigma_obs``, and a
+    forecasting model also records two deterministics, ``{node}_mu`` (the
+    incremental adoption path, which is the mean the likelihood reads) and
+    ``{node}_cumulative`` (the share of the market adopted by each step, which is
+    what the recursion actually carries). Nothing else registers a
+    ``cumulative``; it is named here because anything reading a trace by name,
+    an attribution replay above all, has to know what is in it.
     """
 
     launch_index: int = 0
