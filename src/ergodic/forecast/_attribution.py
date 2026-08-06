@@ -372,13 +372,21 @@ def attribute(
     for node in chosen:
         fit, view = fits[node], views[node]
         keys = fit.mechanism.factors(node, view.components)
-        for window in slices:
-            if keys is None:
-                record, spent = _replay(result, fit, view, window, method, reduce, budget)
-                budget -= spent
-            else:
-                record = _structural(result, fit, view, window, method, reduce, tuple(keys))
-            records.append(record)
+        if keys is None:
+            # Every window of one node shares one set of replays: a re-forecast
+            # produces the whole horizon, and a window only decides how it is
+            # summed up afterwards. Running them per window would multiply the
+            # sampler passes by the number of questions asked.
+            spent, drawn, factors = _replay_states(fit, view, method, budget)
+            budget -= spent
+            records += [
+                _from_states(result, fit, view, window, method, reduce, factors, drawn, spent)
+                for window in slices
+            ]
+            continue
+        records += [
+            _structural(result, fit, view, window, method, reduce, tuple(keys)) for window in slices
+        ]
     return Attribution(nodes=tuple(records), method=method, reduce=reduce)
 
 
@@ -512,16 +520,23 @@ def _structural(
     )
 
 
-def _replay(
-    result: ForecastResult,
+def _replay_states(
     fit: NodeFit,
     view: NodeForecast,
-    window: Window,
     method: str,
-    reduce: str,
     budget: int,
-) -> tuple[NodeAttribution, int]:
-    """Switch a factor off by zeroing its sites and forecasting again on the same seed."""
+) -> tuple[int, dict[tuple[str, ...], Array], tuple[str, ...]]:
+    """Forecast this node once per factor subset, zeroing the sites that are switched off.
+
+    Returns the passes spent, the ``(S, H)`` draws per subset, and the factor
+    keys. The draws cover the whole horizon because a re-forecast produces the
+    whole horizon; which window is being asked about only decides how they are
+    summed up afterwards, so every window of one node shares one set of passes.
+
+    The seed is the one the original forecast ran on, which is what makes this
+    exact rather than approximate: the fresh innovations come back identical, so
+    differencing two states leaves the factor and nothing else.
+    """
     node = fit.node
     recipe = view.replay
     if recipe is None:
@@ -542,7 +557,6 @@ def _replay(
             "structurally."
         )
 
-    first, last = window.resolve(result.horizon, result.index)
     drawn: dict[tuple[str, ...], Array] = {}
     for active in states:
         off = [site for key in keys if key not in active for site in sites[key]]
@@ -554,25 +568,45 @@ def _replay(
             frozen=recipe.frozen,
             seed=recipe.seed,
         )
-        drawn[active] = _reduce(again.draws[:, first:last], reduce)
+        drawn[active] = np.asarray(again.draws, dtype=np.float64)
+    return len(states), drawn, keys
+
+
+def _from_states(
+    result: ForecastResult,
+    fit: NodeFit,
+    view: NodeForecast,
+    window: Window,
+    method: str,
+    reduce: str,
+    keys: tuple[str, ...],
+    drawn: Mapping[tuple[str, ...], Array],
+    spent: int,
+) -> NodeAttribution:
+    """One window's waterfall, cut out of replays that already happened."""
+    node = fit.node
+    first, last = window.resolve(result.horizon, result.index)
+
+    def over(active: tuple[str, ...]) -> Array:
+        return _reduce(drawn[active][:, first:last], reduce)
 
     total = _reduce(view.draws[:, first:last], reduce)
-    baseline_draws = drawn[()]
+    baseline_draws = over(())
     bars: list[FactorContribution] = []
     if method == "sequential":
         running = baseline_draws
         for index, key in enumerate(keys):
-            nxt = drawn[keys[: index + 1]]
+            nxt = over(keys[: index + 1])
             bars.append(FactorContribution(key, _kind(key), nxt - running))
             running = nxt
     else:
-        full = drawn[keys]
+        full = over(keys)
         for key in keys:
             without = tuple(other for other in keys if other != key)
-            bars.append(FactorContribution(key, _kind(key), full - drawn[without]))
+            bars.append(FactorContribution(key, _kind(key), full - over(without)))
         bars.append(_interaction(total, baseline_draws, bars))
 
-    record = NodeAttribution(
+    return NodeAttribution(
         node=node,
         window=window,
         steps=(first, last),
@@ -583,9 +617,8 @@ def _replay(
         factors=tuple(bars),
         total_draws=total,
         forecast_draws=_reduce(result.draws(node)[:, first:last], reduce),
-        n_replays=len(states),
+        n_replays=spent,
     )
-    return record, len(states)
 
 
 def _replay_sites(node: str, trace: Any) -> dict[str, tuple[str, ...]]:

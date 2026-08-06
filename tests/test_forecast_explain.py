@@ -354,6 +354,22 @@ def test_the_replay_budget_is_a_ceiling(opaque: ForecastResult) -> None:
         opaque.explain(max_replays=2)
 
 
+@requires_pymc
+def test_every_window_of_a_node_shares_one_set_of_replays(opaque: ForecastResult) -> None:
+    """Asking four questions of one node costs what asking one does.
+
+    A re-forecast produces the whole horizon; a window only decides how it is
+    summed up. Spending a sampler pass per window would multiply the cost by the
+    number of questions, and the budget would run out for the wrong reason.
+    """
+    whole = opaque.explain()["y"]
+    parts = opaque.explain(windows=[Window("early", 0, 3), Window("late", 3, H)])
+    assert [record.n_replays for record in parts] == [whole.n_replays, whole.n_replays]
+    for index, bar in enumerate(whole.bars):
+        halves = sum(record.bars[index].value for record in parts)
+        assert bar.value == pytest.approx(halves, rel=1e-9)
+
+
 # -- criterion 4: zeroing is sharp --------------------------------------------
 
 
