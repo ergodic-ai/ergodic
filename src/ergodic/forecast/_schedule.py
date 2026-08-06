@@ -129,6 +129,7 @@ class TrainingSchedule:
         roles: Mapping[str, NodeRole],
         *,
         max_batch_size: int = 1,
+        staged: bool = True,
     ) -> TrainingSchedule:
         """Derive the schedule from the window graph, the hierarchy, and the roles.
 
@@ -148,15 +149,23 @@ class TrainingSchedule:
             How many independent nodes may share one MCMC stage. One (the
             default) gives each its own stage, which keeps each sampler small.
             A large number puts every node of a wave in one stage.
+        staged
+            Whether this plan will be run one node at a time. It is only the
+            hierarchy rule that turns on it: staging adds the aggregates up last,
+            so a hierarchy parent that wants its own model has no wave it could
+            run in, while one model over every node has no wave order to violate
+            and can fit a parent and its children together. Everything else in
+            the schedule reads the same either way, because a joint fit still
+            needs the topological order.
 
         Raises
         ------
         ValueError
-            When a hierarchy parent carries a role other than ``AGGREGATE``
-            (staged fitting reconciles bottom-up only), when an ``AGGREGATE``
-            node has no children to add up, when the graph names a variable with
-            no role, when a model node reads an aggregate, or when the modeled
-            nodes drive each other in a loop.
+            When a hierarchy parent carries a role other than ``AGGREGATE`` and
+            ``staged`` is true, when an ``AGGREGATE`` node has no children to add
+            up, when the graph names a variable with no role, when a model node
+            reads an aggregate, or when the modeled nodes drive each other in a
+            loop.
 
         Warns
         -----
@@ -169,7 +178,7 @@ class TrainingSchedule:
         assignment = {str(name): NodeRole(role) for name, role in roles.items()}
         _check_roles_cover(graph, assignment)
         children = _hierarchy_children(hierarchy, assignment)
-        _check_bottom_up(children, assignment)
+        _check_bottom_up(children, assignment, staged=staged)
 
         resolved = sorted(n for n, r in assignment.items() if r is NodeRole.SCENARIO)
         aggregates = sorted(n for n, r in assignment.items() if r is NodeRole.AGGREGATE)
@@ -285,15 +294,30 @@ def _hierarchy_children(
 
 
 def _check_bottom_up(
-    children: Mapping[str, tuple[str, ...]], roles: Mapping[str, NodeRole]
+    children: Mapping[str, tuple[str, ...]],
+    roles: Mapping[str, NodeRole],
+    *,
+    staged: bool = True,
 ) -> None:
-    """Refuse a hierarchy parent that wants its own model, and an aggregate with no children."""
+    """Refuse a hierarchy parent that wants its own model, and an aggregate with no children.
+
+    The first rule is about staging and only about staging. A staged run resolves
+    one node at a time and adds the aggregates up at the end, so a parent that
+    carries its own model has no wave it could run in. A joint run has no waves
+    to violate, so it fits a parent and its children together quite happily and
+    the reconciliation menu then applies to the result exactly as it does on the
+    independent path.
+    """
     for parent in children:
-        if parent in roles and roles[parent] is not NodeRole.AGGREGATE:
+        if staged and parent in roles and roles[parent] is not NodeRole.AGGREGATE:
             raise ValueError(
                 f"{parent!r} is a hierarchy parent with role {roles[parent].value}; staged "
-                "fitting aggregates bottom-up, so a parent of modeled children has to be "
-                "NodeRole.AGGREGATE. Fit it jointly, or reconcile after the fact."
+                "fitting adds the aggregates up last, so a parent of modeled children has "
+                "no wave of its own to run in and has to be NodeRole.AGGREGATE. Three ways "
+                f"out, all of them real: fit='joint' fits {parent!r} and its children in one "
+                "model and reconciles afterwards; dropping the column leaves it to be "
+                "aggregated from below; or forecast without the graph and reconcile after "
+                "the fact, which is the independent path and has never had this limit."
             )
     for node, role in roles.items():
         if role is NodeRole.AGGREGATE and node not in children:

@@ -6,9 +6,18 @@ mechanism per column, reads the time index to find a seasonal period, fits each
 series, and continues it forward, handing back a :class:`ForecastResult` with the
 draws and the provenance to explain where they came from.
 
+Give it a ``graph`` and the series stop being independent. A window graph says
+which series drive which, :func:`schedule` turns that into an order, and the fit
+runs either one node at a time with each posterior handed down (staged) or every
+node in one model (joint). A driver with its own mechanism is simply forecast and
+its uncertainty propagates; a driver whose future is known arrives through
+``scenario=``; a driver with neither is refused before anything samples.
+
 The signature is the finished one. Everything it will eventually accept is
-already a keyword, and the parts that are not built yet refuse by name instead of
-being absent, so no working call ever has to change shape later.
+already a keyword, so no working call ever has to change shape later. The one
+thing still missing is ``do=``, which is intervention rather than assumption and
+waits for identification on window graphs; ``scenario=`` says by name when a
+request is really that.
 
 One name, two things, and the function wins. ``ergodic.forecast`` at the top
 level is this function, so ``from ergodic import forecast`` gives something
@@ -36,7 +45,16 @@ from ._reconcile import (
     _series_of,
 )
 from ._reconcile import reconcile as reconcile_result
-from ._result import ForecastResult
+from ._result import FitStrategy, ForecastResult
+from ._staged import (
+    AUTO_JOINT_MAX_NODES,
+    FIT_STRATEGIES,
+    build_schedule,
+    mcmc_node_count,
+    resolve_scenarios,
+    run_joint,
+    run_staged,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -46,15 +64,17 @@ if TYPE_CHECKING:
     from ..data import Hierarchy
     from ..graph import MixedGraph
     from ._mechanism import TemporalMechanism
+    from ._schedule import TrainingSchedule
+    from ._staged import StagedRun
 
     Array = npt.NDArray[np.float64]
 
-__all__ = ["forecast"]
+__all__ = ["forecast", "schedule"]
 
 #: Fitting strategies that reach the independent per-series path.
 _INDEPENDENT_FITS = ("auto", "independent")
-#: Strategies that exist in the vocabulary but are not built yet.
-_STAGED_FITS = ("staged", "joint")
+#: Strategies that read the graph.
+_GRAPH_FITS = ("staged", "joint")
 #: The strategies that read the training window for their shares.
 _NEEDS_DATA = ("top_down", "middle_out")
 
@@ -92,6 +112,13 @@ def forecast(
     levels are then made to agree by the strategy ``reconcile`` names, and the
     unreconciled version stays available through ``reconcile="none"``.
 
+    Given a ``graph``, the series read each other. Each node's parents enter its
+    regression as lag-shifted columns of their own history, and when the node is
+    forecast, a parent that was itself forecast hands its whole posterior across
+    rather than a path: draw for matching draw, so the child's band carries the
+    driver's uncertainty. :func:`schedule` shows the order this will run in
+    before any of it runs.
+
     Parameters
     ----------
     data:
@@ -100,10 +127,17 @@ def forecast(
     horizon:
         How many steps past the end of the data to forecast.
     graph:
-        A window graph naming which series drive which. Not read yet.
+        A window graph over lagged node names (``pmi[t-2] -> sales[t]``), saying
+        which series drive which. Build one with
+        :func:`~ergodic.forecast.window_graph`, or hand over the ``.graph`` of a
+        temporal discovery result unchanged. Every variable it names has to be a
+        column of the data.
     mechanisms:
         Per-column overrides. A column named here keeps the mechanism it is
-        given; everything else is assigned from the schema.
+        given; everything else is assigned from the schema. A
+        :class:`~ergodic.forecast.ScenarioMechanism` marks a column as
+        known-future, which means it is never fitted and ``scenario=`` has to
+        supply its path.
     reconcile:
         The reconciliation strategy: ``"bottom_up"``, ``"top_down"``,
         ``"middle_out"``, ``"mint"``, or ``"none"``. Unset means bottom-up once
@@ -122,11 +156,20 @@ def forecast(
         ``{node: weight}`` for ``mint``: a node trusted ten times as much moves
         about a tenth as far when the levels are squared up.
     scenario:
-        Pinned future paths for known-future nodes. Not read yet.
+        Pinned future paths, ``{node: path}``, where a path is a length-``horizon``
+        array, a scalar, or the string ``"hold"`` (repeat the last observed
+        value). It makes no causal claim: it pins a path and trusts the fitted
+        regressions downstream, which is honest for a node whose future is
+        exogenous or already known and quietly wrong for one the graph says is
+        driven, so the second case is refused by name.
     fit:
-        ``"auto"`` or ``"independent"``: one fit per series, no information
-        crossing between them. ``"staged"`` and ``"joint"`` are named but not
-        built.
+        ``"independent"`` fits each series alone. ``"staged"`` fits one node at a
+        time and hands each posterior down the graph. ``"joint"`` fits every node
+        in one model, keeping their posteriors correlated. ``"auto"`` is
+        independent without a graph, and with one is joint at or under
+        :data:`AUTO_JOINT_MAX_NODES` modeled nodes and staged above it. The
+        strategy that ran, and the arithmetic behind an automatic choice, are on
+        the result as ``strategy``.
     robust:
         Fit a Student-t likelihood rather than a Normal one, so a few outliers do
         not drag the level. Reaches the auto-assigned mechanisms only; a
@@ -154,25 +197,25 @@ def forecast(
         )
     if int(horizon) < 1:
         raise ValueError(f"horizon must be >= 1, got {horizon}")
-    if graph is not None:
-        raise NotImplementedError(
-            "graph= is the driver sprint (S4): reading a window graph means resolving each "
-            "driver's future and handing posteriors down the stages. Forecast the series "
-            "independently for now by leaving graph unset."
+    if fit not in FIT_STRATEGIES:
+        raise ValueError(f"fit must be one of {FIT_STRATEGIES}, got {fit!r}")
+    if graph is None and fit in _GRAPH_FITS and scenario is None:
+        raise ValueError(
+            f"fit={fit!r} is about several series reading each other, and no graph says "
+            "which reads which. Pass graph=window_graph([...]) (or a discovery result's "
+            ".graph), or leave fit='auto' to forecast each series alone."
         )
-    if scenario is not None:
-        raise NotImplementedError(
-            "scenario= is the driver sprint (S4): a pinned future path only means something "
-            "once a node can read another node's path. Leave it unset for now."
+    if graph is not None and fit == "independent":
+        raise ValueError(
+            "fit='independent' fits each series alone, which would ignore the graph you "
+            "passed. Use fit='staged', fit='joint', or fit='auto' to read it, or drop "
+            "graph= to forecast independently on purpose."
         )
-    if fit in _STAGED_FITS:
-        raise NotImplementedError(
-            f"fit={fit!r} is the driver sprint (S4): staged and joint fitting are about "
-            "several nodes sharing structure, and this sprint fits each series alone. "
-            "Use fit='auto'."
+    if scenario is not None and graph is None and fit == "independent":
+        raise ValueError(
+            "fit='independent' fits each series alone, so a scenario= path would pin a "
+            "future nothing reads. Use fit='auto'."
         )
-    if fit not in _INDEPENDENT_FITS:
-        raise ValueError(f"fit must be one of {(*_INDEPENDENT_FITS, *_STAGED_FITS)}, got {fit!r}")
 
     options = {"proportions": proportions, "level": level, "weights": weights, "trust": trust}
     if not isinstance(data, HierarchicalTSData):
@@ -206,6 +249,30 @@ def forecast(
         raise ValueError("the dataset models no columns, so there is nothing to forecast")
     assigned = assign_mechanisms(data, mechanisms, robust=robust)
     seeds = sorted_seeds(nodes, seed)
+    tree = data.hierarchy if isinstance(data, HierarchicalTSData) else None
+
+    if graph is not None or scenario is not None or fit in _GRAPH_FITS:
+        return _through_the_graph(
+            data,
+            int(horizon),
+            graph=graph,
+            given=mechanisms,
+            assigned=assigned,
+            scenario=scenario,
+            tree=tree,
+            requested=fit,
+            reconcile=reconcile,
+            proportions=proportions,
+            level=level,
+            weights=weights,
+            trust=trust,
+            seeds=seeds,
+            seed=seed,
+            draws=draws,
+            warmup=warmup,
+            chains=chains,
+            target_accept=target_accept,
+        )
 
     fits: dict[str, NodeFit] = {}
     views: dict[str, NodeForecast] = {}
@@ -229,24 +296,169 @@ def forecast(
         diagnostics[node] = fitted.diagnostics
 
     series: dict[str, Array] = {node: views[node].draws for node in nodes}
+    return _assemble(
+        data,
+        int(horizon),
+        series=series,
+        assigned=assigned,
+        diagnostics=diagnostics,
+        fits=fits,
+        views=views,
+        reconcile=reconcile,
+        proportions=proportions,
+        level=level,
+        weights=weights,
+        trust=trust,
+        strategy=FitStrategy(strategy="independent", requested=fit),
+    )
+
+
+def _through_the_graph(
+    data: TimeSeriesData,
+    horizon: int,
+    *,
+    graph: MixedGraph | None,
+    given: Mapping[str, TemporalMechanism] | None,
+    assigned: Mapping[str, TemporalMechanism],
+    scenario: Mapping[str, Any] | None,
+    tree: Hierarchy | None,
+    requested: str,
+    reconcile: str | None,
+    proportions: str | None,
+    level: int | None,
+    weights: str | None,
+    trust: Mapping[str, float] | None,
+    seeds: Mapping[str, int],
+    seed: int,
+    draws: int,
+    warmup: int,
+    chains: int,
+    target_accept: float,
+) -> ForecastResult:
+    """The graph path: roles, then a schedule, then staged or joint fitting.
+
+    Everything that can be refused is refused here, before the first sampler
+    starts: a graph naming a column the data does not have, a scenario key that
+    is really an intervention, a driver whose future nobody supplied, a hierarchy
+    parent that wants its own model under staged fitting.
+    """
+    plan, roles, chosen = build_schedule(
+        data,
+        graph,
+        assigned,
+        given=given,
+        scenario=scenario,
+        hierarchy=tree,
+        fit=requested,
+    )
+    paths = resolve_scenarios(
+        data,
+        horizon,
+        graph=graph,
+        mechanisms=assigned,
+        roles=roles,
+        scenario=scenario,
+    )
+    n_mcmc = mcmc_node_count(roles)
+
+    run: StagedRun
+    if chosen == "joint":
+        run = run_joint(
+            data,
+            horizon,
+            schedule=plan,
+            mechanisms=assigned,
+            roles=roles,
+            paths=paths,
+            seed=seed,
+            draws=draws,
+            warmup=warmup,
+            chains=chains,
+            target_accept=target_accept,
+        )
+    else:
+        run = run_staged(
+            data,
+            horizon,
+            schedule=plan,
+            mechanisms=assigned,
+            roles=roles,
+            paths=paths,
+            seeds=seeds,
+            draws=draws,
+            warmup=warmup,
+            chains=chains,
+            target_accept=target_accept,
+        )
+    return _assemble(
+        data,
+        horizon,
+        series=dict(run.series),
+        assigned=assigned,
+        diagnostics=dict(run.diagnostics),
+        fits=run.fits,
+        views=run.views,
+        reconcile=reconcile,
+        proportions=proportions,
+        level=level,
+        weights=weights,
+        trust=trust,
+        strategy=FitStrategy(
+            strategy=chosen,
+            requested=requested,
+            n_mcmc_nodes=n_mcmc,
+            auto_threshold=AUTO_JOINT_MAX_NODES,
+        ),
+        graph=graph,
+        schedule=plan,
+    )
+
+
+def _assemble(
+    data: TimeSeriesData,
+    horizon: int,
+    *,
+    series: dict[str, Array],
+    assigned: Mapping[str, TemporalMechanism],
+    diagnostics: Mapping[str, Any],
+    fits: Mapping[str, NodeFit],
+    views: Mapping[str, NodeForecast],
+    reconcile: str | None,
+    proportions: str | None,
+    level: int | None,
+    weights: str | None,
+    trust: Mapping[str, float] | None,
+    strategy: FitStrategy,
+    graph: MixedGraph | None = None,
+    schedule: TrainingSchedule | None = None,
+) -> ForecastResult:
+    """Wrap the draws in a result, and reconcile the levels when there is a hierarchy."""
     if not isinstance(data, HierarchicalTSData):
         return ForecastResult(
             series=series,
-            horizon=int(horizon),
+            horizon=horizon,
             kind="draws",
             start=_next_label(data),
             mechanisms=assigned,
+            graph=graph,
+            schedule=schedule,
+            strategy=strategy,
+            fits=dict(fits),
             diagnostics=diagnostics,
         )
 
     tree = data.hierarchy
     _fill_aggregates(tree, series)
     unreconciled = ForecastResult(
-        series={node: series[node] for node in _hierarchy_order(tree, nodes)},
-        horizon=int(horizon),
+        series={node: series[node] for node in _hierarchy_order(tree, tuple(series))},
+        horizon=horizon,
         kind="draws",
         start=_next_label(data),
         mechanisms=assigned,
+        graph=graph,
+        schedule=schedule,
+        strategy=strategy,
+        fits=dict(fits),
         diagnostics=diagnostics,
         # Always, not only when MinT-shrink asks: it costs one median over draws
         # of a path the predictive pass already produced, and carrying it is what
@@ -264,6 +476,52 @@ def forecast(
         weights=weights,
         trust=trust,
     )
+
+
+def schedule(
+    data: TimeSeriesData,
+    graph: MixedGraph | None = None,
+    mechanisms: Mapping[str, TemporalMechanism] | None = None,
+    *,
+    scenario: Mapping[str, Any] | None = None,
+    fit: str = "auto",
+) -> TrainingSchedule:
+    """The plan :func:`forecast` would follow, without fitting anything.
+
+    Reads the same three things the forecast reads (the mechanisms, the graph,
+    the hierarchy) and returns the
+    :class:`~ergodic.forecast.TrainingSchedule`: which nodes are given, which are
+    fitted and in what order, which are summed at the end, and what each fitted
+    node reads from the waves before it. Print it before spending a sampler on
+    it.
+
+    It refuses everything the forecast would refuse about the *structure*: a
+    graph naming a column that is not there, a hierarchy parent that wants its
+    own model under staged fitting, a model node reading an aggregate, nodes that
+    drive each other in a loop. What it cannot see is anything about the horizon,
+    so a missing scenario path is still the forecast's to catch.
+
+    ``fit`` matters here for one reason: a joint plan may carry a hierarchy
+    parent that models itself and a staged plan may not, so passing the same
+    ``fit`` the forecast will get is what makes this the plan that actually runs.
+    """
+    if not isinstance(data, TimeSeriesData):
+        raise TypeError(
+            f"schedule() needs a TimeSeriesData, got {type(data).__name__}; build one with "
+            "ergodic.timeseries(frame, time=...)"
+        )
+    tree = data.hierarchy if isinstance(data, HierarchicalTSData) else None
+    assigned = assign_mechanisms(data, mechanisms)
+    plan, _roles, _strategy = build_schedule(
+        data,
+        graph,
+        assigned,
+        given=mechanisms,
+        scenario=scenario,
+        hierarchy=tree,
+        fit=fit,
+    )
+    return plan
 
 
 def _hierarchy_order(tree: Hierarchy, columns: tuple[str, ...]) -> tuple[str, ...]:
@@ -320,6 +578,12 @@ def _residual_variance(
     fitted: dict[str, Array] = {
         node: in_sample_median(fits[node], views[node]) for node in fits if node in tree.nodes
     }
+    for leaf in tree.leaves:
+        # A pinned leaf has no fit, and its fitted path is the series itself: a
+        # supplied path has no residual, which is MinT trusting it completely, and
+        # that is the right reading of "we already know this one".
+        if leaf not in fitted:
+            fitted[leaf] = _series_of(data, leaf)
     for parent in _leaves_up(tree):
         if parent in fitted:
             continue

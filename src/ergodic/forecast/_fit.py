@@ -30,10 +30,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ._mechanism import require_pymc
+from ._mechanism import is_symbolic, require_pymc
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     import numpy.typing as npt
 
@@ -44,12 +44,21 @@ if TYPE_CHECKING:
     BoolArray = npt.NDArray[np.bool_]
 
 __all__ = [
+    "FrozenParent",
+    "JointFit",
+    "JointNode",
     "NodeDiagnostics",
     "NodeFit",
     "NodeForecast",
+    "ParentColumn",
+    "align_draws",
+    "fit_joint",
     "fit_node",
+    "forecast_joint",
     "forecast_node",
     "in_sample_median",
+    "inject_futures",
+    "lag_align",
 ]
 
 #: A divergence share above this fraction of the draws earns a warning.
@@ -167,6 +176,135 @@ class NodeForecast:
     components: Mapping[str, Array]
 
 
+# -- the lag-shift design -----------------------------------------------------
+
+
+def lag_align(history: Array, future: Any | None, lag: int, horizon: int) -> Any:
+    """One parent column, shifted ``lag`` steps right and padded at the front.
+
+    An edge ``x[t-k] -> y[t]`` says row ``t`` of the child's design reads the
+    parent at ``t - k``. The first ``k`` rows reach back before the series starts,
+    so they are **front-padded with the parent's first observed value**. That
+    choice is worth stating because it is an assumption: it says the driver was
+    where it started before we began watching, which is the mildest thing to
+    assume and is wrong in exactly one direction, understating the trend over the
+    first ``k`` steps. The alternative, masking the first ``max_lag`` steps out of
+    the likelihood, is a real option and is deliberately not taken in v1: with
+    ``k`` small against ``T`` the padded rows are a fraction of a percent of the
+    information, and dropping rows makes two nodes at different lags fit
+    different windows.
+
+    ``history`` is the parent over the training window, ``(T,)``, on the parent's
+    own scaled space. ``future`` is the parent over the horizon, ``(H,)``, either
+    a numpy array (a known future) or a tensor of the model being built (a frozen
+    parent's ``{base}_fc`` site, or an upstream node's mean path). The result runs
+    ``T + horizon`` steps, and it is a tensor exactly when the future it needed
+    was one.
+
+    A lag at or past the horizon never reads the future at all: every horizon row
+    still falls inside the training window, so the column comes back pure numpy.
+    """
+    hist = np.asarray(history, dtype=np.float64)
+    if hist.ndim != 1 or hist.size == 0:
+        raise ValueError(f"a parent history must be a non-empty 1-D array, got shape {hist.shape}")
+    if int(lag) < 0:
+        raise ValueError(f"lag must be >= 0, got {lag}")
+    if int(horizon) < 0:
+        raise ValueError(f"horizon must be >= 0, got {horizon}")
+    t_len = int(hist.shape[0])
+    n_total = t_len + int(horizon)
+    head = np.concatenate([np.full(int(lag), hist[0]), hist])[:n_total]
+    tail_len = n_total - min(n_total, t_len + int(lag))
+    if tail_len == 0:
+        return head
+    if future is None:
+        raise ValueError(
+            f"a parent at lag {lag} needs {tail_len} step(s) of its own future to cover a "
+            f"horizon of {horizon}, and none was given"
+        )
+    if is_symbolic(future):
+        pm = require_pymc()
+        return pm.math.concatenate([head, future[:tail_len]])
+    tail = np.asarray(future, dtype=np.float64)
+    if tail.ndim != 1 or tail.shape[0] < tail_len:
+        raise ValueError(
+            f"a parent at lag {lag} needs {tail_len} future step(s), and the future given "
+            f"has shape {tail.shape}"
+        )
+    return np.concatenate([head, tail[:tail_len]])
+
+
+@dataclass(frozen=True)
+class ParentColumn:
+    """One regressor of one node: which variable, at which lag, under which name.
+
+    ``key`` is the design name the mechanism sees, and therefore the ``beta_{key}``
+    site it registers. It is the parent's plain variable name when that parent
+    drives this node at a single lag, which is the ordinary case and keeps the S2
+    naming contract intact; when the same parent drives at several lags the
+    shortest keeps the plain name and the others read ``{base}_lag{k}``.
+
+    ``history`` and ``future`` are on the **parent's** scaled space, which is the
+    space the child's regression reads it in. ``future`` is ``None`` for a parent
+    whose horizon arrives as posterior draws instead (see :class:`FrozenParent`)
+    and for a parent that is another node of a joint model.
+    """
+
+    key: str
+    base: str
+    lag: int
+    history: Array | None = None
+    future: Array | None = None
+    upstream: bool = False
+
+
+@dataclass(frozen=True)
+class FrozenParent:
+    """A parent whose horizon arrives as its own posterior draws.
+
+    This is the staged handoff. The child's forecast model declares one fresh site
+    ``{base}_fc`` of length ``H``; the parent's stored forecast draws, transformed
+    into the parent's scaled space, are written into a copy of the child's trace
+    under that name; and the posterior-predictive pass replays them by name like
+    any other fitted site. Nothing collapses to a point: every draw of the child
+    sees the matching draw of its parent, so the parent's whole forecast
+    distribution reaches the child's band.
+
+    ``draws`` is ``(S, H)`` on the parent's scaled space, with ``S`` equal to the
+    child's own draw count. ``columns`` lists the design keys that read this
+    parent and the lag each reads it at.
+    """
+
+    base: str
+    draws: Array
+    history: Array
+    columns: tuple[tuple[str, int], ...]
+
+    @property
+    def site(self) -> str:
+        """The name of the fresh site the child's forecast model declares."""
+        return f"{self.base}{_FC_SUFFIX}"
+
+
+def align_draws(draws: Array, n_target: int, *, seed: int) -> Array:
+    """Make a parent's ``(S, H)`` draws match the child's draw count.
+
+    Equal by construction whenever one ``draws=`` sets the budget for the whole
+    graph, which is the normal path and costs nothing. When they differ (a parent
+    fitted separately, at another budget) the parent is resampled with
+    replacement under an explicit seed, which keeps the handoff a sample from the
+    parent's posterior rather than a reshaped one.
+    """
+    values = np.asarray(draws, dtype=np.float64)
+    if values.ndim != 2:
+        raise ValueError(f"parent draws must be 2-D (S, H), got shape {values.shape}")
+    if int(values.shape[0]) == int(n_target):
+        return values
+    rng = np.random.default_rng(seed)
+    picks = rng.integers(0, values.shape[0], size=int(n_target))
+    return np.asarray(values[picks], dtype=np.float64)
+
+
 # -- fitting ------------------------------------------------------------------
 
 
@@ -259,6 +397,7 @@ def forecast_node(
     horizon: int,
     *,
     parents: Mapping[str, Array] | None = None,
+    frozen: Iterable[FrozenParent] | None = None,
     seed: int = 0,
 ) -> NodeForecast:
     """Continue a fitted node ``horizon`` steps, replaying its posterior.
@@ -268,21 +407,33 @@ def forecast_node(
     not, then runs the posterior-predictive pass. The returned draws come back
     through the node's own scaler, so they are in the units the data arrived in.
 
-    ``parents`` are the full ``T + horizon`` driver paths. Without them the
-    fitted parents are extended by nothing, which is why a node with parents
-    needs its parents' futures resolved before this is called.
+    ``parents`` are the full ``T + horizon`` driver paths, on each parent's own
+    scaled space, for parents whose future is known outright. ``frozen`` carries
+    the parents whose future is a posterior instead: each declares a fresh
+    ``{base}_fc`` site here, gets its draws written into a copy of this node's
+    trace, and is replayed from there, so the parent's uncertainty propagates
+    into this node's band rather than collapsing to a path.
     """
     pm = require_pymc()
 
     if horizon < 1:
         raise ValueError(f"horizon must be >= 1, got {horizon}")
-    paths = (
+    handoffs = tuple(frozen or ())
+    paths: dict[str, Any] = (
         {str(k): np.asarray(v, dtype=np.float64) for k, v in parents.items()}
         if parents is not None
         else dict(fit.parents)
     )
     t_len = fit.n_obs
     with pm.Model() as model:
+        for handoff in handoffs:
+            # The prior here is never used: the audit below refuses to run the
+            # predictive pass unless every one of these names is in the trace, and
+            # a name in the trace is read from it rather than sampled. It exists so
+            # the site is an ordinary free variable of the model.
+            future = pm.Normal(handoff.site, mu=0.0, sigma=1.0, shape=horizon)
+            for key, lag in handoff.columns:
+                paths[key] = lag_align(handoff.history, future, lag, horizon)
         fit.mechanism.build(
             fit.node,
             obs=fit.obs_scaled,
@@ -292,13 +443,20 @@ def forecast_node(
             mask=fit.mask,
         )
 
-    _audit_sites(model, fit.trace)
+    trace = fit.trace
+    injected = tuple(handoff.site for handoff in handoffs)
+    if handoffs:
+        trace = inject_futures(
+            trace,
+            {handoff.site: handoff.draws for handoff in handoffs},
+        )
+    _audit_sites(model, trace, injected=injected)
 
     predictive = fit.mechanism.predictive_site(fit.node)
     wanted = [predictive, *(v.name for v in model.deterministics)]
     with model:
         ppc = pm.sample_posterior_predictive(
-            fit.trace,
+            trace,
             var_names=wanted,
             predictions=True,
             progressbar=False,
@@ -314,6 +472,43 @@ def forecast_node(
         draws=np.asarray(fit.scaler.inverse(scaled_draws), dtype=np.float64),
         components=components,
     )
+
+
+def inject_futures(trace: Any, futures: Mapping[str, Array]) -> Any:
+    """Write frozen parent futures into a copy of a trace, ready to be replayed.
+
+    Returns an augmented posterior as an ``xarray`` Dataset, which is one of the
+    shapes ``pm.sample_posterior_predictive`` reads. The trace handed in is never
+    touched: a fitted posterior is a record, and one node's handoff must not
+    change what another node replays.
+
+    Each ``(S, H)`` array is folded back onto the trace's own ``(chain, draw)``
+    grid in the order :func:`_flatten_draws` unfolded it, so draw ``s`` of the
+    parent lands on draw ``s`` of the child. Under staged fitting those two
+    posteriors are independent by construction, so the pairing is a coupling of
+    two exchangeable samples rather than a joint draw, and any pairing would do.
+    What matters is that there *is* one: the child's forecast is then evaluated
+    once per parent draw, which is what carries the parent's whole distribution
+    into the child's band instead of averaging it away.
+    """
+    posterior = _group_dataset(trace, "posterior")
+    augmented = posterior.copy()
+    n_chain = int(posterior.sizes["chain"])
+    n_draw = int(posterior.sizes["draw"])
+    for name, values in futures.items():
+        array = np.asarray(values, dtype=np.float64)
+        if array.ndim != 2:
+            raise ValueError(f"the future for {name!r} must be 2-D (S, H), got {array.shape}")
+        if int(array.shape[0]) != n_chain * n_draw:
+            raise ValueError(
+                f"the future for {name!r} carries {array.shape[0]} draws and the trace holds "
+                f"{n_chain * n_draw}; align the draw counts before injecting"
+            )
+        augmented[name] = (
+            ("chain", "draw", f"{name}_dim_0"),
+            array.reshape(n_chain, n_draw, int(array.shape[1])),
+        )
+    return augmented
 
 
 def in_sample_median(
@@ -360,10 +555,214 @@ def in_sample_median(
     return np.asarray(fit.scaler.inverse(fitted), dtype=np.float64)
 
 
-def _audit_sites(model: Any, trace: Any) -> None:
+# -- the joint fit ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class JointNode:
+    """One node's slot in a joint model: what to build and what it reads."""
+
+    node: str
+    mechanism: TemporalMechanism
+    scaler: Scaler
+    obs_scaled: Array
+    mask: BoolArray
+    parents: tuple[ParentColumn, ...] = ()
+
+
+@dataclass(frozen=True)
+class JointFit:
+    """One posterior over every node of a joint model.
+
+    ``sites`` maps each node to the names it registered, recorded while the model
+    was built rather than guessed from a name prefix, so two nodes whose names
+    share a prefix are still told apart exactly.
+    """
+
+    nodes: tuple[JointNode, ...]
+    trace: Any
+    sites: Mapping[str, tuple[str, ...]]
+    diagnostics: Mapping[str, NodeDiagnostics]
+
+    @property
+    def n_obs(self) -> int:
+        """The number of time steps the model was built over."""
+        return int(self.nodes[0].obs_scaled.shape[0])
+
+    def node_of(self, name: str) -> JointNode:
+        """One node's slot, by name."""
+        for slot in self.nodes:
+            if slot.node == name:
+                return slot
+        raise KeyError(f"no node {name!r} in this joint fit")
+
+
+def fit_joint(
+    nodes: Sequence[JointNode],
+    *,
+    draws: int = 1000,
+    warmup: int = 500,
+    chains: int = 1,
+    seed: int = 0,
+    target_accept: float = 0.99,
+    nuts_sampler: str | None = None,
+) -> JointFit:
+    """Fit every node of a graph in one model, so their posteriors stay correlated.
+
+    ``nodes`` arrives in topological order: a node's parents are built before it,
+    and a parent that is another node of this model feeds the child through its
+    own **mean path** rather than through its observed series. That is the whole
+    difference from staged fitting. The child's likelihood therefore says
+    something about the parent's latent states, and the parent's uncertainty
+    reaches the child as a joint posterior instead of as a handoff, which is what
+    "the correlation staging drops" means concretely.
+
+    It costs what one sampler over everything costs, which is why the facade
+    keeps it for small graphs.
+    """
+    pm = require_pymc()
+
+    slots = tuple(nodes)
+    if not slots:
+        raise ValueError("a joint fit needs at least one node")
+    t_len = int(slots[0].obs_scaled.shape[0])
+    for slot in slots:
+        if int(slot.obs_scaled.shape[0]) != t_len:
+            raise ValueError(
+                f"{slot.node!r} was built over {slot.obs_scaled.shape[0]} steps and "
+                f"{slots[0].node!r} over {t_len}; a joint model shares one time window"
+            )
+
+    with pm.Model() as model:
+        sites = _build_joint(slots, t_len, horizon=0)
+    backend = nuts_sampler or resolve_nuts_sampler()
+    with model:
+        trace = pm.sample(
+            draws=draws,
+            tune=warmup,
+            chains=chains,
+            cores=1,
+            random_seed=seed,
+            progressbar=False,
+            # Named, never defaulted: the reason is at fit_node's own call site.
+            nuts_sampler=backend,
+            target_accept=target_accept,
+            compute_convergence_checks=False,
+            idata_kwargs={"log_likelihood": False},
+        )
+
+    diagnostics: dict[str, NodeDiagnostics] = {}
+    for slot in slots:
+        record = _diagnostics(slot.node, trace, chains=chains, sites=sites[slot.node])
+        _warn_on_breach(record)
+        diagnostics[slot.node] = record
+    return JointFit(nodes=slots, trace=trace, sites=sites, diagnostics=diagnostics)
+
+
+def forecast_joint(fit: JointFit, horizon: int, *, seed: int = 0) -> dict[str, NodeForecast]:
+    """Continue every node of a joint fit at once, in one predictive pass.
+
+    The horizon's driver values are the drivers' own forecasts, computed inside
+    the same model from the same posterior draw, so a child never sees a parent
+    path that its own parameters did not come from.
+    """
+    pm = require_pymc()
+
+    if horizon < 1:
+        raise ValueError(f"horizon must be >= 1, got {horizon}")
+    t_len = fit.n_obs
+    with pm.Model() as model:
+        sites = _build_joint(fit.nodes, t_len, horizon=horizon)
+    _audit_sites(model, fit.trace)
+
+    predictive = {slot.node: slot.mechanism.predictive_site(slot.node) for slot in fit.nodes}
+    wanted = [*predictive.values(), *(v.name for v in model.deterministics)]
+    with model:
+        ppc = pm.sample_posterior_predictive(
+            fit.trace,
+            var_names=wanted,
+            predictions=True,
+            progressbar=False,
+            random_seed=seed,
+        )
+    drawn = _group_dataset(ppc, "predictions")
+    out: dict[str, NodeForecast] = {}
+    for slot in fit.nodes:
+        name = predictive[slot.node]
+        scaled = _flatten_draws(drawn[name])
+        components = {
+            str(site): _flatten_draws(drawn[site])
+            for site in sites[slot.node]
+            if site != name and site in drawn.data_vars
+        }
+        out[slot.node] = NodeForecast(
+            node=slot.node,
+            draws=np.asarray(slot.scaler.inverse(scaled), dtype=np.float64),
+            components=components,
+        )
+    return out
+
+
+def _build_joint(
+    nodes: Sequence[JointNode], t_len: int, *, horizon: int
+) -> dict[str, tuple[str, ...]]:
+    """Build every node into the current model context and record whose sites are whose."""
+    means: dict[str, Any] = {}
+    sites: dict[str, tuple[str, ...]] = {}
+    model = require_pymc().modelcontext(None)
+    seen = _model_names(model)
+    for slot in nodes:
+        paths: dict[str, Any] = {}
+        for column in slot.parents:
+            if column.upstream:
+                if column.base not in means:
+                    raise ValueError(
+                        f"{slot.node!r} reads {column.base!r}, which this joint model has not "
+                        "built yet; the nodes have to arrive in topological order"
+                    )
+                paths[column.key] = _shift_mean(means[column.base], column.lag, t_len + horizon)
+            else:
+                if column.history is None:
+                    raise ValueError(
+                        f"the column {column.key!r} of {slot.node!r} is neither upstream nor "
+                        "carries a history, so there is nothing to read"
+                    )
+                paths[column.key] = lag_align(column.history, column.future, column.lag, horizon)
+        means[slot.node] = slot.mechanism.build(
+            slot.node,
+            obs=slot.obs_scaled,
+            parents=paths,
+            T=t_len,
+            horizon=horizon,
+            mask=slot.mask,
+        )
+        after = _model_names(model)
+        sites[slot.node] = tuple(sorted(after - seen))
+        seen = after
+    return sites
+
+
+def _model_names(model: Any) -> set[str]:
+    """Every name registered in a model so far, free variables and deterministics alike."""
+    return {str(v.name) for v in (*model.free_RVs, *model.observed_RVs, *model.deterministics)}
+
+
+def _shift_mean(mean: Any, lag: int, n_total: int) -> Any:
+    """An upstream node's mean path, shifted ``lag`` steps and front-padded with its first value.
+
+    The tensor sibling of :func:`lag_align`, and the padding rule is the same one.
+    """
+    if int(lag) == 0:
+        return mean
+    pm = require_pymc()
+    head = pm.math.ones(int(lag)) * mean[0]
+    return pm.math.concatenate([head, mean[: n_total - int(lag)]])
+
+
+def _audit_sites(model: Any, trace: Any, *, injected: Iterable[str] = ()) -> None:
     """Check the forecast model against the trace, in both directions, before any ppc.
 
-    Three rules, and every one of them guards a way the run could look fine and
+    Four rules, and every one of them guards a way the run could look fine and
     be wrong:
 
     1. A free variable the trace holds must hold it at the same shape. A shape
@@ -374,17 +773,43 @@ def _audit_sites(model: Any, trace: Any) -> None:
     3. A forecast site must *not* be in the trace, or it would be replayed
        instead of simulated and the horizon would inherit the training window's
        innovations.
+    4. No deterministic of this model may be in the trace: one stored there is
+       read back rather than recomputed, so a fitting model that recorded its own
+       ``mu`` would feed a ``T``-long array into a ``T + H``-long slot.
 
-    Deterministics get the same treatment as rule 3: one stored in the trace is
-    read back from it rather than recomputed, so a fitting model that recorded
-    its own ``mu`` would feed a ``T``-long array into a ``T + H``-long slot.
+    ``injected`` names the frozen parent futures the caller has just written into
+    the trace, and it flips rule 3 into rule 1 for exactly those names: a
+    ``{base}_fc`` that was injected has to be there, at the right shape, because
+    being replayed is the point of it. Every other ``_fc`` site stays
+    required-fresh.
+
+    **That is a caller invariant, and it is the one thing here that can be
+    undone from outside.** :func:`forecast_node` derives the declared sites and
+    the injected list from the same tuple of :class:`FrozenParent` records, in
+    one pass, which is what makes them impossible to disagree. Anyone who
+    separates the two (declaring a site in one place and assembling the injected
+    names in another) re-opens exactly the hole this function exists to close: a
+    handoff that was declared but not written would be a ``_fc`` name absent from
+    both the trace and this list, rule 2 would wave it through as
+    required-fresh, and the child would forecast against a driver drawn from a
+    standard normal prior without anything saying so. Never build this list by
+    hand.
     """
-    posterior = _group_dataset(trace, "posterior")
+    posterior = _posterior_of(trace)
     held = {str(name): tuple(int(s) for s in posterior[name].shape[2:]) for name in posterior}
+    replayed_fc = {str(name) for name in injected}
+    declared = {str(rv.name) for rv in model.free_RVs}
+    orphans = sorted(replayed_fc - declared)
+    if orphans:
+        raise ValueError(
+            f"the futures {orphans} were injected into the trace but this model never "
+            "declared them, so nothing would read them and the node would forecast "
+            "without its driver"
+        )
 
     for rv in model.free_RVs:
         name = str(rv.name)
-        if name.endswith(_FC_SUFFIX):
+        if name.endswith(_FC_SUFFIX) and name not in replayed_fc:
             if name in held:
                 raise ValueError(
                     f"forecast site {name!r} is in the trace; it would be replayed instead "
@@ -427,12 +852,26 @@ def _static_shape(rv: Any) -> tuple[int, ...]:
 # -- diagnostics --------------------------------------------------------------
 
 
-def _diagnostics(node: str, trace: Any, *, chains: int) -> NodeDiagnostics:
-    """Divergences, minimum bulk ESS over the scalar sites, r-hat when there are chains."""
+def _diagnostics(
+    node: str, trace: Any, *, chains: int, sites: Sequence[str] | None = None
+) -> NodeDiagnostics:
+    """Divergences, minimum bulk ESS over the scalar sites, r-hat when there are chains.
+
+    ``sites`` restricts the reading to one node's own names, which is what a joint
+    fit needs: one trace holds every node, and mixing another node's ESS into this
+    node's minimum would report a problem in the wrong place. Divergences stay
+    model-wide, because a divergence is a property of the joint posterior rather
+    than of any one node in it.
+    """
     import arviz as az
 
     posterior = _group_dataset(trace, "posterior")
-    scalars = [str(name) for name in posterior.data_vars if posterior[name].ndim == 2]
+    wanted = None if sites is None else set(sites)
+    scalars = [
+        str(name)
+        for name in posterior.data_vars
+        if posterior[name].ndim == 2 and (wanted is None or str(name) in wanted)
+    ]
     ess_by_site: dict[str, float] = {}
     if scalars:
         # az.ess(ds, var_names=[...]) resolves only the first variable in arviz 1.x
@@ -488,6 +927,20 @@ def _warn_on_breach(diagnostics: NodeDiagnostics) -> None:
 
 
 # -- trace plumbing -----------------------------------------------------------
+
+
+def _posterior_of(trace: Any) -> Any:
+    """The posterior of a sampler result, or the dataset itself when it already is one.
+
+    :func:`inject_futures` hands back a bare posterior Dataset (which is one of the
+    shapes the predictive pass reads), so anything that reads a trace has to take
+    both shapes.
+    """
+    import xarray as xr
+
+    if isinstance(trace, xr.Dataset):
+        return trace
+    return _group_dataset(trace, "posterior")
 
 
 def _group_dataset(trace: Any, group: str) -> Any:

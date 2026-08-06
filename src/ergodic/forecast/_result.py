@@ -8,8 +8,9 @@ posterior or bootstrap draws. The accessors read the cloud: :meth:`median` is th
 point path, :meth:`interval` the equal-tailed band, :meth:`draws` the raw sample.
 
 Provenance fields (the mechanisms, the window graph, the training schedule, the
-sampler diagnostics, the reconciliation strategy) default to ``None`` and get
-filled by the later sprints. A baseline fills none of them.
+fit strategy and the fits behind it, the sampler diagnostics, the reconciliation
+strategy) default to ``None`` and get filled by whatever produced the draws. A
+baseline fills none of them.
 """
 
 from __future__ import annotations
@@ -28,7 +29,37 @@ if TYPE_CHECKING:
     from ..data import Hierarchy
     from ..graph import MixedGraph
 
-__all__ = ["ForecastResult", "coherence_gap"]
+__all__ = ["FitStrategy", "ForecastResult", "coherence_gap"]
+
+
+@dataclass(frozen=True)
+class FitStrategy:
+    """How a forecast was fitted, and why that one.
+
+    ``strategy`` is what ran: ``"independent"`` (one model per series, nothing
+    crossing between them), ``"staged"`` (one model per node, posteriors handed
+    down the graph), or ``"joint"`` (one model over every node, so their
+    posteriors stay correlated). ``requested`` is what the caller asked for, which
+    is ``"auto"`` most of the time.
+
+    ``n_mcmc_nodes`` and ``auto_threshold`` are the arithmetic behind an
+    ``"auto"`` choice: a graph with no more modeled nodes than the threshold is
+    fitted jointly, and anything larger is staged. Carrying both means the choice
+    can be read off a result rather than reasoned about.
+    """
+
+    strategy: str
+    requested: str = "auto"
+    n_mcmc_nodes: int = 0
+    auto_threshold: int | None = None
+
+    def __repr__(self) -> str:
+        body = self.strategy
+        if self.requested == "auto" and self.auto_threshold is not None:
+            body += f" (auto: {self.n_mcmc_nodes} node(s), joint at or under {self.auto_threshold})"
+        elif self.requested != self.strategy:
+            body += f" (requested {self.requested!r})"
+        return f"FitStrategy({body})"
 
 
 @dataclass(frozen=True)
@@ -56,6 +87,13 @@ class ForecastResult:
     mechanisms: Mapping[str, Any] | None = None
     graph: MixedGraph | None = None
     schedule: Any | None = None
+    #: How the fit ran and why, as a :class:`FitStrategy`. ``None`` for a model
+    #: that does no sampling.
+    strategy: FitStrategy | None = None
+    #: Per-node fitted handles (a ``NodeFit`` each), the posterior behind the
+    #: draws. A joint fit gives every node the same trace, which is what a joint
+    #: fit is. ``None`` for a model that does no sampling.
+    fits: Mapping[str, Any] | None = None
     #: Per-node sampler diagnostics, one record each (divergences, minimum bulk
     #: ESS, r-hat when there is more than one chain). A model that does no
     #: sampling leaves it None.
