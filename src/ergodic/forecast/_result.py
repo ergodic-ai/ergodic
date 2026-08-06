@@ -25,9 +25,10 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import pandas as pd
 
+    from ..data import Hierarchy
     from ..graph import MixedGraph
 
-__all__ = ["ForecastResult"]
+__all__ = ["ForecastResult", "coherence_gap"]
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,15 @@ class ForecastResult:
     diagnostics: Mapping[str, Any] | None = None
     reconciliation: str | None = None
     coherent: bool | None = None
+    #: Each node's in-sample one-step residual second moment, when the fits
+    #: computed it: the mean of the squared residuals, uncentered, which is what
+    #: MinT wants (its W estimates ``E[e e']``, not the spread of e around its own
+    #: mean, so a biased fit is charged for its bias). It rides along so the whole
+    #: reconciliation menu stays available after the fact: MinT-shrink weights are
+    #: a property of the fit rather than of the draws, and without them here an
+    #: unreconciled result could not be reconciled that way without sampling
+    #: everything again.
+    residual_var: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
         if self.horizon < 1:
@@ -143,6 +153,29 @@ class ForecastResult:
         hi = np.percentile(draws, (1.0 - tail) * 100.0, axis=0)
         return np.asarray(lo, dtype=np.float64), np.asarray(hi, dtype=np.float64)
 
+    # -- the hierarchy -------------------------------------------------------
+
+    def coherence_error(self, hierarchy: Hierarchy, *, relative: bool = True) -> float:
+        """The worst gap between a parent and its children, over every draw and step.
+
+        Zero means the forecast keeps the hierarchy's arithmetic promise exactly.
+        The default reading is **relative**: the gap divided by the size of the
+        parent it belongs to, so the number means the same thing on a series in
+        units and on the same series in billions. That is the honest contract,
+        because the residual reconciliation leaves behind is rounding, and
+        rounding is relative: adding four float64 numbers near 1e9 cannot do
+        better than about 1e-7 absolute, and calling that incoherent would be
+        wrong. Anything a strategy leaves should read as machine epsilon here,
+        around 1e-16, whatever the series is measured in.
+
+        Pass ``relative=False`` for the gap in the units of the series, which is
+        what to look at when a real disagreement needs sizing.
+
+        Every node of the tree has to be in the result, since a missing one is a
+        gap that cannot be measured rather than a gap of zero.
+        """
+        return coherence_gap(self.series, hierarchy, relative=relative)
+
     def to_frame(self, level: float = 0.9) -> pd.DataFrame:
         """A tidy frame: one row per node and step, with the median and the band."""
         import pandas as pd
@@ -169,3 +202,40 @@ class ForecastResult:
         if self.coherent is not None:
             body += f", coherent={self.coherent}"
         return f"ForecastResult({self.kind}: {body})"
+
+
+def coherence_gap(
+    series: Mapping[str, npt.NDArray[np.float64]],
+    hierarchy: Hierarchy,
+    *,
+    relative: bool = True,
+) -> float:
+    """The largest ``|parent - aggregate(children)|`` over parents, draws, and steps.
+
+    Relative by default: each parent's gap is divided by its own size, so a
+    branch is judged against itself rather than against the biggest number in the
+    tree, and the answer does not change when the series changes units. The
+    divisor is floored at one, which keeps the reading absolute for a series that
+    lives near zero, where a relative gap would be noise over noise.
+
+    Free-standing so a set of draws can be measured before it is wrapped in a
+    result, which is what the reconciliation layer does on its way out.
+    """
+    missing = sorted(set(hierarchy.nodes) - set(series))
+    if missing:
+        raise ValueError(
+            f"coherence cannot be measured: {missing} have no draws. Every node of the "
+            "hierarchy has to be present, since a missing series is an unknown gap rather "
+            "than a gap of zero."
+        )
+    worst = 0.0
+    for parent in hierarchy.internal_nodes:
+        kids = hierarchy.children_of(parent)
+        stacked = np.stack([np.asarray(series[kid], dtype=np.float64) for kid in kids], axis=0)
+        expected = stacked.mean(axis=0) if hierarchy.aggregation == "mean" else stacked.sum(axis=0)
+        top = np.asarray(series[parent], dtype=np.float64)
+        gap = float(np.max(np.abs(top - expected)))
+        if relative:
+            gap /= max(1.0, float(np.max(np.abs(top))))
+        worst = max(worst, gap)
+    return worst

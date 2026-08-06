@@ -49,6 +49,7 @@ __all__ = [
     "NodeForecast",
     "fit_node",
     "forecast_node",
+    "in_sample_median",
 ]
 
 #: A divergence share above this fraction of the draws earns a warning.
@@ -313,6 +314,50 @@ def forecast_node(
         draws=np.asarray(fit.scaler.inverse(scaled_draws), dtype=np.float64),
         components=components,
     )
+
+
+def in_sample_median(
+    fit: NodeFit,
+    view: NodeForecast | None = None,
+    *,
+    seed: int = 0,
+) -> Array:
+    """The fitted mean path over the training window, ``(T,)`` in the data's own units.
+
+    Where the fitted values come from is a design decision worth stating, because
+    the obvious route is closed. A fitting model registers no deterministics at
+    all (S2's finding: a deterministic sitting in the trace is read back *from*
+    the trace by the posterior-predictive pass rather than recomputed, so a
+    fit-time ``mu`` of length ``T`` would be poured into a forecast-time slot of
+    length ``T + H``), so there is no ``mu`` in the trace to read.
+
+    But the forecast model already computes one. Its ``mu`` runs over
+    ``T + horizon`` steps, and the first ``T`` of them are a pure replay: they
+    depend only on parameters and innovations that came out of the trace, never
+    on the fresh horizon innovations, because the recursion runs forward in time.
+    So the in-sample fitted path is the forecast model's own ``mu[:T]``, free of
+    charge when a forecast has already been made, and one small predictive pass
+    when it has not.
+
+    Pass ``view`` when :func:`forecast_node` has already run for this fit; the
+    two agree exactly, since the horizon seed cannot reach the training rows.
+    """
+    seen = view if view is not None else forecast_node(fit, 1, seed=seed)
+    if seen.node != fit.node:
+        raise ValueError(
+            f"the forecast is for {seen.node!r} and the fit is for {fit.node!r}; "
+            "in-sample values have to come from this node's own model"
+        )
+    name = fit.mechanism.mean_site(fit.node)
+    if name not in seen.components:
+        raise ValueError(
+            f"the forecast of {fit.node!r} carries no {name!r} deterministic, so it has no "
+            "fitted mean path to read. A mechanism has to register its mean path under "
+            "mean_site() in forecasting models for in-sample values to exist."
+        )
+    mu = np.asarray(seen.components[name], dtype=np.float64)
+    fitted = np.median(mu[:, : fit.n_obs], axis=0)
+    return np.asarray(fit.scaler.inverse(fitted), dtype=np.float64)
 
 
 def _audit_sites(model: Any, trace: Any) -> None:

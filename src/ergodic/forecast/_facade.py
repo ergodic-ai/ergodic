@@ -27,8 +27,15 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..data import HierarchicalTSData, TimeSeriesData
-from ._fit import fit_node, forecast_node, sorted_seeds
+from ._fit import NodeFit, NodeForecast, fit_node, forecast_node, in_sample_median, sorted_seeds
 from ._mechanism import assign_mechanisms
+from ._reconcile import (
+    RECONCILE_METHODS,
+    _leaves_up,
+    _require_sum,
+    _series_of,
+)
+from ._reconcile import reconcile as reconcile_result
 from ._result import ForecastResult
 
 if TYPE_CHECKING:
@@ -36,6 +43,7 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
+    from ..data import Hierarchy
     from ..graph import MixedGraph
     from ._mechanism import TemporalMechanism
 
@@ -47,6 +55,8 @@ __all__ = ["forecast"]
 _INDEPENDENT_FITS = ("auto", "independent")
 #: Strategies that exist in the vocabulary but are not built yet.
 _STAGED_FITS = ("staged", "joint")
+#: The strategies that read the training window for their shares.
+_NEEDS_DATA = ("top_down", "middle_out")
 
 
 def forecast(
@@ -56,6 +66,10 @@ def forecast(
     graph: MixedGraph | None = None,
     mechanisms: Mapping[str, TemporalMechanism] | None = None,
     reconcile: str | None = None,
+    proportions: str | None = None,
+    level: int | None = None,
+    weights: str | None = None,
+    trust: Mapping[str, float] | None = None,
     scenario: Mapping[str, Any] | None = None,
     fit: str = "auto",
     robust: bool = False,
@@ -72,11 +86,17 @@ def forecast(
     replaying its posterior and simulating only the horizon. The result carries
     the draws, the mechanisms that produced them, and the sampler diagnostics.
 
+    Given a :class:`~ergodic.data.HierarchicalTSData`, every level is forecast
+    the same way. A node with a column gets its own model, leaf or total alike,
+    and a node that exists only as an aggregate is summed from its children. The
+    levels are then made to agree by the strategy ``reconcile`` names, and the
+    unreconciled version stays available through ``reconcile="none"``.
+
     Parameters
     ----------
     data:
-        A :class:`~ergodic.data.TimeSeriesData`. A hierarchical dataset needs the
-        reconciliation layer and refuses here for now.
+        A :class:`~ergodic.data.TimeSeriesData`, or a
+        :class:`~ergodic.data.HierarchicalTSData` for the hierarchical path.
     horizon:
         How many steps past the end of the data to forecast.
     graph:
@@ -85,9 +105,22 @@ def forecast(
         Per-column overrides. A column named here keeps the mechanism it is
         given; everything else is assigned from the schema.
     reconcile:
-        The reconciliation strategy, which only means something for a hierarchy.
-        Leave it unset for flat data. The default once a hierarchy exists is
-        bottom-up.
+        The reconciliation strategy: ``"bottom_up"``, ``"top_down"``,
+        ``"middle_out"``, ``"mint"``, or ``"none"``. Unset means bottom-up once
+        a hierarchy exists and nothing at all on flat data, where naming a
+        strategy raises rather than pretending there was something to reconcile.
+    proportions:
+        ``"historical"`` or ``"forecast"``, how ``top_down`` and ``middle_out``
+        split a parent between its children.
+    level:
+        Which depth ``middle_out`` believes, the root being 0.
+    weights:
+        ``"posterior"`` or ``"mint_shrink"``, where ``mint`` gets its weights.
+        The shrink rule reads each node's in-sample residuals, which this facade
+        computes from the fits it just ran.
+    trust:
+        ``{node: weight}`` for ``mint``: a node trusted ten times as much moves
+        about a tenth as far when the levels are squared up.
     scenario:
         Pinned future paths for known-future nodes. Not read yet.
     fit:
@@ -111,14 +144,9 @@ def forecast(
     -------
     ForecastResult
         Draws of shape ``(draws * chains, horizon)`` per series, in the units the
-        data arrived in.
+        data arrived in. From a hierarchy it also carries ``reconciliation`` and
+        ``coherent``, and its series run top of the tree downward.
     """
-    if isinstance(data, HierarchicalTSData):
-        raise NotImplementedError(
-            "forecast() does not read a HierarchicalTSData yet: forecasting every level "
-            "and making the levels agree is the reconciliation sprint (S3). Pass a flat "
-            "TimeSeriesData, or forecast the levels separately for now."
-        )
     if not isinstance(data, TimeSeriesData):
         raise TypeError(
             f"forecast() needs a TimeSeriesData, got {type(data).__name__}; build one with "
@@ -137,12 +165,6 @@ def forecast(
             "scenario= is the driver sprint (S4): a pinned future path only means something "
             "once a node can read another node's path. Leave it unset for now."
         )
-    if reconcile is not None:
-        raise ValueError(
-            f"reconcile={reconcile!r} needs a hierarchy, and this dataset is flat: there is "
-            "nothing to make coherent. Build a HierarchicalTSData with ergodic.hts(...) to "
-            "reconcile across levels."
-        )
     if fit in _STAGED_FITS:
         raise NotImplementedError(
             f"fit={fit!r} is the driver sprint (S4): staged and joint fitting are about "
@@ -152,13 +174,41 @@ def forecast(
     if fit not in _INDEPENDENT_FITS:
         raise ValueError(f"fit must be one of {(*_INDEPENDENT_FITS, *_STAGED_FITS)}, got {fit!r}")
 
+    options = {"proportions": proportions, "level": level, "weights": weights, "trust": trust}
+    if not isinstance(data, HierarchicalTSData):
+        named = sorted(name for name, value in options.items() if value is not None)
+        if reconcile is not None:
+            named = [f"reconcile={reconcile!r}", *named]
+        if named:
+            raise ValueError(
+                f"{', '.join(named)} needs a hierarchy, and this dataset is flat: there is "
+                "nothing to make coherent. Build a HierarchicalTSData with ergodic.hts(...) "
+                "to reconcile across levels."
+            )
+    else:
+        # All three checks happen before anything samples: neither a typo, nor a
+        # tree this pillar cannot reconcile, nor a leaf nothing will forecast
+        # should cost five NUTS runs first.
+        _require_sum(data.hierarchy)
+        if reconcile is not None and reconcile not in RECONCILE_METHODS:
+            raise ValueError(f"reconcile must be one of {RECONCILE_METHODS}, got {reconcile!r}")
+        modelless = [leaf for leaf in data.hierarchy.leaves if leaf not in data.variables]
+        if modelless:
+            raise ValueError(
+                f"the hierarchy's leaves {modelless} are not modelled columns of this dataset, "
+                "and a leaf has no children to be aggregated from, so nothing would forecast "
+                "them. Include the columns (an excluded column is not modelled) or build the "
+                "hierarchy without those leaves."
+            )
+
     nodes = data.variables
     if not nodes:
         raise ValueError("the dataset models no columns, so there is nothing to forecast")
     assigned = assign_mechanisms(data, mechanisms, robust=robust)
     seeds = sorted_seeds(nodes, seed)
 
-    series: dict[str, Array] = {}
+    fits: dict[str, NodeFit] = {}
+    views: dict[str, NodeForecast] = {}
     diagnostics: dict[str, Any] = {}
     for node in nodes:
         values = np.asarray(data.column(node), dtype=np.float64)
@@ -174,18 +224,111 @@ def forecast(
         )
         # A separate seed for the predictive pass, offset far enough that it can
         # never collide with another node's fit seed.
-        continued = forecast_node(fitted, int(horizon), seed=seeds[node] + 1000)
-        series[node] = continued.draws
+        fits[node] = fitted
+        views[node] = forecast_node(fitted, int(horizon), seed=seeds[node] + 1000)
         diagnostics[node] = fitted.diagnostics
 
-    return ForecastResult(
-        series=series,
+    series: dict[str, Array] = {node: views[node].draws for node in nodes}
+    if not isinstance(data, HierarchicalTSData):
+        return ForecastResult(
+            series=series,
+            horizon=int(horizon),
+            kind="draws",
+            start=_next_label(data),
+            mechanisms=assigned,
+            diagnostics=diagnostics,
+        )
+
+    tree = data.hierarchy
+    _fill_aggregates(tree, series)
+    unreconciled = ForecastResult(
+        series={node: series[node] for node in _hierarchy_order(tree, nodes)},
         horizon=int(horizon),
         kind="draws",
         start=_next_label(data),
         mechanisms=assigned,
         diagnostics=diagnostics,
+        # Always, not only when MinT-shrink asks: it costs one median over draws
+        # of a path the predictive pass already produced, and carrying it is what
+        # lets a result be reconciled every way afterwards without refitting.
+        residual_var=_residual_variance(data, tree, fits, views),
     )
+    method = reconcile or "bottom_up"
+    return reconcile_result(
+        unreconciled,
+        tree,
+        method=method,
+        data=data if method in _NEEDS_DATA else None,
+        proportions=proportions,
+        level=level,
+        weights=weights,
+        trust=trust,
+    )
+
+
+def _hierarchy_order(tree: Hierarchy, columns: tuple[str, ...]) -> tuple[str, ...]:
+    """Tree nodes from the root down, then any column that is not part of the tree.
+
+    Reading order rather than column order: a hierarchical result is easiest to
+    read total first, and a series that is not in the hierarchy (a driver, later)
+    keeps its place at the end.
+    """
+    depth = tree.levels()
+    inside = sorted(tree.nodes, key=lambda node: (depth[node], node))
+    outside = [name for name in columns if name not in tree.nodes]
+    return (*inside, *outside)
+
+
+def _fill_aggregates(tree: Hierarchy, series: dict[str, Array]) -> None:
+    """Give every modelless node the only forecast it can have: its children's sum.
+
+    A node with no column exists only as an aggregate, so its unreconciled draws
+    are the sum of its children's. Deepest parent first, so a chain of
+    aggregate-only levels fills from the bottom.
+    """
+    for parent in _leaves_up(tree):
+        if parent in series:
+            continue
+        kids = tree.children_of(parent)
+        missing = [kid for kid in kids if kid not in series]
+        if missing:  # pragma: no cover - a leaf without a column cannot be built
+            raise ValueError(
+                f"{parent!r} has no column and its children {missing} have no forecast either, "
+                "so there is nothing to aggregate"
+            )
+        series[parent] = np.sum([series[kid] for kid in kids], axis=0)
+
+
+def _residual_variance(
+    data: HierarchicalTSData,
+    tree: Hierarchy,
+    fits: Mapping[str, NodeFit],
+    views: Mapping[str, NodeForecast],
+) -> dict[str, float]:
+    """Each node's in-sample one-step residual second moment, the MinT-shrink diagonal.
+
+    The mean of the squared residuals, uncentered on purpose: MinT's W estimates
+    ``E[e e']``, so a fit that sits systematically above its series is charged
+    for that, where a centered variance would forgive it.
+
+    A modeled node compares its own series against its posterior-median fitted
+    path. A node that exists only as an aggregate has no fit, so its fitted path
+    is its children's fitted paths added up, which makes its residual exactly the
+    sum of its children's residuals: no independence assumption anywhere, just
+    the same arithmetic the hierarchy already promises.
+    """
+    fitted: dict[str, Array] = {
+        node: in_sample_median(fits[node], views[node]) for node in fits if node in tree.nodes
+    }
+    for parent in _leaves_up(tree):
+        if parent in fitted:
+            continue
+        fitted[parent] = np.sum([fitted[kid] for kid in tree.children_of(parent)], axis=0)
+    out: dict[str, float] = {}
+    for node in tree.nodes:
+        residual = _series_of(data, node) - fitted[node]
+        out[node] = float(np.mean(residual**2))
+    return out
 
 
 def _next_label(data: TimeSeriesData) -> Any:

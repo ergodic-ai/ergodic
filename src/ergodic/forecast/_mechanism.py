@@ -120,6 +120,15 @@ class TemporalMechanism:
         """The site holding the horizon's predictive draws in a forecasting model."""
         return self.site(node, "y_fc")
 
+    def mean_site(self, node: str) -> str:
+        """The deterministic holding the mean path, length ``T + horizon``.
+
+        Registered by a forecasting model only, never by a fitting one, which is
+        why in-sample fitted values are read off the forecast model's first ``T``
+        rows rather than out of the trace.
+        """
+        return self.site(node, "mu")
+
     def scaler_for(self, values: Array) -> Scaler:
         """The fitted scaler this mechanism wants for ``values``."""
         return auto_scaler(values)
