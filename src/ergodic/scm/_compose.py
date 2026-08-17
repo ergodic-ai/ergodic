@@ -491,12 +491,32 @@ def observational_draws(
 # -- counterfactuals: the explicit-noise twin network ------------------------
 
 
+def _cf_do_column(value: float | AnyArray, n_units: int, name: str) -> Array:
+    """A counterfactual do-value as an ``(n,)`` column: a scalar fills, an array passes.
+
+    A scalar pins every unit to the same value (the absolute-level intervention,
+    ``do(X = c)``). A length-``n`` array pins each unit to its own value (a per-unit
+    intervention, e.g. the shift ``do(X = x_i + delta)`` from each unit's factual
+    baseline). Any other length is a user error. This is the only place the
+    counterfactual engine reads a non-scalar do.
+    """
+    raw = np.asarray(value, dtype=np.float64).reshape(-1)
+    if raw.size == 1:
+        return np.full(n_units, float(raw[0]))
+    if raw.size == n_units:
+        return raw
+    raise ValueError(
+        f"do-value for {name!r} has length {raw.size}; expected a scalar or one value "
+        f"per unit ({n_units})"
+    )
+
+
 def counterfactual_continuous(
     order: Sequence[str],
     mechanisms: Mapping[str, Mechanism],
     fits: Mapping[str, FitResult],
     factual: Mapping[str, AnyArray],
-    do: Mapping[str, float],
+    do: Mapping[str, float | AnyArray],
     target: str,
     *,
     use_draws: bool,
@@ -564,8 +584,8 @@ def counterfactual_continuous(
     for name in order:
         mech = mechanisms[name]
         if name in do:
-            value = float(do[name])
-            cf[name] = np.full((1, n_units), value) if use_draws else np.full(n_units, value)
+            col = _cf_do_column(do[name], n_units, name)
+            cf[name] = col[None, :].copy() if use_draws else col
             continue
         if isinstance(mech, CategoricalGumbelMax):
             g = gumbel_noise[name]  # the unit's abducted structural Gumbel, (n, K), FIXED.

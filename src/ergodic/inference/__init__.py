@@ -28,12 +28,14 @@ record and returns the same :class:`EffectEstimate` surface.
 from __future__ import annotations
 
 from ._design import Design
-from ._estimate import estimate, estimate_effect
+from ._estimate import cate, estimate, estimate_effect
 from ._estimator import CausalEstimator, Slot, Task
 from ._learner import BayesianLearner, Learner
+from ._perunit import CATEResult, ITEResult, PerUnitEffect
 from ._refute import Refutation, refute_effect
 from ._registry import candidates
 from ._result import EffectEstimate
+from ._scores import DRScores, dr_scores
 from ._target import EffectTarget
 from .estimators import (
     AIPW,
@@ -61,6 +63,7 @@ from .estimators import (
     interrupted_time_series,
     synthetic_control,
 )
+from .explain import Heterogeneity
 from .learners import (
     OLS,
     KNNClassifier,
@@ -77,14 +80,18 @@ __all__ = [
     "OLS",
     "PLIV",
     "BayesianLearner",
+    "CATEResult",
     "CausalEstimator",
     "DRLearner",
+    "DRScores",
     "Design",
     "DiDEffect",
     "EffectEstimate",
     "EffectTarget",
     "EventTimeEffect",
     "GroupTimeEffect",
+    "Heterogeneity",
+    "ITEResult",
     "ITSEffect",
     "KNNClassifier",
     "KNNRegressor",
@@ -93,6 +100,7 @@ __all__ = [
     "MediationEstimate",
     "NullEffect",
     "OutcomeRegression",
+    "PerUnitEffect",
     "PyMCClassifier",
     "PyMCLearner",
     "RLearner",
@@ -106,7 +114,9 @@ __all__ = [
     "Wald",
     "XLearner",
     "candidates",
+    "cate",
     "did",
+    "dr_scores",
     "estimate",
     "estimate_effect",
     "estimate_mediation",

@@ -64,9 +64,9 @@ print(f"estimated ATE: {ate.value:.2f}  CI [{lo:.2f}, {hi:.2f}]   serving cost: 
 # does something pleasingly direct. Cross-fitting the same two nuisance models AIPW uses,
 # it builds a rough per-customer effect guess, noisy for any one person but centered on the
 # right answer on average, and then fits a plain predictive model from each customer's
-# features to that guess, like any supervised problem. The final regression is an ordinary model in an ordinary slot, so you
-# choose how flexible the effect surface can be. The truth is a curve, so give the final
-# slot a model that can bend:
+# features to that guess, like any supervised problem. The final regression is an ordinary
+# model in an ordinary slot, so you choose how flexible the effect surface can be. The truth
+# is a curve, so give the final slot a model that can bend:
 
 # %%
 from sklearn.ensemble import GradientBoostingRegressor

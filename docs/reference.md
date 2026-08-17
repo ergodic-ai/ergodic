@@ -7,6 +7,7 @@ The shared objects live at the top level of `ergodic`, and the pillars under the
 | Build a causal graph | `dag`, `admg`, `cpdag`, `pag` | [Causal graphs](graph.md) |
 | Turn a graph into an estimand | `identify_effect` | [Identification](identification.md) |
 | Estimate an effect from data | `estimate_effect` | [Causal inference](inference.md) |
+| Estimate per-unit effects (CATE) | `cate` | [Causal inference](inference.md) |
 | Stress-test an estimate | `refute_effect` | [Checking an estimate](inference.md#checking-an-estimate) |
 | Learn a graph from data | `discover`, `bootstrap` | [Causal discovery](discovery.md) |
 | Measure a rollout with no graph | `did`, `synthetic_control`, `interrupted_time_series` | [Panel designs](panel.md) |
@@ -48,6 +49,20 @@ Structure learning: the algorithms, the CI tests and scores they consume, and th
 Effect estimation: the estimators, the learners that fill their slots, refutation, and the quasi-experimental designs.
 
 ::: ergodic.inference
+
+### Per-unit effects (CATE/ITE) and explainability
+
+The `cate` facade and the uniform per-unit result. `cate(graph, data, X, Y)` is identification-gated like `estimate_effect` and returns a `CATEResult`; `SCM.ite` returns an `ITEResult`. Both share the `PerUnitEffect` surface (`.values`, `.interval`, `.ate`, `__array__`). `CATEResult.explain` returns a `Heterogeneity` record for Tier-B characterization (BLP, GATES, CLAN, the calibration test, RATE).
+
+::: ergodic.cate
+
+::: ergodic.CATEResult
+
+::: ergodic.ITEResult
+
+::: ergodic.PerUnitEffect
+
+::: ergodic.inference.Heterogeneity
 
 ## Process intelligence
 

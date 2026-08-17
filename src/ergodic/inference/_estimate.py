@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..identification import identify_effect
-from ._registry import default_target, estimator_for
+from ._registry import cate_estimator_for, cate_kwargs_for, default_target, estimator_for
 from .estimators._plugin import plugin_estimate
 
 if TYPE_CHECKING:
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from ..data import TabularData
     from ..graph import MixedGraph
     from ..identification import Identification
+    from ._perunit import CATEResult
     from ._result import EffectEstimate
     from ._target import EffectTarget
 
@@ -105,3 +106,56 @@ def estimate_effect(
         n_boot=n_boot,
         **kwargs,
     )
+
+
+def cate(
+    graph: MixedGraph,
+    data: TabularData,
+    treatment: str | Iterable[str],
+    outcome: str | Iterable[str],
+    *,
+    method: str = "auto",
+    learner: Any = None,
+    treated: Any | None = None,
+    random_state: int | None = None,
+    n_boot: int = 1000,
+    **kwargs: Any,
+) -> CATEResult:
+    """Identify the effect of ``treatment`` on ``outcome``, then estimate the CATE.
+
+    Identification-gated exactly like :func:`estimate_effect`: identify the effect,
+    select a CATE-capable estimator for the family, fit it, and return a
+    :class:`~ergodic.inference.CATEResult`. ``method`` names the meta-learner
+    (``"dr_learner"`` by default, the doubly-robust choice that shares the
+    explainability score helper; also ``"r_learner"``, ``"x_learner"``,
+    ``"t_learner"``, ``"s_learner"``, ``"dml"``). ``learner`` fills the nuisance
+    slots (an alias, a learner, or a slot mapping). The result carries per-unit
+    uncertainty (a posterior with a Bayesian slot, the bootstrap otherwise, the
+    analytic standard error for the linear DR final) and the cached doubly-robust
+    scores, so :meth:`~ergodic.inference.CATEResult.explain` runs the Tier-B
+    characterization.
+    """
+    identification = identify_effect(graph, treatment, outcome)
+    if not identification.identifiable:
+        raise ValueError(
+            f"effect of {treatment} on {outcome} is not identifiable: {identification.estimand}"
+        )
+    estimator_cls = cate_estimator_for(method)
+    if identification.strategy not in estimator_cls.consumes:
+        raise ValueError(
+            f"the CATE estimator {estimator_cls.name!r} consumes "
+            f"{sorted(estimator_cls.consumes)}, but the effect was identified by "
+            f"{identification.strategy!r}; CATE estimation needs an adjustment-identified "
+            "effect (back-door). Front-door, instruments, and the general-ID functional "
+            "have no per-unit meta-learner yet"
+        )
+    from typing import cast
+
+    from ._registry import HasCate
+
+    method_kwargs = {**cate_kwargs_for(method), **kwargs}
+    estimator = estimator_cls(
+        learner, random_state=random_state, n_boot=n_boot, treated=treated, **method_kwargs
+    )
+    estimator.fit(identification, data)
+    return cast("HasCate", estimator).cate()
