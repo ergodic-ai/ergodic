@@ -272,13 +272,13 @@ print("both arrowheads into Alarm:", at_alarm_b is Mark.ARROW and at_alarm_e is 
 # while a harder one recovers in part and is plain about which part. Same algorithm, two
 # honesties, and neither of them pretends to know more than the data supports.
 #
-# ## What this means for real data
+# ## Carrying this back to a real table
 #
-# On a real table you do not get an answer key, so you will not get a recall number. What you
-# keep is the behavior these known networks just demonstrated. PC adds no edges it cannot
-# support, it recovers the structure where the signal is strong, and it leaves gaps where a cause
-# is rare or an assumption is strained. A partial graph that is honest about its gaps beats a
-# complete graph that guessed.
+# On real data you never get an answer key, so you never get a recall number either. What
+# carries over is the behavior these known networks just showed you. PC adds no edges it can't
+# support, it recovers the structure where the signal is strong, and it leaves gaps where a
+# cause is rare or an assumption is strained. A partial graph that's honest about its gaps
+# beats a complete graph that guessed.
 #
 # A discovered graph is not the end of the line. It feeds straight into the rest of the library:
 # `identify_effect` reads a CPDAG and `estimate_effect` runs off it, so the arrows you just

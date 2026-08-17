@@ -11,6 +11,7 @@ The shared objects live at the top level of `ergodic`, and the pillars under the
 | Stress-test an estimate | `refute_effect` | [Checking an estimate](inference.md#checking-an-estimate) |
 | Learn a graph from data | `discover`, `bootstrap` | [Causal discovery](discovery.md) |
 | Measure a rollout with no graph | `did`, `synthetic_control`, `interrupted_time_series` | [Panel designs](panel.md) |
+| Forecast a series, or a whole hierarchy | `forecast`, `backtest` | [Forecasting](forecast.md) |
 | Analyze a process from its log | `process_map`, `case_table`, `discover_model` | [Process intelligence](process.md) |
 | Simulate or ask counterfactuals | `SCM` | [Structural causal models](scm.md) |
 
@@ -63,6 +64,30 @@ The `cate` facade and the uniform per-unit result. `cate(graph, data, X, Y)` is 
 ::: ergodic.PerUnitEffect
 
 ::: ergodic.inference.Heterogeneity
+
+### Causal forest, policy trees, and CATE model selection
+
+The honest causal forest (GRF) is its own CATE learner, reachable through the `cate` facade (`method="causal_forest"` or `"grf"`) or directly as `CausalForest`; it returns a `CATEResult` with native per-unit infinitesimal-jackknife intervals, and `CausalForest(...).fit(...).variable_importance()` returns a `VariableImportance` driver signal. `policy_tree` (also `CATEResult.explain().policy_tree(...)`) learns an interpretable, depth-limited, doubly-robust-optimal treat/don't `PolicyTree`. `select_cate` ranks candidate CATE learners by the doubly-robust tau-risk and returns a `SelectionReport` with the selected result and a Q-aggregation ensemble.
+
+::: ergodic.CausalForest
+
+::: ergodic.inference.VariableImportance
+
+::: ergodic.policy_tree
+
+::: ergodic.PolicyTree
+
+::: ergodic.select_cate
+
+::: ergodic.SelectionReport
+
+## Forecasting
+
+Bayesian trajectories with causal structure in them: the `forecast` facade and its result, the mechanism contract and its zoo, the reconciliation menu, staged fitting and the training schedule, the rolling-origin backtester with its baselines and metrics, and the attribution waterfall.
+
+Note the one shadowed name in the package. `ergodic.forecast` at the top level is the *function*, so `from ergodic import forecast` gives something callable; the module is reached with `from ergodic.forecast import backtest`, and only `import ergodic.forecast as mod` does the surprising thing of binding the function.
+
+::: ergodic.forecast
 
 ## Process intelligence
 

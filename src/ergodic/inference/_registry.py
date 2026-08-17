@@ -17,6 +17,7 @@ from .estimators import (
     DML,
     IPW,
     PLIV,
+    CausalForest,
     DRLearner,
     NullEffect,
     OutcomeRegression,
@@ -43,11 +44,21 @@ class HasCate(Protocol):
     DML satisfy it.
     """
 
-    def cate(self, data: TabularData | None = ...) -> CATEResult: ...
+    def cate(self, data: TabularData | None = ..., *, uncertainty: bool = ...) -> CATEResult: ...
 
 
 _BY_FAMILY: dict[str, list[type[CausalEstimator]]] = {
-    ADJUSTMENT: [AIPW, DML, DRLearner, OutcomeRegression, IPW, Stratification, RLearner, XLearner],
+    ADJUSTMENT: [
+        AIPW,
+        DML,
+        DRLearner,
+        OutcomeRegression,
+        IPW,
+        Stratification,
+        RLearner,
+        XLearner,
+        CausalForest,
+    ],
     FRONTDOOR: [TwoStageRegression],
     IV: [TwoStageLeastSquares, PLIV, Wald],
     NULL: [NullEffect],
@@ -76,6 +87,9 @@ _BY_NAME: dict[str, type[CausalEstimator]] = {
     "rlearner": RLearner,
     "x_learner": XLearner,
     "xlearner": XLearner,
+    "causal_forest": CausalForest,
+    "grf": CausalForest,
+    "causalforest": CausalForest,
     "two_stage_regression": TwoStageRegression,
     "frontdoor": TwoStageRegression,
     "front_door": TwoStageRegression,
@@ -115,6 +129,9 @@ _CATE_BY_NAME: dict[str, type[CausalEstimator]] = {
     "g_formula": OutcomeRegression,
     "dml": DML,
     "double_ml": DML,
+    "causal_forest": CausalForest,
+    "grf": CausalForest,
+    "causalforest": CausalForest,
 }
 
 # Extra constructor knobs a CATE method name implies (the S/T-learner split is one

@@ -1,10 +1,10 @@
 # Concepts
 
-Everything in ergodic builds on a small set of shared objects: the causal graph, the domain-knowledge set, the typed dataset, and the identification step that turns a graph into an estimand. This page covers the model behind the first two, the ones with the most ideas in them, so the method-by-method guides read easily.
+Everything in ergodic builds on a small set of shared objects: the causal graph, the domain-knowledge set, the typed dataset, and the identification step that turns a graph into an estimand. This page walks through the model behind the first two, since they carry the most ideas, so the method-by-method guides can move faster.
 
-## One graph, many kinds
+## Kinds of causal graph
 
-Causal work uses more than one kind of graph. A known model is a DAG. Constraint-based discovery (the PC algorithm) returns a CPDAG, a whole class of DAGs that fit the data equally well. Allow hidden confounders and FCI returns a PAG. Inference with latent variables uses an ADMG. ergodic represents all of them with one object by putting a mark on each end of every edge.
+Causal work needs more than one kind of graph. A known model is a DAG. Constraint-based discovery (the PC algorithm) returns a CPDAG, a whole class of DAGs that fit the data equally well. Allow hidden confounders and FCI returns a PAG instead. Inference with latent variables uses an ADMG. ergodic represents all of these with one object, by putting a mark on each end of every edge.
 
 A mark is a tail, an arrowhead, or a circle. The pair of marks on an edge says what the edge means:
 
@@ -45,4 +45,10 @@ Discovery takes data and domain knowledge and returns a graph, often a CPDAG or 
 
 ## What is built
 
-The representation is done, and the first two pillars run on it end to end. Separation reads every face, circle marks included, and on a CPDAG or PAG it answers for the whole equivalence class. Identification covers adjustment, the front-door, and instruments on a single graph, and the generalized adjustment criterion on a class, so a discovered graph identifies directly. Estimation turns an estimand into a number with its uncertainty, over a library of estimators and an optional Bayesian posterior path. When the question is a rollout no graph can carry, the quasi-experimental designs answer it instead: difference-in-differences, synthetic control, and interrupted time series. Discovery learns a CPDAG (PC with its conservative and majority collider rules, GES, the order searches BOSS and GRaSP, and friends), a full DAG when the noise is non-Gaussian (DirectLiNGAM), or a PAG that tolerates hidden confounders and selection bias both (FCI and the faster RFCI), with domain knowledge entering every search, skeleton screens (MMPC, glasso) confining any of them, and time series read through PCMCI window graphs. The process pillar reads event logs: a case table with timestamp-gated features carries a log into discovery and estimation, a KPI panel turns a process change into a natural experiment, and the model layer mines a sound process model, checks the log against it, and reads each exclusive split as a decision whose branches have estimable effects. Still ahead: off-policy evaluation on logs and soft knowledge, tracked in the implementation journal under `plans/`.
+The representation is done, and the first two pillars run on it end to end. Separation reads every face, circle marks included, and on a CPDAG or PAG it answers for the whole equivalence class. Identification covers adjustment, the front-door, and instruments on a single graph, plus the generalized adjustment criterion on a class, so a discovered graph identifies directly. Estimation turns an estimand into a number with its uncertainty, drawing on a library of estimators and an optional Bayesian posterior path. When the question is a rollout no graph can carry, the quasi-experimental designs answer it instead: difference-in-differences, synthetic control, and interrupted time series.
+
+Discovery learns a CPDAG (PC with its conservative and majority collider rules, GES, the order searches BOSS and GRaSP, and friends), a full DAG when the noise is non-Gaussian (DirectLiNGAM), or a PAG that tolerates hidden confounders and selection bias together (FCI and the faster RFCI). Domain knowledge enters every search, skeleton screens (MMPC, glasso) can confine any of them, and time series get read through PCMCI window graphs.
+
+The process pillar reads event logs. A case table with timestamp-gated features carries a log into discovery and estimation, a KPI panel turns a process change into a natural experiment, and the model layer mines a sound process model, checks the log against it, and reads each exclusive split as a decision whose branches have estimable effects.
+
+Still ahead: off-policy evaluation on logs and soft knowledge. Both are tracked in the implementation journal under `plans/`.

@@ -117,12 +117,12 @@ print(f"correlation of emails and usage, retained only:  {survivor_corr:+.3f}")
 # and concludes the emails are hurting engagement. The true effect, from the code, is
 # exactly nothing.
 #
-# Here's the logic of it. Retention is a shared consequence, a collider: two arrows point
-# into it. Knowing a customer survived while getting few emails tells you something real
-# about their usage: it was probably high, or they wouldn't have survived. Inside the
-# survivors the two causes compete to explain the survival, so they anti-correlate.
-# Conditioning on a common consequence creates association out of nothing; this is
-# Berkson's paradox, the mirror image of the fork, where conditioning removes it.
+# The logic runs through the structure. Retention is a shared consequence, a collider: two
+# arrows point into it. Knowing a customer survived while getting few emails tells you
+# something real about their usage: it was probably high, or they wouldn't have survived.
+# Inside the survivors the two causes compete to explain the survival, so they
+# anti-correlate. Conditioning on a common consequence creates association out of nothing;
+# this is Berkson's paradox, the mirror image of the fork, where conditioning removes it.
 #
 # The nasty part is the second clause of the heading. Nobody types "control for retention"
 # into a regression. They study a table that only contains retained customers, and the

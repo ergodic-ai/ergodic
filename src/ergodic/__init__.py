@@ -32,6 +32,12 @@ from .data import (
     timeseries,
 )
 from .discovery import discover, granger
+
+# `forecast` names both the pillar and its facade, and the function is what the
+# top level exports: `from ergodic import forecast` gives the callable, while
+# `from ergodic.forecast import backtest` still reaches the module. Import the
+# function last so the binding is the deliberate one.
+from .forecast import backtest, forecast
 from .graph import (
     Edge,
     GraphKind,
@@ -71,12 +77,16 @@ from .identification import (
 )
 from .inference import (
     CATEResult,
+    CausalForest,
     EffectEstimate,
     EffectTarget,
     ITEResult,
     MediationEstimate,
     PerUnitEffect,
+    PolicyTree,
     Refutation,
+    SelectionReport,
+    VariableImportance,
     cate,
     did,
     estimate,
@@ -84,7 +94,9 @@ from .inference import (
     estimate_mediation,
     event_study,
     interrupted_time_series,
+    policy_tree,
     refute_effect,
+    select_cate,
     synthetic_control,
 )
 from .knowledge import DomainKnowledge, InconsistentKnowledgeError
@@ -106,7 +118,7 @@ from .scm import (
     Sensitivity,
 )
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 __all__ = [
     "IDA",
@@ -114,6 +126,7 @@ __all__ = [
     "BinaryGumbelMax",
     "CATEResult",
     "CategoricalGumbelMax",
+    "CausalForest",
     "Dataset",
     "DomainKnowledge",
     "Edge",
@@ -139,6 +152,7 @@ __all__ = [
     "Ordinal",
     "PanelData",
     "PerUnitEffect",
+    "PolicyTree",
     "Prob",
     "Product",
     "Ratio",
@@ -146,13 +160,16 @@ __all__ = [
     "SCMResult",
     "Schema",
     "SchemaInferenceWarning",
+    "SelectionReport",
     "Sensitivity",
     "TabularData",
     "TimeSeriesData",
+    "VariableImportance",
     "VariableType",
     "__version__",
     "adjustment_set",
     "admg",
+    "backtest",
     "case_table",
     "cate",
     "conformance",
@@ -170,6 +187,7 @@ __all__ = [
     "estimate_mediation",
     "event_log",
     "event_study",
+    "forecast",
     "frontdoor_set",
     "granger",
     "hts",
@@ -188,8 +206,10 @@ __all__ = [
     "mixed",
     "pag",
     "panel",
+    "policy_tree",
     "process_map",
     "refute_effect",
+    "select_cate",
     "synthetic_control",
     "tabular",
     "timeseries",

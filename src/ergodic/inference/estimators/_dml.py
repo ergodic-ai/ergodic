@@ -131,7 +131,7 @@ class DML(_AdjustmentBase):
         influence = res_t * (res_y - theta * res_t) / (denom / n)
         return theta, influence
 
-    def cate(self, data: TabularData | None = None) -> CATEResult:
+    def cate(self, data: TabularData | None = None, *, uncertainty: bool = True) -> CATEResult:
         """The constant per-unit effect for the partially-linear model: ``theta``.
 
         The partially-linear DML assumes a homogeneous effect, so every unit's CATE
@@ -139,6 +139,8 @@ class DML(_AdjustmentBase):
         orthogonal moment. Returned as a :class:`~ergodic.inference.CATEResult` for a
         uniform surface; a binary treatment additionally caches the doubly-robust
         scores so ``explain`` can test for the heterogeneity the model assumes away.
+        ``uncertainty=False`` returns the point ``theta`` with ``kind="point"`` and no
+        standard error.
         """
         from .._perunit import CATEResult
 
@@ -148,14 +150,15 @@ class DML(_AdjustmentBase):
         z = self._cate_covariates(data)
         n = z.shape[0]
         values = np.full(n, theta, dtype=np.float64)
-        analytic = self._analytic(self._state.arrays, EffectTarget.ATE, self._state.make)
         std_error: npt.NDArray[np.float64] | None = None
         kind = "point"
-        if analytic is not None:
-            influence = analytic[1]
-            se = float(np.std(influence, ddof=1) / np.sqrt(influence.shape[0]))
-            std_error = np.full(n, se, dtype=np.float64)
-            kind = "analytic"
+        if uncertainty:
+            analytic = self._analytic(self._state.arrays, EffectTarget.ATE, self._state.make)
+            if analytic is not None:
+                influence = analytic[1]
+                se = float(np.std(influence, ddof=1) / np.sqrt(influence.shape[0]))
+                std_error = np.full(n, se, dtype=np.float64)
+                kind = "analytic"
         scores = self._dml_scores() if data is None else None
         return CATEResult(
             treatment=self._treatment_name,

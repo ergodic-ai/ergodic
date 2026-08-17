@@ -6,8 +6,8 @@ Causal AI: causal discovery, causal inference, and process intelligence.
     This project is early scaffolding. The public API is not settled and will change.
 
 New to causal inference itself? Start with the [learn series](learn/index.md): ten notebook
-guides that teach the ideas on commercial examples, no background assumed. Know the field and
-want the API? Walk through the [getting started](tutorial.md) page, then read the
+guides that teach the ideas on commercial examples, no background assumed. Already know the
+field and want the API? Walk through [getting started](tutorial.md), then read
 [concepts](concepts.md).
 
 ## Three pillars
@@ -108,7 +108,7 @@ identify_effect(g, "Smoking", "Cancer").estimand
 # 'P(Cancer | do(Smoking)) = P(Cancer | Smoking)'
 ```
 
-And the pillars meet in two calls: discover a graph from data, then estimate straight off it.
+The pillars meet in two calls: discover a graph from data, then estimate straight off it.
 
 ```python
 from ergodic import discover, estimate_effect, tabular

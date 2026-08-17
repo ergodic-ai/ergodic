@@ -381,7 +381,7 @@ draw_map(pm_review, POSITIONS)
 # the review buys back its 3.8-hour toll only if reviewed orders are otherwise like the
 # rest, and the map can't certify that. An arc records precedence, not cause, and the
 # detour here is routed by order value, so the reviewed slice is a selected slice. In
-# this simulation the selection happens to be harmless; in the world of
+# this simulation the selection happens to be harmless; in
 # [guide nine](09-process-intelligence.py) it isn't, and the same kind of naive gap
 # bills a review step at double its true cost until the causal machinery corrects it.
 # That guide carries logs like this one into case tables and KPI panels;

@@ -1,9 +1,9 @@
 # Foundations
 
 Every pillar in ergodic reads the same two things: a causal graph and the data. Two more
-objects sit between them, the domain knowledge that constrains the graph and the identification
-step that turns a graph into an estimand. These four are built first, and the rest of the
-library is a consumer of them.
+objects sit between them: the domain knowledge that constrains the graph, and the
+identification step that turns a graph into an estimand. These four are built first, and the
+rest of the library builds on top of them.
 
 <div class="grid cards" markdown>
 

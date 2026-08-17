@@ -16,8 +16,8 @@ the naive read; the graph says to adjust for it.
 The point is the result object. ``cate()`` returns a ``CATEResult`` that *is* a
 per-unit vector: ``.values`` is one effect per customer, ``.interval()`` is the
 band, ``.ate()`` bridges back to the population number, ``.to_frame()`` is the
-table, and ``__array__`` makes ``np.mean(result)`` just work. One call, the whole
-heterogeneity surface.
+table, and ``__array__`` makes ``np.mean(result)`` just work. A single call gets
+you the whole heterogeneity surface.
 
 Run with: uv run python examples/cate/01_cate_basics.py
 """

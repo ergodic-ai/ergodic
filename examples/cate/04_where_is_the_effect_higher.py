@@ -11,7 +11,7 @@ object of inference).
                 CI. The intercept is the ATE.
   ``.gates()``  Sorted Group ATEs: bin units by predicted effect and report the true
                 effect per bin, plus the top-minus-bottom contrast. "Does the effect
-                actually rise across the predicted groups."
+                rise across the predicted groups."
   ``.clan()``   Classification Analysis: compare covariate averages in the most- vs
                 least-affected group. "Who is in the high-effect group."
 

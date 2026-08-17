@@ -35,6 +35,10 @@ ergodic is organized around three pillars. Each one reads the shared
 
 </div>
 
-When the rollout is the experiment and no graph carries it, the [panel designs](panel.md) sit
-beside the inference pillar: difference-in-differences, synthetic control, and interrupted time
-series.
+When the rollout itself is the experiment and no graph carries it, the [panel designs](panel.md)
+sit beside the inference pillar: difference-in-differences, synthetic control, and interrupted
+time series.
+
+When the question points forward rather than back, [forecasting](forecast.md) is the fourth
+pillar: Bayesian trajectories per series, a hierarchy whose levels are made to agree, drivers
+read off a window graph, and a waterfall saying what the number is made of.

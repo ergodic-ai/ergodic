@@ -89,6 +89,7 @@ nav:
           - 8. Process mining: learn/08-process-mining.py
           - 9. Process intelligence: learn/09-process-intelligence.py
           - 10. Decision points: learn/10-decision-points.py
+          - 11. Forecasting: learn/11-forecasting.py
       - Case studies:
           - case-studies/index.md
           - Smoking and birthweight: case-studies/01-birthweight.py
@@ -109,6 +110,7 @@ nav:
       - Causal discovery: discovery.md
       - Causal inference: inference.md
       - Panel designs: panel.md
+      - Forecasting: forecast.md
       - Process intelligence: process.md
       - Structural causal models: scm.md
   - Reference:

@@ -9,9 +9,9 @@ earning its keep in five minutes. No background needed; if the ideas themselves 
 pip install ergodic   # or: uv add ergodic
 ```
 
-The data below is simulated, so the true answer is known: we plant the discount's real effect
-at exactly **$6** per customer. Watch the obvious method miss it and ergodic find it. The full
-runnable script is at the [bottom of the page](#reproduce-every-number).
+The data below is simulated, so we know the true answer: we plant the discount's real effect
+at exactly $6 per customer. Watch the obvious method miss it, then watch ergodic find it. The
+full runnable script is at the [bottom of the page](#reproduce-every-number).
 
 ## "The discount worked!"
 
@@ -59,23 +59,23 @@ estimate_effect(g, tabular(frame), "discount", "spend")
 # EffectEstimate(aipw, analytic: ate=5.91, se=0.395, 95% CI [5.14, 6.68], n=4000)
 ```
 
-The real effect of the discount is about **$6 per customer**, the $6 we planted, not $23.
-ergodic recovered it as $5.91 with a tight interval. The missing $17 was customer value
-showing up as a treatment effect. If the discount costs more than $6 a head, the naive number
-would have sent you into a money-losing rollout sure it was a winner.
+The real effect of the discount is about $6 per customer, the $6 we planted, not $23. ergodic
+recovered it as $5.91 with a tight interval. The missing $17 was customer value showing up as a
+treatment effect. If the discount costs more than $6 a head, the naive number would have sent
+you into a money-losing rollout, confident it was a winner.
 
 ## What just happened
 
-You gave ergodic a *model* of the problem, not just the numbers, and it did three things plain
-regression does not do on its own:
+You gave ergodic a *model* of the problem instead of a spreadsheet of numbers, and it did three
+things plain regression does not do on its own:
 
-1. **Identification.** It checked the graph and confirmed the effect *can* be recovered from
-   this data, by adjusting for `value`. Change the graph and the answer can flip to "you
-   cannot, not from this data", which is an honest result and a useful one.
-2. **Estimation.** It chose a suitable estimator (a doubly robust one), fit it, and reported
-   its uncertainty.
-3. **A claim you can argue with.** The graph is a stated assumption. A colleague can point at
-   an edge and disagree, which is the point: the assumptions are on the table, not buried in a
+1. Identification. It checked the graph and confirmed the effect *can* be recovered from this
+   data, by adjusting for `value`. Change the graph and the answer can flip to "you cannot, not
+   from this data," which is an honest result and a useful one.
+2. Estimation. It chose a suitable estimator (a doubly robust one), fit it, and reported its
+   uncertainty.
+3. A claim you can argue with. The graph is a stated assumption. A colleague can point at an
+   edge and disagree, which is the point: the assumptions sit out in the open, not buried in a
    model's fine print.
 
 Don't know the graph? ergodic can [learn it from the data](discovery.md), then estimate

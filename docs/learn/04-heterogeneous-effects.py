@@ -78,7 +78,10 @@ model = DRLearner(
     random_state=0,
 ).fit(identify_effect(g, "voucher", "spend"), data)
 
-cate = model.cate()
+# .cate() returns a CATEResult (per-unit points + uncertainty + .explain()); this guide reads
+# only the effect curve, so uncertainty=False skips the per-unit bootstrap, and .values is the
+# raw per-customer effect array the arithmetic and plots below treat like any vector.
+cate = model.cate(uncertainty=False).values
 print(f"average of the per-customer effects: {cate.mean():.2f}")
 
 # %% [markdown]
@@ -164,7 +167,7 @@ fig.tight_layout()
 # all the way down to the treat-everyone loss at the right edge. Every targeting decision a
 # marketing team debates is a point on this curve.
 #
-# ## What to keep in mind
+# ## What heterogeneity costs you
 #
 # Heterogeneity is a modeling claim, so the honesty bar is higher than for an ATE. The
 # pseudo-effects are unbiased but loud, and a flexible final model can hallucinate structure
