@@ -111,6 +111,7 @@ nav:
       - Causal inference: inference.md
       - Panel designs: panel.md
       - Forecasting: forecast.md
+      - Hidden regimes: latent.md
       - Process intelligence: process.md
       - Structural causal models: scm.md
   - Reference:

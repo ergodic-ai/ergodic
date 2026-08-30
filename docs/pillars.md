@@ -42,3 +42,8 @@ time series.
 When the question points forward rather than back, [forecasting](forecast.md) is the fourth
 pillar: Bayesian trajectories per series, a hierarchy whose levels are made to agree, drivers
 read off a window graph, and a waterfall saying what the number is made of.
+
+When the mechanism you care about was never logged, [hidden regimes](latent.md) reads it out of
+one series: recover the posterior on/off path of a hidden switch and the mechanism block it
+moved, certify that a regime exists at all against a simulated null, and calibrate the
+detector's false-fire rate before trusting it.

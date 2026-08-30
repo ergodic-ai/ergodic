@@ -48,6 +48,11 @@ scm = ["pymc>=5"]
 # workhorse model, so installing them alongside is worth it; the pillar runs
 # without them.
 forecast = ["pymc>=5"]
+# The latent pillar (ergodic.latent). Same pymc dependency once more; the bare
+# install never imports it. The forward-marginalized switching models sample
+# through PyMC's JAX backend when jax and numpyro are present, same measured
+# speedup as the forecast pillar, so installing them alongside is worth it.
+latent = ["pymc>=5"]
 # Neural CATE learners (TARNet / DragonNet / CFR). A reserved seam: phase 1 ships
 # no module that imports torch; the registry points here when one is selected.
 neural = ["torch>=2.2"]
@@ -150,7 +155,8 @@ module = ["networkx.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "numpyro.*"]
+# scipy rides in with pymc (the spectral null fit optimizes with it).
+module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "numpyro.*", "scipy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

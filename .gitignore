@@ -34,6 +34,9 @@ coverage.xml
 # Docs build
 site/
 
+# JavaScript dependencies
+node_modules/
+
 # Jupyter
 .ipynb_checkpoints/
 
