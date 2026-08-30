@@ -21,3 +21,9 @@ uv run python examples/adjustment_birthweight.py
 
 The numbers are checked in `tests/test_datasets.py`, so they stay honest as the
 estimators change.
+
+One script is the odd one out. `latent_switch.py` loads no dataset: it generates a
+world with a sealed hidden switch, recovers the switch blind with `ergodic.latent`,
+certifies that a regime exists against a simulated null, and calibrates the detector
+on control worlds. It needs the latent extra (`uv sync --extra latent`) and a few
+minutes of sampling.

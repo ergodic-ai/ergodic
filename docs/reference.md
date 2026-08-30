@@ -12,6 +12,7 @@ The shared objects live at the top level of `ergodic`, and the pillars under the
 | Learn a graph from data | `discover`, `bootstrap` | [Causal discovery](discovery.md) |
 | Measure a rollout with no graph | `did`, `synthetic_control`, `interrupted_time_series` | [Panel designs](panel.md) |
 | Forecast a series, or a whole hierarchy | `forecast`, `backtest` | [Forecasting](forecast.md) |
+| Recover a hidden regime from one series | `recover`, `certify`, `calibrate` | [Hidden regimes](latent.md) |
 | Analyze a process from its log | `process_map`, `case_table`, `discover_model` | [Process intelligence](process.md) |
 | Simulate or ask counterfactuals | `SCM` | [Structural causal models](scm.md) |
 
@@ -88,6 +89,12 @@ Bayesian trajectories with causal structure in them: the `forecast` facade and i
 Note the one shadowed name in the package. `ergodic.forecast` at the top level is the *function*, so `from ergodic import forecast` gives something callable; the module is reached with `from ergodic.forecast import backtest`, and only `import ergodic.forecast as mod` does the surprising thing of binding the function.
 
 ::: ergodic.forecast
+
+## Hidden regimes
+
+Hidden-regime inference over one series: `recover` for the posterior state path and mechanism deltas, `certify` for the simulated-null existence test, `calibrate` for the measured false-fire rate, and `consensus` for laying several likelihoods' verdicts side by side. The built-in likelihoods live in `ergodic.latent.likelihoods` (`spectral_whittle`, `switching_ar`).
+
+::: ergodic.latent
 
 ## Process intelligence
 
