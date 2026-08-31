@@ -36,6 +36,7 @@ SIGNED_PROFILE_CHANNELS = (
 )
 _SHORT_HORIZON = 5
 _MEDIUM_HORIZON = 30
+_SCAN_BURN_IN = 2 * _MEDIUM_HORIZON
 _NORM_TOLERANCE = 1e-12
 
 
@@ -243,7 +244,10 @@ def extract_signed_temporal_profile(
 
     matrix = np.column_stack(arrays)
     diff_centers, scales = _robust_diff_scales(matrix)
-    ticks = np.arange(_MEDIUM_HORIZON, length - _MEDIUM_HORIZON + 1)
+    # A second medium window establishes a public baseline before scoring.
+    # Short inputs retain the only mathematically available 30-sample guard.
+    scan_start = _SCAN_BURN_IN if length >= _SCAN_BURN_IN + _MEDIUM_HORIZON else _MEDIUM_HORIZON
+    ticks = np.arange(scan_start, length - _MEDIUM_HORIZON + 1)
     trend = np.arange(length, dtype=np.float64)[:, None] * diff_centers[None, :]
     detrended = matrix - trend
     cumulative = np.vstack((np.zeros((1, matrix.shape[1])), np.cumsum(detrended, axis=0)))

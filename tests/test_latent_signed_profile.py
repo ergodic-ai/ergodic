@@ -51,8 +51,11 @@ def test_extract_finds_public_change_and_preserves_signed_contrasts() -> None:
 
 
 def test_extract_breaks_equal_on_off_change_tie_at_earliest_tick() -> None:
-    value = extract_signed_temporal_profile(_channels(first=50, second=90))
-    assert value.change_tick == 50
+    channels = {name: np.zeros(140) for name in SIGNED_PROFILE_CHANNELS}
+    for index, name in enumerate(SIGNED_PROFILE_CHANNELS, start=1):
+        channels[name][65:105] = float(index)
+    value = extract_signed_temporal_profile(channels)
+    assert value.change_tick == 65
 
 
 def test_extract_copies_inputs_and_ignores_mapping_order() -> None:
