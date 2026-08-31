@@ -67,8 +67,18 @@ from ._result import (
     GateOutcome,
     LatentResult,
 )
+from ._signed_profile import (
+    SIGNED_PROFILE_CHANNELS,
+    SignedProfileMatch,
+    SignedProfileTemplate,
+    SignedTemporalProfile,
+    build_signed_template,
+    extract_signed_temporal_profile,
+    match_signed_profile,
+)
 
 __all__ = [
+    "SIGNED_PROFILE_CHANNELS",
     "CalibrationReport",
     "CertifyResult",
     "Consensus",
@@ -84,11 +94,17 @@ __all__ = [
     "ProfileInterval",
     "ProfileMatch",
     "RegimeLikelihood",
+    "SignedProfileMatch",
+    "SignedProfileTemplate",
+    "SignedTemporalProfile",
+    "build_signed_template",
     "calibrate",
     "certify",
     "consensus",
+    "extract_signed_temporal_profile",
     "latent_model",
     "match_profile",
+    "match_signed_profile",
     "profile",
     "recover",
     "semi_markov",
