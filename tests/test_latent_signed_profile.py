@@ -69,6 +69,36 @@ def test_extract_copies_inputs_and_ignores_mapping_order() -> None:
     assert all(np.isfinite(left.vector))
 
 
+def test_extract_accepts_explicit_ordered_seventh_channel() -> None:
+    channel_order = (*SIGNED_PROFILE_CHANNELS, "indoor_illuminance_lux")
+    channels = _channels()
+    channels["indoor_illuminance_lux"] = np.arange(140, dtype=np.float64) * 0.01
+    channels["indoor_illuminance_lux"][60:] -= 120.0
+
+    profile = extract_signed_temporal_profile(channels, channel_order=channel_order)
+
+    assert profile.channels == channel_order
+    assert profile.change_tick == 60
+    assert len(profile.scales) == 7
+    assert len(profile.vector) == 14
+    assert profile.contrasts_5[-1] < 0.0
+
+
+@pytest.mark.parametrize(
+    ("channel_order", "error", "message"),
+    [
+        ((), ValueError, "non-empty"),
+        (("temperature_c", "temperature_c"), ValueError, "unique"),
+        (["temperature_c"], TypeError, "immutable tuple"),
+    ],
+)
+def test_extract_rejects_invalid_channel_order(
+    channel_order: object, error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        extract_signed_temporal_profile(_channels(), channel_order=channel_order)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -103,6 +133,22 @@ def test_template_is_invariant_to_global_sign_and_input_order() -> None:
     assert left == right
     assert left.n_profiles == 2
     np.testing.assert_allclose(left.vector, build_signed_template("window", [profile]).vector)
+
+
+def test_template_and_match_require_identical_ordered_channel_schema() -> None:
+    six_channel = extract_signed_temporal_profile(_channels())
+    channel_order = (*SIGNED_PROFILE_CHANNELS, "indoor_illuminance_lux")
+    seven_arrays = _channels()
+    seven_arrays["indoor_illuminance_lux"] = np.zeros(140)
+    seven_arrays["indoor_illuminance_lux"][60:] = 100.0
+    seven_channel = extract_signed_temporal_profile(seven_arrays, channel_order=channel_order)
+
+    with pytest.raises(ValueError, match="identical channels"):
+        build_signed_template("mixed", [six_channel, seven_channel])
+
+    seven_template = build_signed_template("shade", [seven_channel])
+    with pytest.raises(ValueError, match="template channels must equal profile channels"):
+        match_signed_profile(six_channel, {"shade": seven_template})
 
 
 def test_match_identifies_both_orientations_and_reports_margin() -> None:

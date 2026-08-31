@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public-signal temporal profiles for deterministic source matching.
 
-This module is deliberately NumPy-only.  It reads six named sensor arrays,
-finds their strongest joint public change, and preserves the relative signs
-of short- and medium-horizon contrasts.  A global sign is treated as an
-orientation rather than source identity: entering and leaving the same regime
-can therefore match one template without erasing cross-channel direction.
+This module is deliberately NumPy-only.  It reads an explicitly ordered set
+of named sensor arrays, finds their strongest joint public change, and
+preserves the relative signs of short- and medium-horizon contrasts.  The
+built-in order remains the six original public channels.  A global sign is
+treated as an orientation rather than source identity: entering and leaving
+the same regime can therefore match one template without erasing
+cross-channel direction.
 """
 
 from __future__ import annotations
@@ -127,8 +129,12 @@ def _validate_source(source: object) -> str:
 def _validate_channels(channels: object, *, context: str) -> tuple[str, ...]:
     if not isinstance(channels, tuple):
         raise TypeError(f"{context} channels must be an immutable tuple")
-    if channels != SIGNED_PROFILE_CHANNELS:
-        raise ValueError(f"{context} channels must equal SIGNED_PROFILE_CHANNELS in order")
+    if not channels:
+        raise ValueError(f"{context} channels must be non-empty")
+    if any(not isinstance(name, str) or not name.strip() for name in channels):
+        raise ValueError(f"{context} channels must contain non-empty strings")
+    if len(set(channels)) != len(channels):
+        raise ValueError(f"{context} channels must be unique")
     return channels
 
 
@@ -209,23 +215,31 @@ def _window_means(cumulative: np.ndarray, ticks: np.ndarray, horizon: int) -> np
 
 def extract_signed_temporal_profile(
     channels: Mapping[str, np.ndarray],
+    *,
+    channel_order: tuple[str, ...] = SIGNED_PROFILE_CHANNELS,
 ) -> SignedTemporalProfile:
-    """Extract the strongest public six-channel temporal change.
+    """Extract the strongest joint temporal change in an ordered channel set.
 
-    Only the six exact sensor names in :data:`SIGNED_PROFILE_CHANNELS` are
-    accepted.  Arrays are copied before calculation, must be finite 1-D
-    series of equal length, and need at least 61 samples for the 30-sample
+    By default, only the six exact sensor names in
+    :data:`SIGNED_PROFILE_CHANNELS` are accepted, preserving the original API
+    contract.  Callers may instead supply a non-empty, unique
+    ``channel_order`` tuple; that tuple becomes part of the returned profile's
+    schema.  Arrays are copied before calculation, must be finite 1-D series
+    of equal length, and need at least 61 samples for the 30-sample
     before/after scan.  Ties are resolved by NumPy's first-maximum rule, so
     the earliest tick wins deterministically.
     """
     if not isinstance(channels, Mapping):
         raise TypeError("channels must be a mapping")
-    if set(channels) != set(SIGNED_PROFILE_CHANNELS):
-        raise ValueError("channels must contain exactly the six public signed-profile channels")
+    accepted_order = _validate_channels(channel_order, context="channel_order")
+    if set(channels) != set(accepted_order) or len(channels) != len(accepted_order):
+        if accepted_order == SIGNED_PROFILE_CHANNELS:
+            raise ValueError("channels must contain exactly the six public signed-profile channels")
+        raise ValueError("channels must contain exactly the channels in channel_order")
 
     arrays: list[np.ndarray] = []
     length: int | None = None
-    for name in SIGNED_PROFILE_CHANNELS:
+    for name in accepted_order:
         try:
             values = np.array(channels[name], dtype=np.float64, copy=True)
         except (TypeError, ValueError) as exc:
@@ -262,7 +276,7 @@ def extract_signed_temporal_profile(
     medium = contrasts_30[best]
     vector = np.concatenate((short, medium)) / magnitude
     return SignedTemporalProfile(
-        channels=SIGNED_PROFILE_CHANNELS,
+        channels=accepted_order,
         change_tick=int(ticks[best]),
         scales=tuple(float(value) for value in scales),
         contrasts_5=tuple(float(value) for value in short),
@@ -287,19 +301,25 @@ def build_signed_template(
     if not profiles:
         raise ValueError("profiles must contain at least one profile")
     vectors: list[np.ndarray] = []
+    profile_channels: tuple[str, ...] | None = None
     for index, item in enumerate(profiles):
         profile = _validate_profile(item, context=f"profiles[{index}]")
+        if profile_channels is None:
+            profile_channels = profile.channels
+        elif profile.channels != profile_channels:
+            raise ValueError("all profiles must have identical channels in the same order")
         vectors.append(_canonical_orientation(np.asarray(profile.vector, dtype=np.float64)))
     vectors.sort(key=lambda value: tuple(float(item) for item in value))
     combined = np.mean(np.stack(vectors), axis=0)
     norm = float(np.linalg.norm(combined))
     if not np.isfinite(norm) or norm <= 0.0:
         raise ValueError("profiles cannot form a non-zero signed template")
+    assert profile_channels is not None
     vector = combined / norm
     vector = _canonical_orientation(vector)
     return SignedProfileTemplate(
         source=accepted_source,
-        channels=SIGNED_PROFILE_CHANNELS,
+        channels=profile_channels,
         vector=tuple(float(value) for value in vector),
         n_profiles=len(vectors),
     )
@@ -328,6 +348,8 @@ def match_signed_profile(
         SignedProfileTemplate.__post_init__(template)
         if template.source != accepted_source:
             raise ValueError("template mapping key must equal template source")
+        if template.channels != query.channels:
+            raise ValueError("template channels must equal profile channels in the same order")
         signed_cosine = float(np.dot(query_vector, np.asarray(template.vector)))
         orientation: Literal[-1, 1] = 1 if signed_cosine >= 0.0 else -1
         similarity = float(np.clip(abs(signed_cosine), 0.0, 1.0))
