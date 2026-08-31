@@ -59,6 +59,7 @@ from ._likelihood import (
     RegimeLikelihood,
     semi_markov,
 )
+from ._profile import ObservableProfile, ProfileInterval, ProfileMatch, match_profile, profile
 from ._result import (
     CalibrationReport,
     CertifyResult,
@@ -78,12 +79,17 @@ __all__ = [
     "LatentModel",
     "LatentResult",
     "MarkovChain",
+    "ObservableProfile",
     "PreparedData",
+    "ProfileInterval",
+    "ProfileMatch",
     "RegimeLikelihood",
     "calibrate",
     "certify",
     "consensus",
     "latent_model",
+    "match_profile",
+    "profile",
     "recover",
     "semi_markov",
 ]
