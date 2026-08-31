@@ -67,6 +67,15 @@ from ._result import (
     GateOutcome,
     LatentResult,
 )
+from ._signed_evidence import (
+    SIGNED_EVIDENCE_DURATIONS,
+    NullEvidenceDecision,
+    NullEvidenceGate,
+    SignedDisturbanceEvidence,
+    apply_null_evidence_gate,
+    calibrate_null_evidence_gate,
+    score_signed_disturbance_evidence,
+)
 from ._signed_profile import (
     SIGNED_PROFILE_CHANNELS,
     SignedProfileMatch,
@@ -78,6 +87,7 @@ from ._signed_profile import (
 )
 
 __all__ = [
+    "SIGNED_EVIDENCE_DURATIONS",
     "SIGNED_PROFILE_CHANNELS",
     "CalibrationReport",
     "CertifyResult",
@@ -89,16 +99,21 @@ __all__ = [
     "LatentModel",
     "LatentResult",
     "MarkovChain",
+    "NullEvidenceDecision",
+    "NullEvidenceGate",
     "ObservableProfile",
     "PreparedData",
     "ProfileInterval",
     "ProfileMatch",
     "RegimeLikelihood",
+    "SignedDisturbanceEvidence",
     "SignedProfileMatch",
     "SignedProfileTemplate",
     "SignedTemporalProfile",
+    "apply_null_evidence_gate",
     "build_signed_template",
     "calibrate",
+    "calibrate_null_evidence_gate",
     "certify",
     "consensus",
     "extract_signed_temporal_profile",
@@ -107,5 +122,6 @@ __all__ = [
     "match_signed_profile",
     "profile",
     "recover",
+    "score_signed_disturbance_evidence",
     "semi_markov",
 ]
