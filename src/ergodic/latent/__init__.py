@@ -49,6 +49,12 @@ the fast sampler path.
 
 from __future__ import annotations
 
+from ._control_residual import (
+    ControlBaselineModel,
+    ControlResidualEvidence,
+    fit_control_baseline,
+    score_control_residual_evidence,
+)
 from ._facade import LatentModel, calibrate, certify, consensus, latent_model, recover
 from ._likelihood import (
     DeltaBlock,
@@ -92,6 +98,8 @@ __all__ = [
     "CalibrationReport",
     "CertifyResult",
     "Consensus",
+    "ControlBaselineModel",
+    "ControlResidualEvidence",
     "DeltaBlock",
     "EmissionSpec",
     "Gate",
@@ -117,11 +125,13 @@ __all__ = [
     "certify",
     "consensus",
     "extract_signed_temporal_profile",
+    "fit_control_baseline",
     "latent_model",
     "match_profile",
     "match_signed_profile",
     "profile",
     "recover",
+    "score_control_residual_evidence",
     "score_signed_disturbance_evidence",
     "semi_markov",
 ]

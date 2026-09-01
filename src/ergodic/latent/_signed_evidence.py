@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -18,6 +19,9 @@ from ._signed_profile import (
     _robust_diff_scales,
     _validate_channels,
 )
+
+if TYPE_CHECKING:
+    from ._control_residual import ControlResidualEvidence
 
 __all__ = [
     "SIGNED_EVIDENCE_DURATIONS",
@@ -297,7 +301,7 @@ def score_signed_disturbance_evidence(
 
 
 def calibrate_null_evidence_gate(
-    calibration_evidence: Sequence[SignedDisturbanceEvidence],
+    calibration_evidence: Sequence[SignedDisturbanceEvidence | ControlResidualEvidence],
 ) -> NullEvidenceGate:
     """Calibrate the strict empirical-null maximum from non-empty controls."""
     if isinstance(calibration_evidence, (str, bytes)) or not isinstance(
@@ -308,9 +312,7 @@ def calibrate_null_evidence_gate(
         raise ValueError("calibration_evidence must contain at least one value")
     scores: list[float] = []
     for index, evidence in enumerate(calibration_evidence):
-        if not isinstance(evidence, SignedDisturbanceEvidence):
-            raise TypeError(f"calibration_evidence[{index}] must be a SignedDisturbanceEvidence")
-        SignedDisturbanceEvidence.__post_init__(evidence)
+        _validate_gate_evidence(evidence, context=f"calibration_evidence[{index}]")
         scores.append(float(evidence.score))
     scores.sort()
     count = len(scores)
@@ -323,14 +325,12 @@ def calibrate_null_evidence_gate(
 
 
 def apply_null_evidence_gate(
-    evidence: SignedDisturbanceEvidence, gate: NullEvidenceGate
+    evidence: SignedDisturbanceEvidence | ControlResidualEvidence, gate: NullEvidenceGate
 ) -> NullEvidenceDecision:
     """Apply a conservative ``>=`` null rank; threshold ties fail closed."""
-    if not isinstance(evidence, SignedDisturbanceEvidence):
-        raise TypeError("evidence must be a SignedDisturbanceEvidence")
+    _validate_gate_evidence(evidence, context="evidence")
     if not isinstance(gate, NullEvidenceGate):
         raise TypeError("gate must be a NullEvidenceGate")
-    SignedDisturbanceEvidence.__post_init__(evidence)
     NullEvidenceGate.__post_init__(gate)
     numerator = 1 + sum(score >= evidence.score for score in gate.calibration_scores)
     denominator = gate.calibration_count + 1
@@ -344,3 +344,18 @@ def apply_null_evidence_gate(
         threshold=gate.threshold,
         reason=reason,
     )
+
+
+def _validate_gate_evidence(
+    evidence: object, *, context: str
+) -> SignedDisturbanceEvidence | ControlResidualEvidence:
+    """Validate either supported evidence representation without an import cycle."""
+    from ._control_residual import ControlResidualEvidence
+
+    if isinstance(evidence, SignedDisturbanceEvidence):
+        SignedDisturbanceEvidence.__post_init__(evidence)
+        return evidence
+    if isinstance(evidence, ControlResidualEvidence):
+        ControlResidualEvidence.__post_init__(evidence)
+        return evidence
+    raise TypeError(f"{context} must be a SignedDisturbanceEvidence or ControlResidualEvidence")
