@@ -7,11 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - Unreleased
+
+To be released together with Welt (welt-api DEC-078, API-140).
+
 ### Added
-- Initial project scaffolding: the `ergodic` package with `discovery`, `inference`,
-  and `process` subpackages (placeholders).
-- Tooling: uv project layout, ruff (lint + format), mypy (strict), pytest.
-- MkDocs Material documentation skeleton, pre-commit hooks, and a Makefile.
+- A versioned graph format. `MixedGraph.to_dict()` writes
+  `"format": "ergodic.graph/1"`, and `ergodic.GRAPH_FORMAT` (also
+  `ergodic.graph.GRAPH_FORMAT`) names the format this version reads.
+  `MixedGraph.from_dict()` reads a dict without the field as version 1, so older
+  output and hand-written payloads (`kind`, `nodes`, and edges of
+  `{u, v, u_mark, v_mark}`) still load, and it raises `ValueError` naming the
+  supported format on any other value. The rest of the `to_dict()` output is
+  unchanged. Round trips are tested for every graph kind, latent and selection
+  nodes included.
+- ergodic.welt optional Welt integration (API-141)
+
+### Changed
+- Identification's refusal of a `mixed` graph now says how to fix it. A fully
+  directed acyclic graph (what PC returns when domain knowledge orients every
+  edge) points at `graph.as_kind("dag")`; a partially directed graph lists the
+  options (orient the rest with more knowledge, take one member with
+  `consistent_extension`, or rediscover without the orienting knowledge to keep
+  the CPDAG face); a graph that fits the ADMG, CPDAG, MAG, or PAG rules names
+  that face; anything else says no face fits. Which graphs identification
+  accepts is unchanged, and `estimate_effect` and `cate` raise the same
+  message.
+- A bound conditional-independence test handed data at fit (for example
+  `PC(test=GCM(data)).fit(data)`) still raises, and the message now names both
+  correct usages: `PC(test=GCM(data, ...)).fit()`, or an unbound test with the
+  data at fit or `discover`. The `discover` docstring now says it binds an
+  unbound test.
+
+### Fixed
+- Docs: the GCM example in the discovery guide passed data twice and raised;
+  the end-to-end discover-then-estimate example passed a `mixed` graph to
+  `estimate_effect` and now re-faces it with `as_kind("dag")`; the graph guide's
+  `as_kind` example imports `mixed`. The graph guide documents the format field.
+- The README quotes the install extras (`pip install 'ergodic[bayes]'`), which
+  zsh would otherwise read as a glob.
+
+## [0.1.1] - 2026-08-30
+
+Tagged as `v0.1.1`; not uploaded to PyPI.
+
+### Added
+- Hidden-regime inference (`ergodic.latent`): one observed series, a hidden
+  two-state switch, and three questions kept apart. `recover` returns the
+  posterior path of the switch and a credible interval per named mechanism
+  block (level, spread, rhythm, amplitude), `certify` decides whether a regime
+  exists at all against control worlds simulated from a fitted no-switch model,
+  and `calibrate` measures a configured detector's false-fire rate with a
+  Wilson interval. `consensus` lays several likelihoods' verdicts side by side.
+  The hidden chain (`MarkovChain`, `semi_markov`) is summed out by the forward
+  algorithm, so NUTS samples only continuous parameters. Emissions plug in as
+  a `RegimeLikelihood`; two ship, `spectral_whittle` and `switching_ar` (blind
+  to amplitude, and documented as such). pymc is optional,
+  `pip install 'ergodic[latent]'`. A guide page (`docs/latent.md`) and two
+  example scripts come with it.
+
+## [0.1.0] - 2026-08-17
+
+The first release on PyPI: the graph, knowledge, identification, data,
+inference, discovery, process, SCM, and forecast pillars.
+
+### Added
+- Tooling: uv project layout, ruff (lint and format), mypy (strict), pytest,
+  MkDocs Material documentation, pre-commit hooks, and a Makefile.
 - Causal graph objects (`ergodic.graph`): a mixed-graph core with typed endpoint
   marks covering DAG, ADMG, MAG, CPDAG, and PAG; immutable value semantics; d- and
   m-separation; the do-operator and subgraphs; networkx, adjacency, and dict interop.
@@ -138,8 +200,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline and returns a pair-level table rather than a graph (feedback
   across lags is normal; the docstring says what Granger does not claim).
   Shape guards keep the methods honest: iid methods reject temporal data
-  (rows are not exchangeable), `pcmci` rejects tabular data, and `bootstrap`
-  refuses temporal methods until a moving-block variant exists.
+  (rows are not exchangeable) and `pcmci` rejects tabular data.
 - The learn series: six beginner notebook guides (`docs/learn/`) that teach
   causal inference from zero on commercial examples, confounding and Simpson's
   paradox, good and bad controls, estimation with doubly robust and cross-fit
@@ -269,9 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns a `Refutation`. The model-agnostic checks: `"placebo_treatment"` scrambles
   the treatment and the effect should vanish, `"random_common_cause"` adds an
   irrelevant covariate and the effect should hold, `"data_subset"` re-estimates on a
-  random slice. None proves an estimate right; a failure is a real warning. The
-  sharper confounder-specific sensitivity (partial R-squared, the E-value) comes
-  later. `refute_effect` and `Refutation` re-export at the top level.
+  random slice. None proves an estimate right; a failure is a real warning.
+  `refute_effect` and `Refutation` re-export at the top level.
 - Case studies (`docs/case-studies/`): five narrative pages that apply the tools to
   a famous dataset and recover the number the original study published. Smoking and
   birthweight (backdoor adjustment), the 1973 Berkeley admissions paradox (Simpson's
@@ -295,9 +355,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `functional` and `hedge` fields. `ida(graph, treatment, outcome)` identifies
   across an equivalence class: it enumerates the members of a CPDAG and runs
   `identify_effect` per member, returning an `IDA` record (`members`,
-  `n_identifiable`, `all_identifiable`, `agree`, `strategies`, `estimands`); PAG
-  and MAG members need a DAG realization and raise a clear "not built" for the
-  general case. Held executably to the soundness-against-truth anchor (the
+  `n_identifiable`, `all_identifiable`, `agree`, `strategies`, `estimands`). On a
+  PAG or MAG it returns the class-level adjustment answer where one applies and
+  raises otherwise, since general per-member ID needs a DAG realization of each
+  member. Held executably to the soundness-against-truth anchor (the
   functional evaluated on random discrete worlds matches the truth) and the
   identifiability catalog.
 - The discrete plug-in estimator (`ergodic.inference`): `estimate_effect` on a
@@ -305,7 +366,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evaluating the empirical sum-product with a bootstrap standard error. Discrete-
   only and binary-treatment guarded, with a positivity check that raises on an
   empty stratum the formula divides by (the discrete analog of the overlap check);
-  a continuous variable raises and points at the SCM path (not built).
+  a continuous variable raises and points at the SCM pillar.
 - Mediation (`ergodic.identification`, `ergodic.inference`):
   `identify_mediation(graph, treatment, outcome, mediators)` decides the natural
   direct and indirect effects (NDE, NIE) via a covariate set that blocks the X-Y,
@@ -353,7 +414,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded pieces and costs no sampling; the replay engine (for a mechanism that
   does not expose them) zeroes the factor's sites in a copy of the trace and
   forecasts again on the stored seed. pymc is optional, `pip install
-  ergodic[forecast]`, and the bare install never imports it.
+  'ergodic[forecast]'`, and the bare install never imports it.
+- The structural causal model (`ergodic.scm`): a Bayesian `SCM` on PyMC with
+  explicit-noise mechanisms (`GaussianAdditive`, and `BinaryGumbelMax` /
+  `CategoricalGumbelMax` for discrete nodes), `pm.do` interventions, and batched
+  twin-network counterfactuals with per-draw uncertainty. `ate` routes through
+  `identify_effect` first and the return type names the world: a back-door
+  effect returns a posterior `SCMResult`, a non-identified one returns a
+  `Sensitivity` curve with no point accessor. A latent-confounded ADMG fits its
+  confounded districts jointly, so a front-door effect computes from the fitted
+  model; instruments and general ID still raise and point at `estimate_effect`.
+  `SCM.ite` returns per-unit individual treatment effects off the twin network,
+  as a contrast between two levels or a shift from each unit's own baseline.
+  pymc is optional, `pip install 'ergodic[scm]'`.
+- Per-unit effects and the CATE toolkit (`ergodic.inference`): `CATEResult` and
+  `ITEResult` share one array-like `PerUnitEffect` surface (`values`,
+  `interval`, `ate`, `to_frame`), and every meta-learner's `cate` returns one.
+  The top-level `cate(graph, data, X, Y, method=...)` is identification-gated
+  like `estimate_effect`; `uncertainty=False` skips the per-unit uncertainty
+  pass for a fast point-only result. `CATEResult.explain()` gives honest
+  characterization off out-of-fold scores (best linear projection, sorted group
+  effects, CLAN, the calibration test, RATE). `CausalForest` is a native honest
+  generalized random forest with infinitesimal-jackknife intervals,
+  `policy_tree` learns an interpretable treat-or-not rule with its policy value
+  and regret, and `select_cate` ranks candidate learners by doubly robust
+  tau-risk and returns a Q-aggregated ensemble.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
@@ -392,3 +477,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to walk them literally. `identify_effect` on a CPDAG or MAG used to run
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
+
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ergodic-ai/ergodic/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/ergodic-ai/ergodic/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/ergodic-ai/ergodic/releases/tag/v0.1.0
