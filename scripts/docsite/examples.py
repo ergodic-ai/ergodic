@@ -1,0 +1,270 @@
+"""Run, check and record the programs published on documentation pages.
+
+The rules (the Welt next-pass rules in welt-api ``docs/sdk-docs-handoff.md``):
+
+- A ``python`` fence with ``file="name.py"`` is a complete, runnable program. It runs
+  in a fresh process with a timeout, from an empty working directory, with network
+  access disabled, so it can read only the package's bundled datasets.
+- Every other ``python`` fence on that page must be a verbatim, contiguous excerpt of
+  one of the page's programs, so fragments cannot drift from the executed code.
+- An ``output`` panel names its program with ``from="name.py"`` (optionally a
+  ``lines="a-b"`` slice of its standard output). ``record`` writes the program's output
+  into the panel; ``check`` reruns the program and compares, exactly by default or with
+  ``tol``/``rtol`` numeric tolerances for sampling-based pages.
+"""
+
+from __future__ import annotations
+
+import difflib
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
+
+from .config import Site
+from .graphite import DocsError, Fence, fences, line_numbers
+
+PYTHON = ("python", "py")
+# Runs the program as __main__ after disabling sockets: documentation examples use
+# bundled data only and never reach the network.
+BOOTSTRAP = """
+import runpy, socket, sys
+def _blocked(*args, **kwargs):
+    raise OSError("network access is disabled while running documentation examples")
+socket.socket.connect = _blocked
+socket.socket.connect_ex = _blocked
+socket.create_connection = _blocked
+socket.getaddrinfo = _blocked
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+NUMBER = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
+
+
+@dataclass(frozen=True)
+class Program:
+    page: Path
+    name: str
+    code: str
+    timeout: int
+
+
+@dataclass(frozen=True)
+class Run:
+    program: Program
+    returncode: int
+    stdout: str
+    stderr: str
+    seconds: float
+
+
+def page_paths(site: Site, only: list[str] | None = None) -> list[Path]:
+    paths = sorted(site.pages_dir.glob("*.md"))
+    if only:
+        wanted = {Path(name).stem for name in only}
+        paths = [p for p in paths if p.stem in wanted]
+        if {p.stem for p in paths} != wanted:
+            raise DocsError(f"Unknown page(s): {sorted(wanted - {p.stem for p in paths})}")
+    return paths
+
+
+def programs_of(path: Path, site: Site) -> list[Program]:
+    found = []
+    for fence in fences(path.read_text()):
+        if fence.language in PYTHON and "file" in fence.attributes:
+            name = fence.attributes["file"]
+            if not re.fullmatch(r"[a-z0-9_]+\.py", name):
+                raise DocsError(f"{path.name}: program names are snake_case .py files: {name!r}")
+            timeout = int(fence.attributes.get("timeout", site.example_timeout))
+            found.append(Program(path, name, fence.code, timeout))
+    return found
+
+
+def all_programs(site: Site) -> dict[str, Program]:
+    """Every program on the site, by file name (names are unique: they share downloads/)."""
+    programs: dict[str, Program] = {}
+    for path in page_paths(site):
+        for program in programs_of(path, site):
+            if program.name in programs:
+                other = programs[program.name].page.name
+                raise DocsError(f"Program {program.name} appears on {other} and {path.name}")
+            programs[program.name] = program
+    return programs
+
+
+def excerpt_problems(path: Path, site: Site) -> list[str]:
+    """Python fences that are not a contiguous excerpt of one of the page's programs."""
+    text = path.read_text()
+    programs = [p.code.rstrip("\n").split("\n") for p in programs_of(path, site)]
+    names = {p.name for p in programs_of(path, site)}
+    problems = []
+    for fence in fences(text):
+        line = text.count("\n", 0, fence.start) + 1
+        if fence.language == "output":
+            source = fence.attributes.get("from")
+            if source is None:
+                problems.append(f'{path.name}:{line}: output panel needs from="<program>.py"')
+            elif source not in names:
+                problems.append(f"{path.name}:{line}: output from unknown program {source!r}")
+            continue
+        if fence.language not in PYTHON or "file" in fence.attributes:
+            continue
+        lines = fence.code.rstrip("\n").split("\n")
+        if not any(
+            program[i : i + len(lines)] == lines
+            for program in programs
+            for i in range(len(program) - len(lines) + 1)
+        ):
+            problems.append(
+                f"{path.name}:{line}: python fence is not a verbatim, contiguous excerpt of a "
+                'file="…" program on this page'
+            )
+    return problems
+
+
+def run(program: Program) -> Run:
+    """Run one program in a fresh interpreter, from an empty directory, without network."""
+    with tempfile.TemporaryDirectory(prefix="docs-example-") as folder:
+        script = Path(folder) / program.name
+        script.write_text(program.code)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT")
+        }
+        env.update(PYTHONHASHSEED="0", MPLBACKEND="Agg", PYTHONWARNINGS="ignore")
+        started = time.perf_counter()
+        try:
+            done = subprocess.run(
+                [sys.executable, "-s", "-P", "-c", BOOTSTRAP, str(script)],
+                cwd=folder,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=program.timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return Run(program, -1, "", f"timed out after {program.timeout} s", program.timeout)
+        return Run(
+            program, done.returncode, done.stdout, done.stderr, time.perf_counter() - started
+        )
+
+
+def run_all(programs: list[Program], workers: int = 4) -> list[Run]:
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        return list(pool.map(run, programs))
+
+
+def clean(text: str) -> str:
+    """Recorded output: trailing spaces and trailing blank lines removed."""
+    lines = [line.rstrip() for line in text.split("\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def select(stdout: str, spec: str | None) -> str:
+    text = clean(stdout)
+    if not spec:
+        return text
+    lines = text.rstrip("\n").split("\n")
+    chosen = sorted(line_numbers(spec, len(lines)))
+    return "\n".join(lines[i - 1] for i in chosen) + "\n"
+
+
+def same(expected: str, actual: str, tol: float = 0.0, rtol: float = 0.0) -> bool:
+    """Exact match, or numbers within ``tol + rtol * |expected|`` and the same text."""
+    if expected == actual:
+        return True
+    if not tol and not rtol:
+        return False
+    left, right = NUMBER.split(expected), NUMBER.split(actual)
+    numbers_left, numbers_right = NUMBER.findall(expected), NUMBER.findall(actual)
+    if len(numbers_left) != len(numbers_right):
+        return False
+    if [" ".join(x.split()) for x in left] != [" ".join(x.split()) for x in right]:
+        return False
+    return all(
+        abs(float(a) - float(b)) <= tol + rtol * abs(float(a))
+        for a, b in zip(numbers_left, numbers_right, strict=True)
+    )
+
+
+def diff(expected: str, actual: str, label: str) -> str:
+    lines = difflib.unified_diff(
+        expected.splitlines(),
+        actual.splitlines(),
+        f"{label} (recorded)",
+        f"{label} (now)",
+        n=1,
+        lineterm="",
+    )
+    return "\n".join(list(lines)[:40])
+
+
+def output_panels(text: str) -> list[Fence]:
+    return [f for f in fences(text) if f.language == "output" and "from" in f.attributes]
+
+
+def replace_fence(text: str, fence: Fence, content: str) -> str:
+    body = "".join(fence.indent + line if line else line for line in content.splitlines(True))
+    head = f"{fence.indent}{fence.marker}{fence.info}\n"
+    tail = f"{fence.indent}{fence.marker}"
+    return text[: fence.start] + head + body + tail + text[fence.end :]
+
+
+@dataclass
+class Report:
+    runs: list[Run]
+    problems: list[str]
+    recorded: list[str]
+
+
+def check(site: Site, only: list[str] | None = None, *, record: bool = False) -> Report:
+    """Excerpts, program runs and output panels for the selected pages."""
+    paths = page_paths(site, only)
+    all_programs(site)  # Names must be unique across the whole site.
+    problems: list[str] = []
+    for path in paths:
+        problems += excerpt_problems(path, site)
+    programs = [program for path in paths for program in programs_of(path, site)]
+    runs = run_all(programs)
+    by_name = {r.program.name: r for r in runs}
+    for item in runs:
+        if item.returncode != 0:
+            tail = "\n".join(item.stderr.strip().splitlines()[-12:])
+            problems.append(
+                f"{item.program.page.name}: {item.program.name} failed "
+                f"(exit {item.returncode}):\n{tail}"
+            )
+    recorded: list[str] = []
+    for path in paths:
+        text = path.read_text()
+        for fence in reversed(output_panels(text)):
+            source = fence.attributes["from"]
+            result = by_name.get(source)
+            if result is None or result.returncode != 0:
+                continue
+            actual = select(result.stdout, fence.attributes.get("lines"))
+            if record:
+                if fence.code != actual:
+                    text = replace_fence(text, fence, actual)
+                    recorded.append(f"{path.name}: {source}")
+                continue
+            tol = float(fence.attributes.get("tol", 0))
+            rtol = float(fence.attributes.get("rtol", 0))
+            if not same(fence.code, actual, tol, rtol):
+                problems.append(
+                    f"{path.name}: output of {source} changed "
+                    f"(tol={tol}, rtol={rtol}); run `make docs-record` after review\n"
+                    + diff(fence.code, actual, source)
+                )
+        if record and text != path.read_text():
+            path.write_text(text)
+    return Report(runs, problems, recorded)

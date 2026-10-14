@@ -1,0 +1,150 @@
+# API-143 / DEC-078: per-site configuration for the Graphite documentation builder
+# (scripts/docsite). Everything product-specific lives here; the builder holds none.
+
+[site]
+name = "ergodic"
+subtitle = "Docs"
+tagline = "Open-source causal AI for Python"
+description = "ergodic: causal discovery, identification and effect estimation in Python, with tested examples on bundled data."
+package = "ergodic"                         # importable package; its __version__ names the build
+distribution = "ergodic"                    # PyPI distribution name
+public_url = "https://ergodic.dev"          # canonical root of the published site
+cname = "ergodic.dev"                       # written to CNAME at the output root
+repository = "https://github.com/ergodic-ai/ergodic"
+pages_source = "docsite/pages"              # repository path of page sources (for "View source")
+theme_key = "ergodic-docs-theme"            # localStorage key for the reader's theme choice
+footer = "ergodic by Ergodic · Apache-2.0"
+cta = { label = "Get started", page = "start" }
+search_prompt = "Search ergodic by task, function or error."
+search_hint = "No matches. Try “estimate”, “discover”, “dag” or “identify”."
+related_llms = [
+    ["Welt (hosted models, MCP server and Python SDK)", "https://welt.ergodic.dev/llms.txt"],
+]
+
+[install]
+# Shown as tabs on the landing page, in order.
+commands = [
+    ["pip", 'pip install "ergodic"'],
+    ["uv", 'uv add "ergodic"'],
+]
+
+[versions]
+# Published versions older than this build that stay in the picker (v<version>/), oldest first.
+previous = []
+
+[[products]]
+name = "ergodic"
+description = "Open-source causal AI library"
+current = true
+
+[[products]]
+name = "Welt"
+description = "Python SDK documentation"
+url = "https://ergodic-ai.github.io/welt-python/"
+
+[[products]]
+name = "Welt console"
+description = "Hosted tabular and causal models"
+url = "https://welt.ergodic.dev"
+
+[[footer_links]]
+label = "Welt"
+url = "https://welt.ergodic.dev"
+
+[[footer_links]]
+label = "Welt SDK docs"
+url = "https://ergodic-ai.github.io/welt-python/"
+
+# Top-bar sections. A page belongs to the section whose groups list it.
+[[nav]]
+label = "Get started"
+page = "start"
+groups = ["Get started"]
+
+[[nav]]
+label = "Guides"
+page = "estimate-average-effect"
+groups = ["Guides"]
+
+[[nav]]
+label = "Notebooks"
+page = "notebooks"
+groups = ["Notebooks"]
+
+[[nav]]
+label = "Reference"
+page = "reference"
+groups = ["Reference"]
+
+# Sidebar groups; their order defines the previous/next pager.
+[[groups]]
+label = "Get started"
+pages = [["Your first causal effect", "start"]]
+
+[[groups]]
+label = "Guides"
+pages = [["Estimate an average effect", "estimate-average-effect"]]
+
+[[groups]]
+label = "Notebooks"
+pages = [["All notebooks", "notebooks"]]
+
+[[groups]]
+label = "Reference"
+pages = [["Python reference", "reference"]]
+
+[landing]
+eyebrow = "Python 3.11+ · Apache-2.0"
+title = "From data"
+title_muted = "to a causal effect."
+lead = "Learn a causal graph from your data, check that the effect you want is identifiable, and estimate it with an interval. Every example on this site runs as written."
+program = "start.md#first_effect.py"        # complete program (and its recorded output) shown on the landing
+secondary = { label = "Python reference", page = "reference" }
+
+[[landing.tasks]]
+title = "Your first causal effect"
+page = "start"
+text = "Discover, identify and estimate on a bundled dataset."
+
+[[landing.tasks]]
+title = "Estimate an average effect"
+page = "estimate-average-effect"
+text = "Adjust for confounders and read the interval."
+
+[[landing.tasks]]
+title = "Notebooks"
+page = "notebooks"
+text = "The learn series and case studies, ready to download."
+
+[reference]
+group = "Reference"
+# Modules documented one page each (ergodic.<module>), in sidebar order.
+modules = [
+    ["graph", "Causal graphs"],
+    ["data", "Data"],
+    ["knowledge", "Domain knowledge"],
+    ["identification", "Identification"],
+    ["discovery", "Discovery"],
+    ["inference", "Effect estimation"],
+    ["process", "Process intelligence"],
+    ["scm", "Structural causal models"],
+    ["forecast", "Forecasting"],
+    ["latent", "Hidden regimes"],
+    ["datasets", "Datasets"],
+]
+
+[notebooks]
+page = "notebooks"
+title = "Notebooks"
+lead = "Download a notebook and run it yourself. Each preview shows the cells with outputs cleared; release CI runs every notebook."
+
+[[notebooks.groups]]
+label = "Learn series"
+source = "docs/learn"
+
+[[notebooks.groups]]
+label = "Case studies"
+source = "docs/case-studies"
+
+[examples]
+timeout = 180          # seconds per program, unless a fence sets timeout="…"
