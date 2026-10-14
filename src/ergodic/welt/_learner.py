@@ -28,11 +28,12 @@ _TARGET = "__ergodic_target__"
 
 
 class _FitBudget:
-    """The fit count a learner and its clones share, with the cap they share."""
+    """What a learner and its clones share: the fit cap and count, and catalogue limits."""
 
     def __init__(self, max_fits: int | None) -> None:
         self.max_fits = max_fits
         self.used = 0
+        self.prediction_rows: dict[tuple[str, str], int | None] = {}
 
     def charge(self, model: str) -> None:
         if self.max_fits is not None and self.used >= self.max_fits:
@@ -128,7 +129,6 @@ class WeltLearner:
         self.seed = seed
         self.timeout = timeout
         self._budget = _FitBudget(max_fits)
-        self._prediction_rows: int | None = None
 
     # -- scikit-learn surface -------------------------------------------------
 
@@ -186,7 +186,6 @@ class WeltLearner:
         """
         twin = WeltLearner(**self.get_params())
         twin._budget = self._budget
-        twin._prediction_rows = self._prediction_rows
         return twin
 
     @property
@@ -255,8 +254,9 @@ class WeltLearner:
                 seed=self.seed,
             )
             predictor = job.result(timeout=self.timeout)
-            if self._prediction_rows is None:
-                self._prediction_rows = self._limit(client)
+            key = (self.model, self.task)
+            if key not in self._budget.prediction_rows:
+                self._budget.prediction_rows[key] = self._limit(client)
         if predictor.get("task") != self.task:
             raise ValueError("Welt fitted a predictor for a different task")
         self.predictor_id_: str = predictor["id"]
@@ -284,7 +284,7 @@ class WeltLearner:
             raise ValueError(f"X has {matrix.shape[1]} columns; the fit had {self._n_features}")
         columns = [f"x{i}" for i in range(matrix.shape[1])]
         rows = matrix_rows(matrix)
-        size = self._prediction_rows or len(rows)
+        size = self._budget.prediction_rows.get((self.model, self.task)) or len(rows)
         from welt import PredictionPendingError
 
         answers: list[dict[str, Any]] = []

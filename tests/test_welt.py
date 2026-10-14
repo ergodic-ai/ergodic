@@ -378,6 +378,8 @@ def test_dml_through_welt_matches_ols_on_the_same_folds() -> None:
     assert learner.fits_used == 4
     assert fake.count("POST", "/v1/fits") == 4
     assert hosted.kind == "analytic"
+    # The clones share one catalogue lookup for the prediction-row limit.
+    assert fake.count("GET", "/v1/models/") == 1
 
 
 def test_the_fit_budget_stops_a_bootstrap_fan_out_before_paying() -> None:
