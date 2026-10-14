@@ -39,6 +39,7 @@ from .discovery import discover, granger
 # function last so the binding is the deliberate one.
 from .forecast import backtest, forecast
 from .graph import (
+    GRAPH_FORMAT,
     Edge,
     GraphKind,
     InvalidGraphError,
@@ -134,6 +135,7 @@ from .scm import (
 __version__ = "0.1.1"
 
 __all__ = [
+    "GRAPH_FORMAT",
     "IDA",
     "SCM",
     "BinaryGumbelMax",

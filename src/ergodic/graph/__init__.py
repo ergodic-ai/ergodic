@@ -27,6 +27,7 @@ from ._graph import (
     mixed,
     pag,
 )
+from ._io import GRAPH_FORMAT
 from ._marks import Mark
 from ._meek import consistent_extension, cpdag_of_dag, dags_of_cpdag, extendable, meek_closure
 from ._pag import (
@@ -43,6 +44,7 @@ from ._primitives import district_of, districts, latent_projection, topological_
 from ._separation import d_separated, m_connected, m_separated
 
 __all__ = [
+    "GRAPH_FORMAT",
     "Edge",
     "EdgeSpec",
     "GraphKind",

@@ -59,6 +59,8 @@ How deep do these checks go? This paragraph is for readers who care about valida
 Re-tag a graph with `as_kind`, which validates before it returns:
 
 ```python
+from ergodic import mixed
+
 m = mixed(["X <-> Y"])
 m.as_kind("admg")   # or GraphKind.ADMG
 ```
@@ -123,6 +125,8 @@ g.to_adjacency()               # (directed 0/1 matrix, node order)
 data = g.to_dict()             # JSON-ready
 MixedGraph.from_dict(data)
 ```
+
+The dict carries `"format": "ergodic.graph/1"` (the value of `ergodic.GRAPH_FORMAT`). `from_dict` reads a dict without the field as that version and raises `ValueError` on any other format, so a reader never guesses at a layout it does not know.
 
 networkx is used only here, at the edge of the package. The graph algorithms are native.
 
