@@ -39,6 +39,8 @@ uv add ergodic
 
 Requires Python 3.11+.
 
+To run [Welt](https://welt.ergodic.dev)'s hosted foundation models from ergodic, install the `welt` extra: `pip install "ergodic[welt]"`. `ergodic.welt` then runs Welt causal discovery (`discover(data, method="welt:arrow")`), puts a Welt tabular model in any nuisance slot (`estimate_effect(..., learner=WeltLearner("tabicl-v2"))`), and moves tables between the two. Welt calls are paid, and cross-fitting fits once per fold and slot. The extra needs Python 3.11 to 3.13 until `welt-client` supports 3.14. The rest of ergodic never imports it and makes no network calls.
+
 ## Quick start
 
 ```python

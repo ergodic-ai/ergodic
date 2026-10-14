@@ -90,6 +90,12 @@ Note the one shadowed name in the package. `ergodic.forecast` at the top level i
 
 ::: ergodic.forecast
 
+## Welt
+
+Welt's hosted foundation models, behind `pip install "ergodic[welt]"` (Python 3.11 to 3.13): `discover` runs a Welt causal discovery model and returns a `DiscoveryResult` (also `ergodic.discover(data, method="welt:arrow")`), `WeltLearner` fills a nuisance slot with a Welt tabular model under a shared fit budget, and `upload_dataset` and `load_research_dataset` move tables between ergodic and Welt. Every call is a Welt request; most are paid.
+
+::: ergodic.welt
+
 ## Hidden regimes
 
 Hidden-regime inference over one series: `recover` for the posterior state path and mechanism deltas, `certify` for the simulated-null existence test, `calibrate` for the measured false-fire rate, and `consensus` for laying several likelihoods' verdicts side by side. The built-in likelihoods live in `ergodic.latent.likelihoods` (`spectral_whittle`, `switching_ar`).

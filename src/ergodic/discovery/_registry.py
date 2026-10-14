@@ -59,7 +59,10 @@ def algorithm_for(method: str) -> type[Any]:
     entry = _BY_METHOD.get(method.lower())
     if entry is None:
         allowed = ", ".join(sorted(_BY_METHOD))
-        raise ValueError(f"unknown discovery method {method!r}; use one of {allowed}")
+        raise ValueError(
+            f"unknown discovery method {method!r}; use one of {allowed}, "
+            "or 'welt:<model>' through discover() with ergodic[welt]"
+        )
     module_name, attr = entry
     return cast("type[Any]", getattr(import_module(module_name), attr))
 
