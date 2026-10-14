@@ -31,8 +31,10 @@ def discover(
 ) -> DiscoveryResult:
     """Learn causal structure from ``data`` with the named ``method``.
 
-    ``test`` feeds a constraint method (a :class:`CITest` instance, bound or
-    not, or an alias like ``"linear"``); ``score`` feeds a score-based method
+    ``test`` feeds a constraint method (a :class:`CITest` instance built
+    without data, since ``discover`` binds it to ``data``, or an alias like
+    ``"linear"``; a bound test runs through the algorithm class, as in
+    ``PC(test=GCM(data)).fit()``); ``score`` feeds a score-based method
     (a :class:`Score` instance or an alias like ``"bic"``, ``"bdeu"``); both
     default to ``"auto"``, picked from the column schema. Each algorithm
     declares which ingredient it consumes. Extra keyword arguments pass to
