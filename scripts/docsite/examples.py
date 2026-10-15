@@ -373,6 +373,8 @@ def check(
                 vary = set(range(1, count + 1))
             if not same(fence.code, actual, tol, rtol, vary_lines=vary):
                 rule = f"tol={tol}, rtol={rtol}" + (f", vary={spec}" if spec else "")
+                if (tol or rtol or spec) and not reproduces:
+                    rule = "PyMC 5: text and number count only"
                 problems.append(
                     f"{path.name}: output of {source} changed "
                     f"({rule}); run `make docs-record` after review\n"
