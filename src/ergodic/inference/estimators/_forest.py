@@ -34,6 +34,7 @@ normalized split frequency, a driver signal exposed on the result and the estima
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -344,6 +345,10 @@ class VariableImportance:
         return {name: float(value) for name, value in zip(self.names, self.values, strict=True)}
 
 
+#: The share of zero-width per-unit bands above which ``cate`` warns.
+_ZERO_SE_WARN = 0.05
+
+
 class CausalForest(_MetaLearnerBase):
     """An honest causal forest (GRF) for the conditional average treatment effect.
 
@@ -357,8 +362,20 @@ class CausalForest(_MetaLearnerBase):
     Hyperparameters: ``n_trees`` (forest size), ``min_leaf`` (the minimum estimate-half
     rows per leaf), ``max_depth``, ``honest`` (split/estimate sample-splitting, on by
     default), ``subsample`` (the per-tree subsample fraction), and ``random_state``.
-    Binary treatment in this phase; a continuous treatment via the same local moment
-    is deferred and raises.
+    Binary treatment only; a continuous treatment via the same local moment is not
+    supported and raises.
+
+    The per-unit intervals need many trees. The infinitesimal-jackknife variance
+    subtracts a Monte-Carlo correction that shrinks only as ``n_trees`` grows, and
+    where the correction exceeds the raw variance the standard error is clipped to
+    zero (a zero-width band). Measured on a 4,000-row world with a linear effect
+    (``min_leaf=15``, nominal 90%): 400 trees covered the true effect for 68% of
+    units with 25% zero-width bands; 1,600 trees covered 87% with 1% zero-width.
+    So use ``n_trees`` of the order of half the rows or more when the per-unit
+    intervals matter; ``cate`` warns, and records
+    ``diagnostics["ij_zero_se_share"]``, when more than 5% of the bands are
+    zero-width. Coverage stays somewhat below nominal where the effect changes
+    steeply (the forest's smoothing bias), so treat the bands as approximate.
     """
 
     name = "causal_forest"
@@ -554,6 +571,20 @@ class CausalForest(_MetaLearnerBase):
         n = point.shape[0]
         std_error = self._ij_standard_error(model, z, point) if uncertainty else None
         kind = "analytic" if uncertainty else "point"
+        diagnostics = dict(self._state.diagnostics)
+        if std_error is not None and std_error.size:
+            zero_share = float(np.mean(std_error == 0.0))
+            diagnostics["ij_zero_se_share"] = zero_share
+            if zero_share > _ZERO_SE_WARN:
+                warnings.warn(
+                    f"{zero_share:.0%} of the per-unit standard errors are zero: with "
+                    f"{len(model.trees)} trees for {model.x_train.shape[0]} rows the "
+                    "infinitesimal-jackknife Monte-Carlo correction swamps the variance, "
+                    "so those bands have zero width. Raise n_trees (of the order of half "
+                    "the rows or more) before reading the per-unit intervals.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         scores = self._cate_scores(data)
         return CATEResult(
             treatment=self._treatment_name,
@@ -562,7 +593,7 @@ class CausalForest(_MetaLearnerBase):
             n=n,
             kind=kind,
             source=self.name,
-            diagnostics=dict(self._state.diagnostics),
+            diagnostics=diagnostics,
             identification=self._identification,
             _values=point,
             _index=self._cate_index(data, n),

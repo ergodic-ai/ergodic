@@ -330,3 +330,20 @@ def test_solve_local_moment_zero_without_variation() -> None:
     alpha = np.ones((1, n), dtype=np.float64) / n
     tau = _solve_local_moment(alpha, w_res, y_res)
     assert tau[0] == 0.0
+
+
+def test_zero_width_bands_are_counted_and_warned() -> None:
+    """Regression (API-149): too few trees clipped many IJ variances to zero, silently.
+
+    With few trees for the rows the Monte-Carlo correction exceeds the raw
+    infinitesimal-jackknife variance, the standard error is clipped to zero, and the
+    band has zero width. The result now records the share and warns.
+    """
+    data, graph, _ = _linear_tau(n=1500, seed=3, a=1.0, b=1.0)
+    forest = _fit(data, graph, n_trees=40, min_leaf=10, random_state=0)
+    with pytest.warns(UserWarning, match="zero"):
+        res = forest.cate()
+    share = res.diagnostics["ij_zero_se_share"]
+    assert res.std_error is not None
+    assert share == pytest.approx(float(np.mean(res.std_error == 0.0)))
+    assert share > 0.05

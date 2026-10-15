@@ -197,6 +197,13 @@ To be released together with Welt.
   sitting in mirror modes of a good fit reported 1.83 (the spread arm of the
   golden worlds; aligned, 1.01). The raw number moves to the new
   `rhat_max_unaligned`, and the R-hat warning now reads the aligned value.
+- `CausalForest.cate()` records the share of per-unit standard errors clipped to
+  zero (`diagnostics["ij_zero_se_share"]`) and warns when it exceeds 5%. With too
+  few trees for the rows, the infinitesimal-jackknife Monte-Carlo correction
+  exceeds the raw variance and the band has zero width; on a 4,000-row world 400
+  trees gave 25% zero-width bands and 68% coverage of a nominal 90%, 1,600 trees
+  1% and 87%. The estimator is unchanged; its docstring states these
+  measurements and recommends `n_trees` of the order of half the rows or more.
 
 ## [0.1.1] - 2026-08-30
 
