@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from scripts.docsite import examples, notebooks
-from scripts.docsite.build import build, reference_site
+from scripts.docsite.build import build, expand_includes, reference_site
 from scripts.docsite.config import ROOT, Site, load_site
 from scripts.docsite.graphite import DocsError, fence_info, render_markdown
 from scripts.docsite.links import check_links
@@ -87,6 +87,38 @@ def test_record_then_check_outputs(tmp_path: Path) -> None:
     assert recorded.recorded == ["page.md: demo.py"]
     assert '```output from="demo.py"\ntotal 3\n```' in (site.pages_dir / "page.md").read_text()
     assert examples.check(site).problems == []
+
+
+def test_programs_that_need_a_service_are_checked_but_not_run(tmp_path: Path) -> None:
+    def hosted(name: str) -> str:
+        return (
+            f'```python file="{name}.py" requires="a Welt API key"\n'
+            'raise SystemExit("never run")\nprint("done")\n```\n'
+        )
+
+    page = "# Page\n\n" + hosted("hosted") + '\n```python\nprint("done")\n```\n'
+    drifted = "# Page\n\n" + hosted("drifted") + '\n```python\nprint("other")\n```\n'
+    panel = "# Page\n\n" + hosted("panel") + '\n```output from="panel.py"\ndone\n```\n'
+    site = site_with_pages(tmp_path, {"page": page, "drifted": drifted, "panel": panel})
+    report = examples.check(site, ["page"])
+    assert report.runs == [] and report.problems == []
+    assert [(p.name, p.requires) for p in report.skipped] == [("hosted.py", "a Welt API key")]
+    assert "not a verbatim" in examples.excerpt_problems(site.pages_dir / "drifted.md", site)[0]
+    assert "never run" in examples.excerpt_problems(site.pages_dir / "panel.md", site)[0]
+    body, _ = render_markdown(page)
+    assert '<span class="code-requires">Needs a Welt API key</span>' in body
+    assert 'href="downloads/hosted.py"' in body
+
+
+def test_pages_include_repository_files_verbatim(tmp_path: Path) -> None:
+    (tmp_path / "NOTES.md").write_text("# Notes\n\nText.\n")
+    (tmp_path / "CODE.md").write_text("# Code\n\n```python\nx = 1\n```\n")
+    assert expand_includes("{{include:NOTES.md}}\n", tmp_path) == "# Notes\n\nText.\n"
+    inline = "Inline {{include:NOTES.md}} stays."
+    assert expand_includes(inline, tmp_path) == inline
+    for bad in ("../NOTES.md", "MISSING.md", "CODE.md"):
+        with pytest.raises(DocsError):
+            expand_includes(f"{{{{include:{bad}}}}}\n", tmp_path)
 
 
 def test_numeric_tolerance() -> None:
@@ -175,6 +207,9 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     manifest = json.loads((output / "manifest.json").read_text())
     assert manifest["reference"]["public_names"] == summary["public_names"]
     assert not re.search(r"welt-docs-theme|Welt Python SDK", root_index)
+    changelog = (output / "changelog.html").read_text()
+    release = re.search(r"^## \[(\d+\.\d+\.\d+)\]", (ROOT / "CHANGELOG.md").read_text(), re.M)
+    assert release is not None and f">{release[1]}</a> - " in changelog
     assert check_links(output) == []
 
 
@@ -259,7 +294,10 @@ def test_slow_programs_run_only_when_asked(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.delenv("DOCS_SLOW", raising=False)
     skipped = examples.check(site)
     assert skipped.runs == [] and skipped.problems == []
-    assert skipped.skipped == ["long.md: long.py", "slow.md: demo.py"]
+    assert [f"{p.page.name}: {p.name}" for p in skipped.skipped] == [
+        "long.md: long.py",
+        "slow.md: demo.py",
+    ]
     monkeypatch.setenv("DOCS_SLOW", "1")
     included = examples.check(site, jobs=2)
     assert len(included.runs) == 2 and included.problems == [] and included.skipped == []

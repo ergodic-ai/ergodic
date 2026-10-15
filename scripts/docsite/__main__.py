@@ -73,8 +73,14 @@ def main(argv: list[str] | None = None) -> int:
                 status = "ok" if item.returncode == 0 else "FAILED"
                 where = f"{item.program.page.name}: {item.program.name}"
                 print(f"{status:6} {item.seconds:6.1f} s  {where}")
-            for line in report.skipped:
-                print(f"skipped {line} (slow; set DOCS_SLOW=1 or pass --slow)")
+            for program in report.skipped:
+                where = f"{program.page.name}: {program.name}"
+                reason = (
+                    f"needs {program.requires}; not run"
+                    if program.requires
+                    else "slow; set DOCS_SLOW=1 or pass --slow"
+                )
+                print(f"{'skip':6} {'':8}  {where} ({reason})")
             for line in report.recorded:
                 print(f"recorded {line}")
             for problem in report.problems:

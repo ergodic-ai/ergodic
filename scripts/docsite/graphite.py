@@ -6,8 +6,10 @@ Ported functions: ``icon``, ``format_signature``, ``highlight``, ``mark_lines``,
 and ``search_records``. Changes from the source, all product-neutral:
 
 - typed for mypy strict and formatted for ruff; errors raise :class:`DocsError`;
-- fence attributes add ``from``/``lines``/``tol``/``rtol`` (recorded output panels)
-  and ``timeout`` (programs); a ``file="…"`` header links its download;
+- fence attributes add ``from``/``lines``/``tol``/``rtol`` (recorded output panels),
+  ``timeout`` (programs) and ``requires`` (a program that needs an outside service,
+  shown as a "Needs …" note and never run by the checker); a ``file="…"`` header
+  links its download;
 - ``render_markdown(lenient=True)`` maps unknown callouts to notes (notebook previews);
 - ``search_records(deep=True)`` indexes ``###`` headings (reference pages).
 
@@ -142,7 +144,7 @@ CALLOUTS = {
 }
 # Attributes each fence kind accepts. ``output`` panels name the program they record.
 FENCE_ATTRIBUTES = {
-    "code": frozenset({"file", "tab", "hl", "title", "timeout", "slow"}),
+    "code": frozenset({"file", "tab", "hl", "title", "timeout", "slow", "requires"}),
     "output": frozenset({"title", "from", "lines", "tol", "rtol"}),
 }
 
@@ -292,9 +294,13 @@ def code_block(blocks: list[tuple[str, dict[str, str], str]], position: int = 0)
         label = attributes.get("file") or language
         file_class = " code-file" if "file" in attributes else ""
         download = ""
+        if "requires" in attributes:
+            download += (
+                f'<span class="code-requires">Needs {html.escape(attributes["requires"])}</span>'
+            )
         if "file" in attributes:
             target = html.escape(attributes["file"], quote=True)
-            download = (
+            download += (
                 f'<a class="code-download" href="downloads/{target}" download="{target}">'
                 "Download</a>"
             )

@@ -191,9 +191,14 @@ program = "start.md#first_effect.py"        # complete program (and its recorded
 secondary = { label = "Python reference", page = "reference" }
 
 [[landing.tasks]]
-title = "Your first causal effect"
-page = "start"
-text = "Discover, identify and estimate on a bundled dataset."
+title = "Discover a graph"
+page = "discover-a-graph"
+text = "Learn a causal graph from data, with domain knowledge."
+
+[[landing.tasks]]
+title = "Check whether an effect is identifiable"
+page = "identify-an-effect"
+text = "Ask a graph for the formula before you estimate."
 
 [[landing.tasks]]
 title = "Estimate an average effect"
@@ -201,9 +206,19 @@ page = "estimate-average-effect"
 text = "Adjust for confounders and read the interval."
 
 [[landing.tasks]]
-title = "Notebooks"
-page = "notebooks"
-text = "The learn series and case studies, ready to download."
+title = "Forecast with causal drivers"
+page = "forecast-with-drivers"
+text = "Forecast series whose drivers you can name."
+
+[[landing.tasks]]
+title = "Map a process from an event log"
+page = "map-a-process"
+text = "See a workflow, then measure what slows it."
+
+[[landing.tasks]]
+title = "Discover in Welt, estimate in ergodic"
+page = "welt"
+text = "Run Welt's hosted models from ergodic."
 
 [reference]
 group = "Reference"

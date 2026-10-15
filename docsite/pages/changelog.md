@@ -1,3 +1,1 @@
-# Changelog
-
-This page is being written (API-144).
+{{include:CHANGELOG.md}}

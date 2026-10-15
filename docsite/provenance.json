@@ -112,7 +112,7 @@
     {
       "file": "site.css",
       "source": null,
-      "transformation": "New (API-143): product switcher, program download link, landing output spacing and a ring on the brand tile in dark mode; tokens only."
+      "transformation": "New (API-143): product switcher, program download link, service note (API-144), landing output spacing and a ring on the brand tile in dark mode; tokens only."
     }
   ]
 }
