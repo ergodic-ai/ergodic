@@ -414,21 +414,24 @@ def test_gcm_with_nearest_neighbours_carries_a_calibration_note() -> None:
     graph = dag(["a -> b", "b -> c"])
     knn = test_graph(graph, _chain_data(), test="gcm")
     assert knn.test == "gcm"
-    assert any("not calibrated" in note and "learner='ols'" in note for note in knn.notes)
+    assert any("over-rejects" in note and "30%" in note for note in knn.notes)
     ols = test_graph(graph, _chain_data(), test=GCM(learner="ols"))
-    assert not any("not calibrated" in note for note in ols.notes)
-    assert any("has not been measured" in note for note in ols.notes)
+    assert not any("over-reject" in note for note in ols.notes)
+    assert any("gcm test is not calibrated" in note for note in ols.notes)
+    mixed_notes = test_graph(graph, _chain_data(), test="mixed").notes
+    assert any("mixed test is not calibrated" in note for note in mixed_notes)
     default = test_graph(graph, _chain_data())
-    assert not any("measured" in note or "calibrated" in note for note in default.notes)
+    assert not any("calibrated" in note for note in default.notes)
 
 
 def test_g_squared_at_small_n_carries_a_size_note() -> None:
     truth = dag(list(load_earthquake(n=300, seed=1).target["edges"]))
     small = test_graph(truth, load_earthquake(n=300, seed=1).data)
     assert small.test == "discrete"
-    assert any("can run over alpha" in note for note in small.notes)
+    assert any("can over-reject" in note for note in small.notes)
     large = test_graph(truth, load_earthquake(n=5000, seed=1).data)
-    assert not any("can run over alpha" in note for note in large.notes)
+    assert not any("over-reject" in note for note in large.notes)
+    assert any("discrete test is not calibrated" in note for note in large.notes)
 
 
 def test_zero_dof_claims_are_vacuous_and_left_out_of_k() -> None:
@@ -446,22 +449,27 @@ def test_zero_dof_claims_are_vacuous_and_left_out_of_k() -> None:
     assert {(i.x, i.y) for i in result.vacuous} == {("a", "c"), ("b", "c")}
     assert all(i.dof == 0.0 for i in result.vacuous)
     assert any("zero degrees of freedom" in note for note in result.notes)
+    assert any("every claim was vacuous" in note for note in result.notes)
+    assert not any("adjacent or inseparable" in note for note in result.notes)
     assert len(result.to_dict()["vacuous"]) == 2
 
 
-def test_linear_p_values_keep_their_order_far_in_the_tail() -> None:
+def test_claims_that_underflow_to_zero_rank_by_their_statistic() -> None:
     rng = np.random.default_rng(6)
     n = 1500
     a = rng.normal(size=n)
     b = a + 2.0 * rng.normal(size=n)
     c = b + 3.0 * rng.normal(size=n)
+    # Name order puts a-c first; strength order puts b-c first.
     result = test_graph(dag(["a -> b"], nodes=["c"]), tabular({"a": a, "b": b, "c": c}))
     p = [i.p_value for i in result.implications]
     stats = [abs(i.statistic) for i in result.implications]
-    # Both |z| are above 8.3, where 1 - Phi underflowed to zero and tied them.
-    assert min(stats) > 9.0 and len(stats) == 2
-    assert all(value > 0.0 for value in p)
+    # Both |z| are above 8.3, where Linear's p-value underflows to exactly 0.
+    assert p == [0.0, 0.0]
+    assert min(stats) > 9.0
     assert stats == sorted(stats, reverse=True)
+    top = result.implications[0]
+    assert {top.x, top.y} == {"b", "c"}
 
 
 # -- review fixes: selection, MAGs, the few-rows and hidden-column notes ---------------------

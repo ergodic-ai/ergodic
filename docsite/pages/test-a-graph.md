@@ -116,8 +116,8 @@ argues that for the DAG basis set they are when the model holds, and with
 large-sample tests such as partial correlation and G squared that holds
 approximately. On simulated six-variable linear-Gaussian graphs, with the default
 partial-correlation test, the true graph was rejected at `alpha = 0.05` in 5.5% of
-3,000 seeded worlds with 200 rows, and 4.6% with 1,000 rows. That is the only size
-this guide has measured.
+3,000 seeded worlds with 200 rows, and 4.6% with 1,000 rows. The partial-correlation
+test is the only one calibrated this way.
 
 The basis set is also not every independence the graph implies. Together the claims
 imply the rest when the distribution has the composition property, as Gaussian
@@ -136,10 +136,10 @@ distributions do. With discrete data a pass says less.
 | `test` | The independence test that ran, such as `"linear"`. |
 | `kind` | How the graph was read: `dag`, `cpdag`, `admg`, `mag` or `pag`. |
 | `n` | Rows used, after dropping incomplete ones. |
-| `implications` | The claims, smallest p-value first. |
+| `implications` | The claims, smallest p-value first. Ties, such as p-values too small to represent that print as 0, go to the larger statistic. |
 | `untestable` | Pairs without an edge that no observed set separates. |
 | `vacuous` | Claims whose test had zero degrees of freedom, such as one with a single-level column. They carry no information and are left out of `k`. |
-| `notes` | Caveats about this run, such as a small sample or a test whose size isn't measured. |
+| `notes` | Caveats about this run, such as a small sample or a test that isn't calibrated. |
 
 Each claim is an `ImpliedIndependence` with `x`, `y`, `given`, `statistic`, `p_value`,
 `p_holm`, `rejected`, `dof` and `rule`. `x` comes before `y` in a topological order of
@@ -175,12 +175,13 @@ discrete, and the degenerate-Gaussian test when they mix. Pass a name or an unbo
 test to choose another; [Choose a method and test](choose-a-method.md) describes each
 one. A test already bound to data is refused, so the rows come from one place.
 
-Only the partial-correlation test's size has been measured. Two others are known to
-reject true graphs too often, and the result carries a note when you use them:
+Only the partial-correlation test, the default for continuous data, is calibrated. With
+any other test the result carries a note saying so, and two are known to reject true
+graphs too often:
 
 - `GCM` with its default nearest-neighbour learner rejected true linear-Gaussian graphs
-  about 30% of the time at `alpha = 0.05`. For near-linear data use
-  `test=GCM(learner="ols")`, or keep the default.
+  about 30% of the time at `alpha = 0.05`. For near-linear data keep the default test.
+  `GCM(learner="ols")` is closer to it but isn't calibrated either.
 - G squared, the default for discrete data, rejected true binary graphs about 10% of
   the time with 200 rows (about 5% with 1,000).
 

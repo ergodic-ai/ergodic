@@ -69,23 +69,14 @@ Planned as 0.3.0.
   Claims whose test has zero degrees of freedom go to `vacuous` and are left out of
   `k`. An infinite value in an observed continuous column, or a non-finite p-value or
   statistic from the test, raises instead of reading as a pass; missing rows are
-  dropped with a note. The result notes when the test's size has not been measured,
-  and specifically for `GCM` with a nearest-neighbour learner and for G squared with
-  fewer than 1,000 rows, both of which over-reject true graphs. The p-value cannot
-  separate Markov-equivalent graphs and a pass does not confirm the graph; the new
-  guide "Test a graph against data" says so. Over 3,000 seeded six-variable
+  dropped with a note. Only the default partial-correlation test is calibrated; the
+  result notes any other test, and says that `GCM` with a nearest-neighbour learner
+  and G squared with fewer than 1,000 rows over-reject true graphs. Claims whose
+  p-values tie (for example, underflowed to 0) rank by the larger `|statistic|`. The
+  p-value cannot separate Markov-equivalent graphs and a pass does not confirm the
+  graph; the new guide "Test a graph against data" says so. Over 3,000 seeded six-variable
   linear-Gaussian worlds, with the default partial-correlation test, the true graph
   was rejected at `alpha = 0.05` in 5.5% of worlds with 200 rows and 4.6% with 1,000.
-
-### Changed
-- The `Linear` (partial correlation) and `GCM` tests compute their two-sided normal
-  p-value with `erfc`, so it no longer underflows to exactly 0 once `|z|` passes about
-  8.3 (it now does only past about 38). Very strong dependences keep their order by
-  p-value. Every decision at a usual `alpha` is unchanged, but PCMCI's parent
-  screen, which ranks candidate parents by p-value, now orders strong parents by
-  strength instead of by name, so the number of tests it runs can change: the
-  "Discover from time series" guide's tiered run now skips to 37 tests from 47
-  rather than 49, with the same links.
 
 ### Changed
 - A decode with knowledge, hard-only knowledge included, now audits it: one extra

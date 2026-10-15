@@ -144,7 +144,8 @@ class GraphTest:
         kind: How the candidate was read: ``"dag"``, ``"cpdag"``, ``"admg"``,
             ``"mag"`` or ``"pag"``.
         n: Rows the tests used (complete rows over the observed variables).
-        implications: The tested claims, smallest p-value first.
+        implications: The tested claims, smallest p-value first; ties (such as
+            p-values that underflow to 0.0) go to the larger ``|statistic|``.
         untestable: Non-adjacent pairs that no observed set separates, so the
             candidate implies no independence for them.
         vacuous: Claims whose test had zero degrees of freedom (a single-level
@@ -201,7 +202,7 @@ class GraphTest:
         }
 
     def to_frame(self) -> pd.DataFrame:
-        """The claims as a dataframe, one row each, smallest p-value first."""
+        """The claims as a dataframe, one row each, in the ``implications`` order."""
         import pandas as pd
 
         rows = [item.to_dict() for item in self.implications]
@@ -445,10 +446,15 @@ def test_graph(
     whatever the dependence; rejecting when either one rejects spends more
     than ``alpha``.
 
-    The size was measured for the default partial-correlation test on
-    linear-Gaussian data. Other tests carry a note on the result: a GCM with
-    its default nearest-neighbour learner over-rejects true graphs, and G
-    squared can over-reject with fewer than 1,000 rows.
+    Only the default partial-correlation test is calibrated: its size was
+    checked against ``alpha`` on linear-Gaussian data. Any other test carries a
+    note on the result saying it is not calibrated; a GCM with its default
+    nearest-neighbour learner and G squared with fewer than 1,000 rows are
+    known to over-reject true graphs.
+
+    Claims are ranked by p-value, smallest first, with ties (such as p-values
+    that underflow to 0.0) going to the larger ``|statistic|``. Fisher's C is
+    unaffected by the order.
 
     What the p-value means: how surprising the data would be if every implied
     independence held. It cannot separate Markov-equivalent graphs (they imply
@@ -554,7 +560,7 @@ def test_graph(
                 _record(c, r, adj, adj <= alpha)
                 for (c, r), adj in zip(tested, adjusted, strict=True)
             ),
-            key=lambda item: (item.p_value, item.x, item.y),
+            key=_rank,
         )
     )
     vacuous = tuple(_record(c, r, 1.0, False) for c, r in empty)
@@ -571,10 +577,15 @@ def test_graph(
             f"The tests of {shown} had zero degrees of freedom (a single-level column or "
             "empty strata), so they carry no information and are left out of k."
         )
-    if not tested:
+    if not claims:
         notes.append(
             "Nothing to test: every pair of observed variables is adjacent or inseparable, "
             "so the candidate implies no independence and fits any data."
+        )
+    elif not tested:
+        notes.append(
+            "Nothing was tested: every claim was vacuous, so the data could not speak to "
+            "any of them."
         )
     if untestable:
         shown = ", ".join(f"{x}-{y}" for x, y in untestable)
@@ -634,8 +645,17 @@ def _record(claim: _Claim, result: CIResult, p_holm: float, rejected: bool) -> I
     )
 
 
+def _rank(item: ImpliedIndependence) -> tuple[float, float, str, str]:
+    """Smallest p-value first; ties go to the larger ``|statistic|``, then to the names.
+
+    Every claim runs through one test, so its statistics share a scale. That
+    keeps strong violations in order when their p-values underflow to 0.0.
+    """
+    return (item.p_value, -abs(item.statistic), item.x, item.y)
+
+
 def _calibration_note(oracle: CITest, n: int) -> str | None:
-    """Say when the test's size on this path was not measured, or measured off."""
+    """Say when the test's size is not calibrated, and what is known about it."""
     if isinstance(oracle, GCM):
         learner = oracle.learner
         knn = (
@@ -645,21 +665,22 @@ def _calibration_note(oracle: CITest, n: int) -> str | None:
         )
         if knn:
             return (
-                "GCM with a nearest-neighbour learner is not calibrated here: in an "
-                "independent check it rejected true linear-Gaussian graphs about 30% of the "
-                "time at alpha = 0.05. For near-linear data use GCM(learner='ols') or the "
-                "default partial-correlation test."
+                "GCM with a nearest-neighbour learner is not calibrated, and it over-rejects: "
+                "in an independent check it rejected true linear-Gaussian graphs about 30% of "
+                "the time at alpha = 0.05. Only the partial-correlation test (the default for "
+                "continuous data) is calibrated; GCM(learner='ols') is closer to linear but "
+                "not calibrated either."
             )
     if oracle.name == "discrete" and n < _DISCRETE_SMALL_N:
         return (
-            f"With {n} rows the G squared test's size can run over alpha: in an independent "
-            "check on binary graphs with 200 rows it rejected true graphs about 10% of the "
-            "time at alpha = 0.05 (about 5% with 1,000 rows)."
+            f"The G squared test is not calibrated, and with {n} rows it can over-reject: in "
+            "an independent check on binary graphs with 200 rows it rejected true graphs "
+            "about 10% of the time at alpha = 0.05 (about 5% with 1,000 rows)."
         )
-    if oracle.name not in ("linear", "d_separation", "discrete"):
+    if oracle.name not in ("linear", "d_separation"):
         return (
-            f"The size of test_graph was measured with the partial-correlation test on "
-            f"linear-Gaussian data; with the {oracle.name} test it has not been measured."
+            f"The {oracle.name} test is not calibrated for test_graph: only the "
+            "partial-correlation test's size has been checked against alpha."
         )
     return None
 
