@@ -252,8 +252,8 @@ def bootstrap(
     replicate, exactly as :func:`discover` does.
 
     The frequencies measure resampling variability, not Bayesian uncertainty;
-    they are not posterior probabilities over graphs (graph posteriors belong
-    to a later phase). The run is deterministic: the same data, seed, and
+    they are not posterior probabilities over graphs (ergodic has no graph
+    posteriors). The run is deterministic: the same data, seed, and
     settings give the same result. A temporal method keys the frequencies on
     window-graph glyphs like ``"X[t-1] --> Y[t]"``.
 

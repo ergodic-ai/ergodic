@@ -6,9 +6,9 @@ doubly-robust score object so the cross-fitting and orthogonality stay consisten
 :class:`Heterogeneity` (from :meth:`~ergodic.inference.CATEResult.explain`) is the
 entry point; the per-tool result records carry the estimates with honest intervals.
 
-This is Tier-B *characterization* (BLP, GATES, CLAN, the calibration test, RATE).
-Tier-A drivers (SHAP, partial dependence, variable importance) and policy trees are
-later phases.
+This is Tier-B *characterization* (BLP, GATES, CLAN, the calibration test, RATE),
+plus the doubly-robust policy tree. Tier-A drivers (SHAP, partial dependence) are
+not part of this module; the causal forest has its own variable importance.
 """
 
 from __future__ import annotations

@@ -369,11 +369,10 @@ class Consensus:
     blocks where declaring models disagree, which is where a cross-model rule
     would adjudicate.
 
-    v1 ships the structure with the one planned rule slot explicitly empty:
-    the amp/spread rule (a spectral amplitude fire against a volatility
-    model's spread silence separates a louder wave from a noisier floor)
-    needs the deferred ``vol_garch`` likelihood, and
-    :meth:`amp_vs_spread` raises by name until it lands.
+    One rule is not available: the amp/spread rule (a spectral amplitude fire
+    against a volatility model's spread silence separates a louder wave from a
+    noisier floor) needs a ``vol_garch`` likelihood that ergodic does not have,
+    so :meth:`amp_vs_spread` raises by name.
     """
 
     target: str
@@ -423,9 +422,8 @@ class Consensus:
         deferred ``vol_garch`` likelihood and lands with it.
         """
         raise NotImplementedError(
-            "the amp/spread cross-model rule needs the deferred vol_garch "
-            "likelihood; consensus() ships the agreement table now and this "
-            "rule lands with that likelihood"
+            "the amp/spread cross-model rule needs a vol_garch likelihood, which "
+            "is not available; consensus() reports the agreement table"
         )
 
     def to_frame(self) -> pd.DataFrame:

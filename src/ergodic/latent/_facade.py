@@ -84,7 +84,7 @@ def _validated_series(
     if isinstance(data, PanelData):
         raise TypeError(
             f"{verb}() reads one series; a PanelData holds one per entity. "
-            "Pooling entities over a shared switch is a reserved seam; select "
+            "Pooling entities over a shared switch is not supported; select "
             "one entity and build a TimeSeriesData."
         )
     if not isinstance(data, TimeSeriesData):
@@ -110,9 +110,9 @@ def _validated_series(
         )
     if not data.schema[target].is_continuous:
         raise TypeError(
-            f"target {target!r} is {data.schema[target].kind.value}, and the v1 "
-            "likelihoods read a continuous series; count and categorical "
-            "emissions are a reserved seam"
+            f"target {target!r} is {data.schema[target].kind.value}, and the "
+            "likelihoods read a continuous series; there are no count or "
+            "categorical emissions"
         )
     y = np.asarray(data.column(target), dtype=np.float64)
     if not np.all(np.isfinite(y)):
@@ -179,9 +179,9 @@ def recover(
     """
     if graph is not None:
         raise NotImplementedError(
-            "graph= is a reserved seam: v1 recovers one regime driving one "
-            "series (the implicit regime -> target graph). Several series "
-            "sharing one switch will land here."
+            "graph= is not supported: recover reads one regime driving one "
+            "series (the implicit regime -> target graph); several series "
+            "sharing one switch are not supported."
         )
     y, chain = _validated_series(data, target, model, chain, verb="recover")
     for name, value in (
@@ -439,11 +439,10 @@ def consensus(results: Sequence[LatentResult], *, level: float = 0.99) -> Consen
     result's delta draws at the shared ``level``, familywise-corrected and
     gated exactly as :meth:`LatentResult.verdicts` reports them.
 
-    The one planned cross-model rule ships as an explicitly empty slot:
-    adjudicating a spectral amplitude fire against a volatility model's
-    spread verdict (a louder wave against a noisier floor) needs the deferred
-    ``vol_garch`` likelihood, and :meth:`Consensus.amp_vs_spread` raises by
-    name until it lands.
+    One cross-model rule is not available: adjudicating a spectral amplitude
+    fire against a volatility model's spread verdict (a louder wave against a
+    noisier floor) needs a ``vol_garch`` likelihood that ergodic does not have,
+    so :meth:`Consensus.amp_vs_spread` raises by name.
     """
     results = list(results)
     if len(results) < 2:

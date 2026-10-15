@@ -156,7 +156,7 @@ def select_cate(
     """Fit and rank candidate CATE learners by the doubly-robust tau-risk.
 
     Identifies the effect (the same back-door gate as :func:`~ergodic.inference.cate`),
-    fits each candidate in ``candidates`` (default the Phase-1 registered meta-learners
+    fits each candidate in ``candidates`` (default the registered meta-learners
     ``dr_learner``/``r_learner``/``x_learner``/``t_learner``) through the ``cate``
     facade, and scores each against one shared cross-fit AIPW signal ``Gamma`` by the
     DR tau-risk ``mean[(Gamma - tau_hat)^2]``. Returns a :class:`SelectionReport` with

@@ -170,8 +170,8 @@ def _treated_from_column(data: PanelData, treatment: str) -> tuple[Any, Any]:
     if len(treated_units) > 1:
         raise ValueError(
             f"treatment column {treatment!r} marks {len(treated_units)} treated units "
-            f"({treated_units[:4]}); multi-unit synthetic control is not built yet, "
-            "run one call per treated unit"
+            f"({treated_units[:4]}); synthetic control here takes one "
+            "treated unit, so run one call per treated unit"
         )
     chosen = treated_units[0]
     return chosen, first_treated[chosen]

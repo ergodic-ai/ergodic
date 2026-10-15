@@ -92,6 +92,16 @@ To be released together with Welt.
 - `AStar` raises `ValueError` naming the violations when its searched DAG cannot
   satisfy the domain knowledge (for example a confounded pair), instead of an
   `AssertionError` (which `python -O` would also have skipped).
+- Error messages and docstrings state limits plainly instead of internal planning
+  words ("reserved seam", "not built yet", "phase 1", "MVP", "post-MVP", "when the
+  causal layer lands"): the neural and foundation CATE method names, `ITEResult.explain`,
+  multi-unit synthetic control, a continuous mediator, per-member ID on a PAG,
+  count and categorical forecast columns, scenario pins on endogenous nodes, the
+  SCM's custom-mechanism and `engine="dml"` refusals, soft knowledge, and the
+  `ergodic.latent` refusals. The neural and foundation names no longer suggest
+  installing `ergodic[neural]`/`ergodic[foundation]`, which do not provide those
+  learners in this version. A test reads
+  every string constant in the package and refuses those words.
 
 ## [0.1.1] - 2026-08-30
 

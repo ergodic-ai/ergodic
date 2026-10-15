@@ -77,8 +77,8 @@ def _combined_loglik(logliks: Sequence[Any]) -> Any:
     ndims = {int(t.ndim) for t in logliks}
     if len(ndims) != 1:
         raise NotImplementedError(
-            "combining (T, K) and (T, K, K) emissions in one model is a reserved "
-            "seam; every emission tensor must share a shape"
+            "combining (T, K) and (T, K, K) emissions in one model is not "
+            "supported; every emission tensor must share a shape"
         )
     total = logliks[0]
     for extra in logliks[1:]:

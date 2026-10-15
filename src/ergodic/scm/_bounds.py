@@ -6,7 +6,7 @@ When the identification layer hands back a :class:`~ergodic.identification.Hedge
 be dishonest: the pressure-test showed a "low confounding" prior returns twice the
 truth with tight error bars. So the SCM returns a :class:`Sensitivity` instead.
 
-The MVP engine is the analytic linear sensitivity curve. For a bow
+The engine is the analytic linear sensitivity curve. For a bow
 (``U -> X``, ``U -> Y``, ``X -> Y`` with ``U`` latent), the observed margin fixes
 ``cov(X, Y) = b * var(X) + c`` where ``c = cov_U(X, Y)`` is the unidentified
 confounding channel. So the causal effect is the exact line

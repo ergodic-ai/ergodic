@@ -20,8 +20,8 @@ treatment-by-mediator interaction; with one, the remainder
 directly rather than as the sum.
 
 It handles a binary treatment, a discrete (binary or low-cardinality)
-mediator, and a continuous or binary outcome. A continuous mediator raises with a
-pointer at the future multiply-robust / density path. The standard error is a
+mediator, and a continuous or binary outcome. A continuous mediator raises (it
+needs a density or multiply-robust estimator, which is not available). The standard error is a
 nonparametric bootstrap over the rows, refitting both models per resample, which
 also carries the model uncertainty.
 
@@ -446,8 +446,9 @@ def _mediator_codes(data: TabularData, name: str) -> tuple[npt.NDArray[np.int64]
     if not col.is_discrete:
         raise NotImplementedError(
             f"the g-computation estimator needs a discrete (binary or low-cardinality) "
-            f"mediator; {name!r} is {col.kind.value}. A continuous mediator needs the "
-            "density / imputation form (the multiply-robust path), not built"
+            f"mediator; {name!r} is {col.kind.value}. A continuous mediator needs a "
+            "density or imputation estimator, which is not available; discretize it "
+            "into a few levels to use this estimator"
         )
     card = col.cardinality or 0
     if card > _MAX_MEDIATOR_LEVELS:
@@ -520,7 +521,7 @@ def estimate_mediation(
     classifier). ``treated`` names the treatment level coded to 1. The standard
     errors are a nonparametric bootstrap over the rows at ``random_state``.
 
-    A continuous mediator raises (the density / multiply-robust path is not built);
+    A continuous mediator raises (it needs a density estimator, not available);
     a non-binary treatment raises. Returns a :class:`MediationEstimate` with a
     :class:`~ergodic.inference.Design` record naming the (untestable) cross-world
     assumption.

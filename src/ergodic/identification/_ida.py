@@ -14,7 +14,7 @@ Scope, stated honestly (the plan's A7):
   :func:`~ergodic.identification.identify_effect`. The record is the per-member
   multiset.
 - PAG or MAG. Each member is a MAG, not a DAG; general per-member ID needs a DAG
-  realization of every MAG member, which is not built. The class-level
+  realization of every MAG member, which is not available. The class-level
   generalized adjustment criterion (which :func:`identify_effect` already runs on
   a class face) gives a single answer that holds for *every* member where it
   applies (null or an adjustment set); that is returned as a one-element class
@@ -150,13 +150,13 @@ def ida(
         return IDA(x, y, kind, members)
     # PAG or MAG: the class-level adjustment criterion gives a member-invariant
     # answer where it applies; otherwise general per-member ID is needed, which
-    # needs a DAG realization of each MAG member (not built).
+    # needs a DAG realization of each MAG member (not available).
     class_level = identify_effect(graph, x, y)
     if class_level.identifiable:
         return IDA(x, y, kind, (class_level,))
     raise NotImplementedError(
         f"general ID over {kind.value} members needs a DAG realization of each "
-        "MAG member (not built); the class-level adjustment criterion did not "
+        "MAG member, which is not available; the class-level adjustment criterion did not "
         f"identify {sorted(x)} -> {sorted(y)} here. Use the per-member adjustment "
         "criterion (identify_effect on the class) or enumerate the class "
         "(mags_of_pag) and reason per member"

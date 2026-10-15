@@ -79,7 +79,7 @@ def test_recover_refuses_non_likelihood_model() -> None:
 
 
 def test_recover_refuses_graph() -> None:
-    with pytest.raises(NotImplementedError, match="reserved seam"):
+    with pytest.raises(NotImplementedError, match="graph= is not supported"):
         recover(_series(), "signal", model=_Stub(), graph=object())
 
 
@@ -198,7 +198,7 @@ def test_markov_chain_validates() -> None:
 
 
 def test_semi_markov_is_reserved() -> None:
-    with pytest.raises(NotImplementedError, match="reserved seam"):
+    with pytest.raises(NotImplementedError, match="not available"):
         semi_markov(min_dwell=100)
 
 

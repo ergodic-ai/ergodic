@@ -331,9 +331,10 @@ class ITEResult(PerUnitEffect):
     conditional average. Carries the factual outcome column, the contrast framing
     (``levels=`` or ``shift=``), and a structural provenance note.
 
-    :meth:`explain` is deferred: the Tier-B machinery is defined over the CATE's
-    doubly-robust scores, and the inference-valid descriptive regression of abducted
-    ITEs is a later phase, so it raises with a pointer rather than faking inference.
+    :meth:`explain` is not available: the Tier-B machinery is defined over the
+    CATE's doubly-robust scores, and there is no inference-valid descriptive
+    regression of abducted ITEs, so it raises with a pointer rather than faking
+    inference.
     """
 
     estimand: str = "ite"
@@ -349,10 +350,10 @@ class ITEResult(PerUnitEffect):
         return np.asarray(self._factual, dtype=np.float64)
 
     def explain(self) -> Heterogeneity:
-        """Deferred in phase 1: the Tier-B tools need the CATE's doubly-robust scores."""
+        """Not available: the Tier-B tools need the CATE's doubly-robust scores."""
         raise NotImplementedError(
-            "ITEResult.explain is not available yet: the Tier-B characterization "
-            "(BLP, GATES, RATE) is defined over the doubly-robust CATE scores, and the "
-            "descriptive regression of structural ITEs is a later phase. Use a CATE "
-            "meta-learner (cate(...)) for inference-valid heterogeneity characterization"
+            "ITEResult.explain is not available: the Tier-B characterization "
+            "(BLP, GATES, RATE) is defined over the doubly-robust CATE scores, which "
+            "structural ITEs do not have. Use a CATE meta-learner (cate(...)) for "
+            "inference-valid heterogeneity characterization"
         )

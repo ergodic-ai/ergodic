@@ -9,12 +9,12 @@ estimators emit (:class:`~ergodic.inference.EffectEstimate`): ``mean``, ``draws`
 
 What it adds is the honesty flag. ``identified`` is ``True`` for a query that is a
 function of the data alone: an interventional distribution that the identification
-layer certified, or a counterfactual on invertible mechanisms. In the MVP every
+layer certified, or a counterfactual on invertible mechanisms. Today every
 query that reaches an :class:`SCMResult` is identified -- the back-door effect, the
-interventional distribution, and the exact invertible counterfactual (the MVP
+interventional distribution, and the exact invertible counterfactual (the SCM
 refuses a non-invertible-mechanism counterfactual rather than return a result). The
-flag is carried for the post-MVP wider-abduction counterfactual, where ``False``
-will mean the answer is the wider posterior and its width is the message. A
+flag is kept so a result can say ``False`` if a wider-abduction counterfactual is
+ever returned, where the width of the posterior would be the message. A
 *non-identified effect* never lands here at all; it returns a
 :class:`~ergodic.scm.Sensitivity`, so a naked point read is impossible by
 construction.

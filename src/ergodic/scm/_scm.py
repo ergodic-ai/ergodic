@@ -140,7 +140,7 @@ class SCM:
         The parents come from the projected ADMG (so a projection-introduced edge is
         honored), and the mechanism is given its incident latents and the subset it
         anchors the sign gauge for. A Markovian node lists no latents and reduces to
-        the MVP mechanism exactly.
+        the plain mechanism exactly.
         """
         from dataclasses import replace
 
@@ -154,7 +154,7 @@ class SCM:
                     f"node {node!r} sits in a confounded district (incident latents "
                     f"{list(lats)}) but its mechanism {type(mech).__name__} is not a "
                     "built-in Gaussian/categorical, so it cannot carry latent loadings; "
-                    "a custom mechanism in a bidirected district is post-MVP"
+                    "custom mechanisms in a bidirected district are not supported"
                 )
             mech = replace(
                 mech,
@@ -189,7 +189,7 @@ class SCM:
     def fit(self, *, parallel: bool = False) -> SCM:
         """Fit every node's mechanism, per node for singletons, jointly per district.
 
-        A Markovian singleton district fits per node (cheap, exact, the MVP path); a
+        A Markovian singleton district fits per node (cheap and exact); a
         confounded district (nodes sharing a ``<->``) does not factorize -- the latent
         couples it -- so it fits as one joint NUTS block with the explicit latents,
         the gauge, a non-centered parameterization, and a high ``target_accept`` (the
@@ -445,7 +445,7 @@ class SCM:
         # The twin-network counterfactual abducts the exact structural noise, which
         # is only valid for invertible mechanisms. A non-invertible (probabilistic-
         # only) node would need the genuinely wider abduction posterior, which is not
-        # in the MVP; refuse rather than reuse the exact residual and mislabel the
+        # implemented; refuse rather than reuse the exact residual and mislabel the
         # result. Every shipped mechanism is invertible, so this guards a future
         # mechanism, not today's worlds.
         non_invertible = sorted(n for n, m in self.mechanisms.items() if not _is_invertible(m))
@@ -453,7 +453,7 @@ class SCM:
             raise NotImplementedError(
                 f"node(s) {non_invertible} use a non-invertible (probabilistic-only) "
                 "mechanism; non-invertible-mechanism counterfactuals (the genuinely "
-                "wider abduction posterior) are not in the MVP. Every built-in "
+                "wider abduction posterior) are not supported. Every built-in "
                 "mechanism is invertible, so this only arises for a custom mechanism"
             )
         draws = _compose.counterfactual_continuous(
@@ -678,9 +678,9 @@ class SCM:
         rests on the instrument's exclusion restriction, which the latent-district fit
         does not impose, so its treatment->outcome coefficient stays on the same
         non-identified ridge as the bow. The **general ID functional** likewise
-        raises for now (verify-then-widen: its latent-fit do-contrast was not held to
-        ``estimate_effect`` to tolerance in this phase). ``engine="dml"`` is the
-        cross-fit reuse path (post-MVP; raises with a pointer for now).
+        raises (its latent-fit do-contrast was not verified against
+        ``estimate_effect`` to tolerance). ``engine="dml"`` is reserved for a
+        cross-fit reuse path that is not available; it raises with a pointer.
         """
         self._require_fit()
         self._check_node(treatment)
@@ -697,8 +697,8 @@ class SCM:
             return self._bounds(treatment, outcome, ident)
         if engine == "dml":
             raise NotImplementedError(
-                "engine='dml' (cross-fit reuse of the existing DML estimator) is "
-                "post-MVP; the default engine='posterior' returns the SCM plug-in "
+                "engine='dml' (cross-fit reuse of the existing DML estimator) is not "
+                "available; the default engine='posterior' returns the SCM plug-in "
                 "contrast. Use ergodic.estimate_effect(graph, data, X, Y, "
                 "strategy='dml') for a DML estimate"
             )
@@ -899,7 +899,7 @@ class SCM:
     def _check_observable(self, node: str, role: str) -> None:
         """Reject a latent node where a fitted mechanism is required.
 
-        A latent node has no data column and no fitted mechanism (the MVP fits the
+        A latent node has no data column and no fitted mechanism (the SCM fits the
         observed margin), so intervening on it or reading its query would fail with
         an opaque ``KeyError`` from deep in the compose/PyMC path. Reject up front.
         """

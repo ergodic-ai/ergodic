@@ -98,7 +98,7 @@ def resolve_nuts_sampler() -> str:
     """The NUTS backend to name at the call site: the JAX path when it is installed.
 
     Never left to PyMC's own default. PyMC picks nutpie when it is present and
-    ``nuts_sampler`` is omitted, and the forecast engine spike measured nutpie
+    ``nuts_sampler`` is omitted, and a benchmark on the forecast model measured nutpie
     at 3.8 times the wall clock of the JAX path on this shape of model, so the
     choice is made here and stated.
 
@@ -162,13 +162,13 @@ def semi_markov(*, min_dwell: int) -> MarkovChain:
     A geometric dwell is what a Markov chain can express, and the worlds this
     pillar was measured on have negative-binomial dwells, which the Beta stay
     prior only approximates. An explicit semi-Markov chain (dwell floor, or a
-    full dwell distribution) needs its own forward pass and is deferred; this
-    seam is where it will land.
+    full dwell distribution) needs its own forward pass and is not available, so
+    this raises.
     """
     raise NotImplementedError(
-        f"semi_markov(min_dwell={min_dwell}) is a reserved seam: v1 chains are "
+        f"semi_markov(min_dwell={min_dwell}) is not available: chains are "
         "Markov with a Beta stay prior. Use MarkovChain(stay_alpha, stay_beta) "
-        "to encode dwell knowledge for now."
+        "to encode dwell knowledge."
     )
 
 
@@ -278,9 +278,8 @@ class RegimeLikelihood:
     def __post_init__(self) -> None:
         if self.k != 2:
             raise NotImplementedError(
-                f"k={self.k} states is a reserved seam: v1 recovers one binary "
-                "switch (k=2). Multi-state vocabularies need their own delta "
-                "design."
+                f"k={self.k} states is not supported: the likelihoods recover one "
+                "binary switch (k=2)."
             )
 
     def default_chain(self) -> MarkovChain:

@@ -23,13 +23,13 @@ Auto-assignment reads the schema, the same dispatch
 gets :class:`GaussianAdditive` with a Bayesian-linear mean (the default), a binary
 node a :class:`BinaryGumbelMax`, a categorical node a :class:`CategoricalGumbelMax`.
 
-Overrides in the MVP are a built-in name (``"linear"``/``"gaussian"``/``"ols"`` for
+Overrides are a built-in name (``"linear"``/``"gaussian"``/``"ols"`` for
 the additive Gaussian, ``"categorical"``/``"softmax"`` for the Gumbel-max
 categorical, ``"binary"``/``"logistic"`` for the binary Gumbel-max) or a
 :class:`Mechanism` instance used as is. Richer mean overrides -- a
 :class:`~ergodic.inference.Learner` instance as the mean, GP/BART built-ins, a
 :class:`~ergodic.inference.PyMCLearner` subclass, and a raw callable that adds the
-node's RVs to a model -- are planned post-MVP. pymc is imported only inside the
+node's RVs to a model -- are not available. pymc is imported only inside the
 methods, never at module top, so the bare install never imports it (the
 ``PyMCLearner`` precedent).
 
@@ -255,15 +255,15 @@ class GaussianAdditive:
     a half-normal prior on the noise scale. Invertible, so its counterfactual is
     the exact residual ``U = X - (b0 + w . PA)`` reused under the action. A
     :class:`~ergodic.inference.Learner`-as-mean override (carrying no parameter
-    posterior, abducting via the residual against the fitted mean) is planned
-    post-MVP; the MVP fits the Bayesian-linear mean.
+    posterior, abducting via the residual against the fitted mean) is not
+    available; the mean is always the Bayesian-linear one.
 
     In a confounded district the node may also carry incident *latents*: one
     per-unit ``L ~ Normal(0, 1)`` per bidirected edge the node touches, entering
     the mean as ``+ loading_L * L``. ``latents`` lists those latent RV names (in a
     deterministic order); ``gauged_latents`` is the subset whose loading is pinned
     positive (a ``HalfNormal``) to kill the ``L -> -L`` reflection. A Markovian node
-    leaves both empty and reduces to the MVP exactly.
+    leaves both empty and reduces to the plain additive mechanism exactly.
     """
 
     name: str
@@ -694,7 +694,7 @@ def auto_mechanism(graph: MixedGraph, data: Dataset, node: str) -> Mechanism:
             name=node, parents=parents, parent_cards=cards, n_categories=n_cat
         )
     raise ValueError(
-        f"node {node!r} is {col.kind.value}; the MVP fits continuous, binary, and "
+        f"node {node!r} is {col.kind.value}; the SCM fits continuous, binary, and "
         "categorical nodes (datetime and excluded columns have no mechanism)"
     )
 
