@@ -188,3 +188,24 @@ def test_a_forecast_node_declared_as_a_future_covariate_is_refused() -> None:
     spy = _Spy(future_covariates=("promo", "sales"))
     with pytest.raises(ValueError, match="both forecast and declared future covariates"):
         backtest(spy, _sales(), test_size=7)
+
+
+@dataclass(frozen=True)
+class _Targeted(_Spy):
+    """A spy that names its targets, so backtest can check them before any fit."""
+
+    targets: tuple[str, ...] = ("sales", "promo")
+
+
+def test_a_model_naming_a_target_as_a_covariate_is_refused_before_it_runs() -> None:
+    spy = _Targeted()
+    with pytest.raises(ValueError, match="both forecast targets and declared future"):
+        backtest(spy, _sales(), test_size=7)
+    assert spy.seen == []
+
+
+def test_a_string_future_covariates_attribute_is_refused() -> None:
+    spy = _Spy(future_covariates="promo")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="sequence of column names"):
+        backtest(spy, _sales(), test_size=7)
+    assert spy.seen == []

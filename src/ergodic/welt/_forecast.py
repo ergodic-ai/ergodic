@@ -15,12 +15,15 @@ column per series; Welt reads long tables. By default every target column become
 one series of a panel (an id column holding the column name and one value
 column), forecast independently (``cross_learning=False``). ``multivariate=True``
 sends them as the targets of one series instead, forecast jointly. Covariates ride
-along on every row.
+along on every row. A table whose JSON is larger than the SDK's inline threshold
+(``welt.forecast.INLINE_TABLE_BYTES``, 1 MiB) is uploaded first as a workspace
+dataset and referenced by id, as ``welt.Forecast`` does.
 """
 
 from __future__ import annotations
 
 import copy
+import json
 import math
 import uuid
 from dataclasses import dataclass, field
@@ -32,7 +35,7 @@ import numpy as np
 from ..data import HierarchicalTSData, TimeSeriesData
 from ..forecast import RECONCILE_METHODS, ForecastResult, quantile_draws, reconcile
 from ..forecast._facade import _fill_aggregates, _hierarchy_order, _horizon_index
-from ._client import _cell, using
+from ._client import using
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -53,11 +56,16 @@ NATIVE_QUANTILE_LEVELS: tuple[float, ...] = (
 #: How the draws are made from Welt's quantiles, recorded on every result.
 CONVERSION = "inverse-cdf: linear between levels, exponential tails, steps independent"
 
+# The API refuses request bodies over 10 MiB (413 payload_limit), and a dataset upload
+# is a JSON body too, so a table larger than this cannot be sent either way.
+_MAX_TABLE_BYTES = 10 * 1024 * 1024
+_DAY = {"unit": "day", "every": 1}
+
 _ID = "__ergodic_series__"
 _VALUE = "__ergodic_value__"
-# Integer and float time indexes are sent as consecutive days from this origin:
-# Welt reads ISO timestamps, and Chronos-2 reads the order of the rows, not the
-# calendar.
+# A numeric index, or a datetime index Welt cannot read as regular (business days,
+# trading days), is sent as consecutive days from this origin: Welt reads ISO
+# timestamps, and Chronos-2 reads the order of the rows, not the calendar.
 _STEP_ORIGIN = np.datetime64("2000-01-01T00:00:00", "s")
 _SECONDS_PER_DAY = 86_400
 _RECONCILE_HERE = tuple(m for m in RECONCILE_METHODS if m not in ("middle_out", "none"))
@@ -86,9 +94,18 @@ class WeltForecastDiagnostics:
             and that Welt sorted (DEC-085 §1); zero when nothing was repaired.
         cross_learning: Whether the series shared information.
         multivariate: Whether the targets were sent as one multivariate series.
-        conversion: How the draws were made, :data:`CONVERSION`.
-        time_encoding: ``"timestamps"``, or ``"steps-as-days"`` for an integer
-            or float time index sent as consecutive days.
+        conversion: How the draws were made: inverse-CDF sampling, linear between
+            levels, exponential tails, each step sampled on its own.
+        time_encoding: ``"timestamps"``, or ``"steps-as-days"`` when the rows were
+            sent as consecutive days from 2000-01-01 (a numeric index, or a
+            datetime index without a regular frequency Welt can read).
+        point_semantics: Always ``"median"``: Welt's point forecast is the 0.5
+            quantile.
+        calibrated_intervals: Always ``False``: Chronos-2's quantiles are not
+            calibrated. Check coverage with a backtest.
+        datasets: The workspace datasets this job's tables were uploaded as, by
+            role (``"history"``, ``"future"``); empty when both went inline. They
+            stay in the workspace until you delete them.
     """
 
     node: str
@@ -106,6 +123,7 @@ class WeltForecastDiagnostics:
     time_encoding: str = "timestamps"
     point_semantics: str = "median"
     calibrated_intervals: bool = False
+    datasets: Mapping[str, str] = field(default_factory=dict)
 
 
 class _Session:
@@ -119,7 +137,8 @@ class _Session:
         # (model_version, configuration) of the first job, then expected of the rest.
         self.versions: tuple[str, str] | None = None
 
-    def charge(self, model: str) -> None:
+    def check(self, model: str) -> None:
+        """Refuse before sending when the budget of accepted jobs is spent."""
         if self.max_forecasts is not None and self.used >= self.max_forecasts:
             raise RuntimeError(
                 f"WeltForecaster reached max_forecasts={self.max_forecasts} paid Welt "
@@ -127,7 +146,6 @@ class _Session:
                 "sends one per fold; use fewer folds, or raise max_forecasts if you mean "
                 "to pay for more"
             )
-        self.used += 1
 
 
 def _names(values: Sequence[str] | str, label: str) -> tuple[str, ...]:
@@ -142,8 +160,9 @@ def _names(values: Sequence[str] | str, label: str) -> tuple[str, ...]:
 class WeltForecaster:
     """Welt's hosted Chronos-2 as an ergodic forecasting model.
 
-    ``WeltForecaster().fit(data).forecast(12)`` forecasts every numeric column of
-    ``data`` 12 steps ahead with one paid Welt job and returns a
+    ``WeltForecaster().fit(data).forecast(12)`` forecasts every variable of
+    ``data`` that is not a covariate (each must be continuous) 12 steps ahead with
+    one paid Welt job and returns a
     :class:`~ergodic.forecast.ForecastResult` of ``draws`` sample paths per series.
     ``backtest(WeltForecaster(), data, test_size=12)`` scores it, one paid job
     per fold. ``Chronos`` is the same class.
@@ -153,9 +172,11 @@ class WeltForecaster:
     (:func:`~ergodic.forecast.quantile_draws`), seeded by ``forecast``'s ``seed``.
     They match Welt's marginal at each step, but each step is sampled on its own:
     a path has no dependence across steps, and series have none between them.
-    Per-step readings (median, intervals, coverage, CRPS) are unaffected; a sum
-    over steps or a bottom-up aggregate reads the errors as independent. The
-    native quantiles stay in each node's :class:`WeltForecastDiagnostics`.
+    Each unreconciled node's per-step readings (median, intervals, coverage,
+    CRPS) follow Welt's quantiles. A sum over steps, a bottom-up aggregate, and
+    the intervals, coverage and CRPS of a ``bottom_up`` or ``mint`` reconciliation
+    all treat the errors as independent across steps or series. The native
+    quantiles stay in each node's :class:`WeltForecastDiagnostics`.
 
     ``fit`` is local and free: it checks the columns and keeps the window. Every
     ``forecast`` is a paid job. The first one also reads the model's catalogue
@@ -164,7 +185,8 @@ class WeltForecaster:
     of the first job are required of every later one (``X-Welt-Model-Version``),
     so the folds of one backtest all run the same model. The forecaster and every
     copy of it (``backtest`` copies it per fold) share one budget of
-    ``max_forecasts`` jobs and one client.
+    ``max_forecasts`` jobs and one client. The budget counts jobs Welt accepted; a
+    request it refuses (for example a 422) costs nothing and is not counted.
 
     Args:
         model: The Welt forecasting model id.
@@ -178,7 +200,9 @@ class WeltForecaster:
         future_covariates: Columns whose future values are known. ``forecast``
             then needs ``future=``; ``backtest`` supplies the held-out values.
             A categorical or ordinal column (by the dataset's schema) is sent as a
-            categorical covariate, any other must be numeric.
+            categorical covariate, its cells as strings or integers (``True``
+            becomes ``1``, ``2.0`` becomes ``2``); any other covariate must be
+            continuous and is sent as numbers (a boolean as 0.0 or 1.0).
         multivariate: ``False`` sends each target as its own series of a panel;
             ``True`` sends them as the targets of one series, forecast jointly.
             Welt prices a forecast by series length times variates, so with
@@ -194,7 +218,11 @@ class WeltForecaster:
         reconcile: On a hierarchy, reconcile the forecast before returning it:
             ``"bottom_up"``, ``"top_down"`` (historical shares of the training
             window) or ``"mint"`` (posterior weights). ``None`` returns the levels
-            as forecast; :func:`~ergodic.forecast.reconcile` does the rest.
+            as forecast; :func:`~ergodic.forecast.reconcile` does the rest. The
+            draws carry no dependence between series, so ``bottom_up`` and
+            ``mint`` intervals (and the coverage and CRPS a backtest reads from
+            them) treat the series as independent; ``top_down`` splits the root's
+            draws by fixed shares and does not depend on it.
         client: A ``welt.Client`` to use as is, shared with every copy. ``None``
             opens a short-lived ``welt.Client()`` per forecast.
         max_forecasts: The most paid forecasts this object and its copies may
@@ -206,7 +234,8 @@ class WeltForecaster:
             default.
 
     Attributes:
-        forecasts_used: Paid forecasts sent so far by this object and its copies.
+        forecasts_used: Forecast jobs Welt accepted so far from this object and
+            its copies.
     """
 
     def __init__(
@@ -295,7 +324,7 @@ class WeltForecaster:
 
     @property
     def forecasts_used(self) -> int:
-        """Paid forecasts sent so far by this forecaster and every copy of it."""
+        """Forecast jobs Welt accepted so far from this forecaster and every copy of it."""
         return self._session.used
 
     @property
@@ -320,7 +349,8 @@ class WeltForecaster:
         Args:
             data: The history, a :class:`~ergodic.data.TimeSeriesData` or
                 :class:`~ergodic.data.HierarchicalTSData` with a datetime or an
-                evenly spaced numeric time index.
+                evenly spaced numeric time index (spacing compared with a relative
+                tolerance of 1e-9).
             seed: Accepted for the protocol. Welt's forecast is deterministic, so
                 only :meth:`forecast`'s seed (for the draws) matters.
 
@@ -348,6 +378,18 @@ class WeltForecaster:
         if missing:
             raise ValueError(f"covariates {missing} are not variables of the data")
         targets = self._targets(data, set(covariates))
+        clash = sorted(set(targets) & set(covariates))
+        if clash:
+            raise ValueError(
+                f"{clash} are nodes of the hierarchy, forecast by default, and covariates; "
+                "pass targets= without them"
+            )
+        for name in covariates:
+            kind = data.schema[name]
+            if not (kind.is_continuous or kind.is_discrete):
+                raise ValueError(
+                    f"covariate {name!r} is {kind.kind}; Welt takes numbers or categories"
+                )
         for name in targets:
             if name in variables and not data.schema[name].is_continuous:
                 raise ValueError(
@@ -358,7 +400,7 @@ class WeltForecaster:
                 raise ValueError(
                     f"future covariate {name!r} has missing values; Welt needs them complete"
                 )
-        _encode_times(data.times, data)  # raises when the index cannot be sent
+        _time_plan(data)  # raises when the index cannot be sent
         fitted = copy.copy(self)
         fitted._data = data
         return fitted
@@ -403,13 +445,32 @@ class WeltForecaster:
         horizon = int(horizon)
         if self.max_context is not None and data.n_rows > self.max_context:
             data = data.take(np.arange(data.n_rows - self.max_context, data.n_rows, dtype=np.int64))
-        future_rows = self._future_rows(data, horizon, future)
+        encoding, frequency = _time_plan(data)
+        future_rows = self._future_rows(data, horizon, future, encoding)
         targets = self._targets(data, {*self.past_covariates, *self._future_covariates})
         history = {name: _history(data, name) for name in targets}
-        payload, time_encoding = self._payload(data, horizon, targets, history, future_rows)
+        payload = self._payload(data, horizon, targets, history, future_rows, encoding, frequency)
+        sizes = {
+            role: _encoded_bytes(payload[role]["table"])
+            for role in ("history", "future")
+            if role in payload
+        }
+        too_big = {role: size for role, size in sizes.items() if size > _MAX_TABLE_BYTES}
+        if too_big:
+            raise ValueError(
+                f"the {', '.join(too_big)} table would be {max(too_big.values()):,} bytes of "
+                f"JSON, over the API's {_MAX_TABLE_BYTES:,}-byte request limit; nothing was "
+                "sent. Send fewer rows (max_context=), fewer series per job, or "
+                "multivariate=True, which sends the covariates once"
+            )
 
         session = self._session
         with using(session.client) as client:
+            if not hasattr(client, "submit_forecast"):
+                raise RuntimeError(
+                    "WeltForecaster needs welt-client 0.14 or later (Client.submit_forecast): "
+                    'pip install -U "ergodic[welt]"'
+                )
             meta = session.metadata
             if meta is None:
                 meta = dict(client.model(self.model))
@@ -425,10 +486,22 @@ class WeltForecaster:
                 series=n_series,
                 horizon=horizon,
             )
-            session.charge(self.model)
+            session.check(self.model)
+            inline = _inline_limit()
+            datasets: dict[str, str] = {}
+            for role, size in sizes.items():
+                if size > inline:
+                    table = payload[role]["table"]
+                    record = client.upload(
+                        columns=table["columns"],
+                        rows=table["rows"],
+                        name=f"ergodic forecast {role}",
+                    )
+                    datasets[role] = str(record["id"])
+                    payload[role] = {"dataset_id": datasets[role]}
             job_id, result = self._run(client, payload)
 
-        series = self._read(result, targets, horizon, job_id, data.n_rows, time_encoding)
+        series = self._read(result, targets, horizon, job_id, data.n_rows, encoding, datasets)
         draws: dict[str, npt.NDArray[np.float64]] = {}
         rng = np.random.default_rng(seed)
         for node in targets:
@@ -459,7 +532,11 @@ class WeltForecaster:
         return self.targets
 
     def _future_rows(
-        self, data: TimeSeriesData, horizon: int, future: TimeSeriesData | pd.DataFrame | None
+        self,
+        data: TimeSeriesData,
+        horizon: int,
+        future: TimeSeriesData | pd.DataFrame | None,
+        encoding: str,
     ) -> dict[str, list[Any]] | None:
         """The future table's columns (time plus future covariates), checked."""
         names = self._future_covariates
@@ -490,7 +567,7 @@ class WeltForecaster:
         for name, values in columns.items():
             if _has_missing(values):
                 raise ValueError(f"future covariate {name!r} has missing values in future=")
-        encoded = _encode_times(np.asarray(times), data, future=True)
+        encoded = _encode_times(np.asarray(times), data, encoding, future=True)
         return {"__time__": encoded, **{name: list(values) for name, values in columns.items()}}
 
     def _payload(
@@ -500,22 +577,29 @@ class WeltForecaster:
         targets: tuple[str, ...],
         history: Mapping[str, npt.NDArray[np.float64]],
         future_rows: Mapping[str, list[Any]] | None,
-    ) -> tuple[dict[str, Any], str]:
+        encoding: str,
+        frequency: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
         time_name = data.time
-        stamps = _encode_times(data.times, data)
-        encoding = "timestamps" if np.asarray(data.times).dtype.kind == "M" else "steps-as-days"
-        past = {name: data.column(name) for name in self.past_covariates}
-        known = {name: data.column(name) for name in self._future_covariates}
+        stamps = _encode_times(data.times, data, encoding)
         covariate_names = [*self.past_covariates, *self._future_covariates]
-        covariates = {**past, **known}
+        categorical = [name for name in covariate_names if data.schema[name].is_discrete]
+        # Cells by role, as the API validates them: categorical covariates as strings
+        # or integers, everything else as finite numbers (a bool is neither for Welt).
+        cast = {name: _category if name in categorical else _number for name in covariate_names}
+        covariates = {
+            name: [cast[name](v, name) for v in data.column(name).tolist()]
+            for name in covariate_names
+        }
+        values = {node: [_number(v, node) for v in history[node].tolist()] for node in targets}
 
         if self.multivariate:
             columns = [time_name, *targets, *covariate_names]
             rows = [
                 [
                     stamps[t],
-                    *(_cell(history[name][t]) for name in targets),
-                    *(_cell(covariates[name][t]) for name in covariate_names),
+                    *(values[name][t] for name in targets),
+                    *(covariates[name][t] for name in covariate_names),
                 ]
                 for t in range(data.n_rows)
             ]
@@ -525,13 +609,12 @@ class WeltForecaster:
                 [
                     stamps[t],
                     node,
-                    _cell(history[node][t]),
-                    *(_cell(covariates[name][t]) for name in covariate_names),
+                    values[node][t],
+                    *(covariates[name][t] for name in covariate_names),
                 ]
                 for node in targets
                 for t in range(data.n_rows)
             ]
-        categorical = [name for name in covariate_names if data.schema[name].is_discrete]
         payload: dict[str, Any] = {
             "model_id": self.model,
             "configuration": self.configuration,
@@ -547,9 +630,8 @@ class WeltForecaster:
         }
         if not self.multivariate:
             payload["id_column"] = _ID
-        frequency = _frequency(data) if encoding == "timestamps" else {"unit": "day", "every": 1}
         if frequency is not None:
-            payload["frequency"] = frequency
+            payload["frequency"] = dict(frequency)
         if future_rows is not None:
             names = list(self._future_covariates)
             ids = [None] if self.multivariate else list(targets)
@@ -558,36 +640,50 @@ class WeltForecaster:
                 [
                     future_rows["__time__"][step],
                     *([] if ident is None else [ident]),
-                    *(_cell(future_rows[name][step]) for name in names),
+                    *(cast[name](future_rows[name][step], name) for name in names),
                 ]
                 for ident in ids
                 for step in range(horizon)
             ]
             payload["future"] = {"table": {"columns": future_columns, "rows": future_table}}
-        return payload, encoding
+        return payload
 
     def _run(self, client: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Submit one forecast job with ``client.submit_forecast`` and wait for its result.
 
         The first job's versions become the expectations of every later one, so a
-        version change in Welt fails the next job instead of mixing versions.
+        version change in Welt fails the next job instead of mixing versions; the
+        result's versions are also compared with the pin here.
         """
-        if not hasattr(client, "submit_forecast"):
-            raise RuntimeError(
-                "WeltForecaster needs welt-client 0.14 or later (Client.submit_forecast): "
-                'pip install -U "ergodic[welt]"'
-            )
-        pinned = self._session.versions
+        session = self._session
+        pinned = session.versions
         job = client.submit_forecast(
             payload,
             idempotency_key=uuid.uuid4().hex,
             expected_model_version=None if pinned is None else pinned[0],
             expected_configuration_version=None if pinned is None else pinned[1],
         )
+        session.used += 1  # Welt accepted the job (202): it counts against the budget
+        job_id = str(job.id)
         result: dict[str, Any] = job.result(timeout=self.timeout)
+        model_id = result.get("model_id")
+        version = result.get("model_version")
+        configuration = result.get("configuration")
+        if model_id != self.model:
+            raise _unreadable(job_id, f"model {model_id!r}, expected {self.model!r}")
+        if not (isinstance(version, str) and version and isinstance(configuration, str)):
+            raise _unreadable(job_id, "no model_version or configuration")
+        if not configuration:
+            raise _unreadable(job_id, "an empty configuration")
         if pinned is None:
-            self._session.versions = (str(result["model_version"]), str(result["configuration"]))
-        return str(job.id), result
+            session.versions = (version, configuration)
+        elif (version, configuration) != pinned:
+            raise _unreadable(
+                job_id,
+                f"versions {(version, configuration)}, but every job of this forecaster runs "
+                f"{pinned}",
+            )
+        return job_id, result
 
     # -- result --------------------------------------------------------------
 
@@ -599,14 +695,12 @@ class WeltForecaster:
         job_id: str,
         context: int,
         time_encoding: str,
+        datasets: Mapping[str, str],
     ) -> dict[str, WeltForecastDiagnostics]:
         """Check Welt's result against the request and pick out each node's quantiles."""
 
         def bad(reason: str) -> ValueError:
-            return ValueError(
-                f"Welt forecast job {job_id!r} returned a result ergodic cannot read: {reason}. "
-                f"The result stays in Welt (welt.Client().job_result({job_id!r}))"
-            )
+            return _unreadable(job_id, reason)
 
         if result.get("task") != "forecasting":
             raise bad(f"task {result.get('task')!r}, expected 'forecasting'")
@@ -634,9 +728,9 @@ class WeltForecaster:
             quantiles.setflags(write=False)
             out[node] = WeltForecastDiagnostics(
                 node=node,
-                model=str(result.get("model_id", self.model)),
-                model_version=str(result.get("model_version")),
-                configuration=str(result.get("configuration")),
+                model=str(result["model_id"]),
+                model_version=str(result["model_version"]),
+                configuration=str(result["configuration"]),
                 job_id=job_id,
                 quantile_levels=levels,
                 quantiles=quantiles,
@@ -645,6 +739,7 @@ class WeltForecaster:
                 cross_learning=bool(result.get("cross_learning", self.cross_learning)),
                 multivariate=self.multivariate,
                 time_encoding=time_encoding,
+                datasets=dict(datasets),
             )
         return out
 
@@ -732,43 +827,151 @@ def _history(data: TimeSeriesData, node: str) -> npt.NDArray[np.float64]:
     raise ValueError(f"target {node!r} is not a variable of the data")  # pragma: no cover
 
 
-def _encode_times(times: Any, data: TimeSeriesData, *, future: bool = False) -> list[str]:
-    """ISO-8601 UTC timestamps for Welt, or consecutive days for a numeric index.
+def _unreadable(job_id: str, reason: str) -> ValueError:
+    return ValueError(
+        f"Welt forecast job {job_id!r} returned a result ergodic cannot read: {reason}. "
+        f"The result stays in Welt (welt.Client().job_result({job_id!r}))"
+    )
 
-    A datetime index is sent as is, read as UTC. A numeric index must be evenly
-    spaced; step ``k`` (counted from the start of the training window) is sent as
-    day ``k`` from 2000-01-01, and a future window must continue it exactly.
+
+def _scalar(value: Any) -> Any:
+    if hasattr(value, "item") and not isinstance(value, (str, bytes)):
+        value = value.item()
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value
+
+
+def _number(value: Any, name: str) -> float | None:
+    """A numeric cell as the API validates it: a finite float, or None for missing."""
+    value = _scalar(value)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if not math.isfinite(number) or abs(number) > _FP32_MAX:
+            raise ValueError(f"{name!r} holds {value!r}; Welt needs finite FP32 numbers")
+        return number
+    raise ValueError(f"{name!r} holds a {type(value).__name__} cell; Welt needs numbers")
+
+
+def _category(value: Any, name: str) -> str | int | None:
+    """A categorical cell as the API validates it: a string or an integer."""
+    value = _scalar(value)
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return str(value)
+
+
+_FP32_MAX = float(np.finfo(np.float32).max)
+
+
+def _encoded_bytes(table: Any) -> int:
+    """Bytes of the compact JSON the SDK sends for ``table``."""
+    text = json.dumps(table, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return len(text.encode())
+
+
+def _inline_limit() -> int:
+    """The SDK's inline-table threshold; tables above it are uploaded as datasets."""
+    try:
+        from welt.forecast import INLINE_TABLE_BYTES
+    except ImportError:  # pragma: no cover - welt-client before 0.14
+        return 1024 * 1024
+    return int(INLINE_TABLE_BYTES)
+
+
+def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
+    """How the index goes to Welt: ``("timestamps", frequency)`` or steps as days.
+
+    A datetime index is sent as timestamps when its frequency is known (the
+    dataset's ``freq``, else pandas' inferred one, mapped to Welt's units) or its
+    spacing is constant, so Welt can infer it. Anything else, a business-day or
+    trading-day index say, which Welt would refuse as irregular, is sent as
+    consecutive days, which Chronos-2 reads the same way. A numeric index must be
+    evenly spaced (relative tolerance 1e-9) and is always sent as days.
+    """
+    times = np.asarray(data.times)
+    if times.dtype.kind == "M":
+        if bool(np.any(np.isnat(times))):
+            raise ValueError("the time index has missing values")
+        declared = _frequency(data.freq)
+        if declared is not None:
+            return "timestamps", declared
+        if times.size >= 3:
+            import pandas as pd
+
+            try:
+                inferred = pd.infer_freq(pd.DatetimeIndex(times))
+            except (TypeError, ValueError):
+                inferred = None
+            mapped = _frequency(inferred)
+            if mapped is not None:
+                return "timestamps", mapped
+        seconds = np.diff(times.astype("datetime64[s]").astype(np.int64))
+        if seconds.size and bool(np.all(seconds == seconds[0])) and seconds[0] > 0:
+            return "timestamps", None
+        return "steps-as-days", dict(_DAY)
+    if times.dtype.kind not in "iuf":
+        raise ValueError(
+            f"Welt reads a datetime or numeric time index; {data.time!r} is {times.dtype}"
+        )
+    values = times.astype(np.float64)
+    steps = np.diff(values)
+    if (
+        values.size < 2
+        or steps[0] <= 0
+        or not bool(np.allclose(steps, steps[0], rtol=1e-9, atol=0.0))
+    ):
+        raise ValueError(
+            f"the numeric time index {data.time!r} must be evenly spaced and increasing; "
+            "use a datetime index for anything else"
+        )
+    return "steps-as-days", dict(_DAY)
+
+
+def _encode_times(
+    times: Any, data: TimeSeriesData, encoding: str, *, future: bool = False
+) -> list[str]:
+    """The time cells for Welt: ISO-8601 UTC timestamps, or row positions as days.
+
+    With timestamps, a datetime index is sent as is, read as UTC. As days, row ``k``
+    of the training window is day ``k`` from 2000-01-01, and a future window must
+    be the rows right after it: for a numeric index the exact next steps, for a
+    datetime index any increasing times after its end.
     """
     history = np.asarray(data.times)
     values = np.asarray(times)
     if history.dtype.kind == "M":
         if values.dtype.kind != "M":
             raise ValueError("future= times must be datetimes, like the training index")
-        if future and values.size and values[0] <= history[-1]:
-            raise ValueError("future= must start after the end of the training window")
         if bool(np.any(np.isnat(values))):
             raise ValueError("the time index has missing values")
-        seconds = values.astype("datetime64[s]")
-        return [f"{stamp}Z" for stamp in np.datetime_as_string(seconds, unit="s")]
-    if history.dtype.kind not in "iuf":
-        raise ValueError(
-            f"Welt reads a datetime or numeric time index; {data.time!r} is {history.dtype}"
-        )
-    steps = np.diff(history.astype(np.float64))
-    if history.size < 2 or not bool(np.all(steps == steps[0])) or steps[0] <= 0:
-        raise ValueError(
-            f"the numeric time index {data.time!r} must be evenly spaced and increasing; "
-            "use a datetime index for anything else"
-        )
-    step = float(steps[0])
-    offsets = (values.astype(np.float64) - float(history[0])) / step
-    if not bool(np.all(offsets == np.round(offsets))):
-        raise ValueError("future= times must continue the training index's spacing")
-    if future:
+        if future and values.size and values[0] <= history[-1]:
+            raise ValueError("future= must start after the end of the training window")
+        if encoding == "timestamps":
+            seconds = values.astype("datetime64[s]")
+            return [f"{stamp}Z" for stamp in np.datetime_as_string(seconds, unit="s")]
+        if future and values.size > 1 and not bool(np.all(np.diff(values) > np.timedelta64(0))):
+            raise ValueError("future= times must be increasing")
+    elif future:
+        origin = float(history[0])
+        step = (float(history[-1]) - origin) / max(history.size - 1, 1)
+        offsets = (values.astype(np.float64) - origin) / step
         expected = np.arange(history.size, history.size + values.size, dtype=np.float64)
-        if not np.array_equal(offsets, expected):
+        if not bool(np.allclose(offsets, expected, rtol=0.0, atol=1e-6)):
             raise ValueError("future= times must be the steps right after the training window")
-    days = _STEP_ORIGIN + offsets.astype(np.int64) * np.timedelta64(_SECONDS_PER_DAY, "s")
+    start = history.size if future else 0
+    positions = np.arange(start, start + values.size, dtype=np.int64)
+    days = _STEP_ORIGIN + positions * np.timedelta64(_SECONDS_PER_DAY, "s")
     return [f"{stamp}Z" for stamp in np.datetime_as_string(days, unit="s")]
 
 
@@ -787,18 +990,14 @@ _UNITS = {
 }
 
 
-def _frequency(data: TimeSeriesData) -> dict[str, Any] | None:
-    """Welt's ``frequency`` for the dataset's declared pandas ``freq``, or ``None``.
-
-    ``None`` leaves Welt to infer it from the timestamps, which it does when they
-    are regular.
-    """
-    if not data.freq:
+def _frequency(freq: str | None) -> dict[str, Any] | None:
+    """Welt's ``frequency`` for a pandas frequency string, or ``None`` when it has none."""
+    if not freq:
         return None
     import pandas as pd
 
     try:
-        offset = pd.tseries.frequencies.to_offset(data.freq)
+        offset = pd.tseries.frequencies.to_offset(freq)
     except (TypeError, ValueError):
         return None
     unit = _UNITS.get(type(offset).__name__)

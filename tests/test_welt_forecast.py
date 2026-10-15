@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from statistics import NormalDist
 from typing import Any
 
@@ -63,6 +64,8 @@ class FakeChronos(FakeWelt):
         rearranged_steps: int = 0,
         fail: bool = False,
         wrong_horizon: bool = False,
+        ignore_expectations: bool = False,
+        drop_version: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -71,7 +74,10 @@ class FakeChronos(FakeWelt):
         self.rearranged_steps = rearranged_steps
         self.fail = fail
         self.wrong_horizon = wrong_horizon
+        self.ignore_expectations = ignore_expectations
+        self.drop_version = drop_version
         self.version = "chronos-2-fixture-1"
+        self.refused: list[str] = []
         self.forecasts: list[dict[str, Any]] = []
         self.headers: list[dict[str, str]] = []
 
@@ -102,11 +108,17 @@ class FakeChronos(FakeWelt):
         headers = {k.lower(): v for k, v in request.headers.items()}
         assert headers.get("idempotency-key")
         expected = headers.get("x-welt-model-version")
-        if expected is not None:
+        if expected is not None and not self.ignore_expectations:
             assert headers.get("x-welt-configuration-version") == "chronos-2-forecast-v1"
             if expected != self.version:
                 error = {"code": "model_version_mismatch", "message": "Version changed."}
                 return httpx.Response(409, json={"error": error})
+        problem = self._cells(body)
+        if problem is not None:
+            self.refused.append(problem)
+            return httpx.Response(
+                422, json={"error": {"code": "invalid_input", "message": problem}}
+            )
         self.forecasts.append(body)
         self.headers.append(headers)
         result = self._chronos(body)
@@ -124,13 +136,58 @@ class FakeChronos(FakeWelt):
         self.jobs[job] = {"status": status, "result": result}
         return httpx.Response(202, json={"id": job, "status": "queued"})
 
+    def _table(self, source: dict[str, Any]) -> dict[str, Any]:
+        """An inline table, or the uploaded dataset a source names."""
+        if "dataset_id" in source:
+            dataset = self.datasets[source["dataset_id"]]
+            return {"columns": dataset["columns"], "rows": dataset["rows"]}
+        table: dict[str, Any] = source["table"]
+        return table
+
+    def _cells(self, body: dict[str, Any]) -> str | None:
+        """The server's cell rules (welt_api.forecasts.numeric / category), or None if met.
+
+        Numbers are int or float but never bool, finite FP32; categorical cells are
+        str or exact int; targets and past covariates may be missing, future
+        covariates (in both tables), time and id may not.
+        """
+        categorical = set(body["categorical_covariates"])
+        future = set(body["future_covariates"])
+        nullable = set(body["targets"]) | set(body["past_covariates"])
+
+        def bad(value: Any, name: str) -> str | None:
+            if value is None:
+                return None if name in nullable else f"{name} cells cannot be missing."
+            if name in categorical:
+                ok = type(value) in (str, int)
+                return None if ok else f"{name}: categorical cells must be strings or integers."
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return f"{name} cells must be numbers."
+            if not math.isfinite(float(value)) or abs(float(value)) > 3.4028234663852886e38:
+                return f"{name} cells must be finite FP32 values."
+            return None
+
+        checked = set(body["targets"]) | set(body["past_covariates"]) | future
+        for role in ("history", "future"):
+            if role not in body:
+                continue
+            table = self._table(body[role])
+            for row in table["rows"]:
+                for name, value in zip(table["columns"], row, strict=True):
+                    if name in (body["time_column"], body.get("id_column")):
+                        if type(value) is not str:
+                            return f"{name} cells must be strings."
+                    elif name in checked and (problem := bad(value, name)):
+                        return problem
+        return None
+
     def _chronos(self, body: dict[str, Any]) -> dict[str, Any]:
         """Check the request against DEC-085 §1 and forecast it deterministically."""
         assert body["model_id"] == "chronos-2"
         levels = body["quantile_levels"]
         assert levels == sorted(set(levels)) and set(levels) <= set(NATIVE_QUANTILE_LEVELS)
         horizon = int(body["horizon"])
-        table = body["history"]["table"]
+        table = self._table(body["history"])
         columns = table["columns"]
         time_name, id_name = body["time_column"], body.get("id_column")
         targets = body["targets"]
@@ -145,7 +202,7 @@ class FakeChronos(FakeWelt):
                 ids.append(ident)
         futures: dict[Any, list[list[Any]]] = {ident: [] for ident in ids}
         if future_names:
-            ftable = body["future"]["table"]
+            ftable = self._table(body["future"])
             fcols = ftable["columns"]
             assert fcols == [time_name, *([id_name] if id_name else []), *future_names]
             assert not set(targets) & set(fcols)
@@ -192,7 +249,7 @@ class FakeChronos(FakeWelt):
         return {
             "task": "forecasting",
             "model_id": "chronos-2",
-            "model_version": self.version,
+            "model_version": None if self.drop_version else self.version,
             "configuration": "chronos-2-forecast-v1",
             "horizon": horizon + 1 if self.wrong_horizon else horizon,
             "frequency": body.get("frequency", {"unit": "day", "every": 1}),
@@ -583,3 +640,204 @@ def test_bad_configurations_are_refused_locally() -> None:
     assert repr(WeltForecaster(future_covariates=["promo"])) == (
         "WeltForecaster('chronos-2', future_covariates=['promo']; unfitted)"
     )
+
+
+# -- review findings (API-163 independent review) --------------------------------------
+
+
+def test_boolean_and_float_coded_categoricals_are_sent_as_integers() -> None:
+    """F1: a bool flag or float codes in a categorical column are not valid Welt cells."""
+    n = 40
+    frame = pd.DataFrame(
+        {
+            "day": _days(n),
+            "sales": np.linspace(10, 20, n),
+            "flag": np.arange(n) % 7 == 3,  # bool, inferred categorical
+            "code": (np.arange(n) % 3).astype(float),  # float codes
+            "lift": np.arange(n) % 5 == 0,  # bool, declared continuous
+        }
+    )
+    data = timeseries(
+        frame, time="day", freq="D", types={"code": "categorical", "lift": "continuous"}
+    )
+    assert data.schema["flag"].is_discrete and data.schema["code"].is_discrete
+    later = pd.DataFrame(
+        {
+            "day": pd.date_range("2026-02-10", periods=3, freq="D"),
+            "flag": [True, False, False],
+            "code": [2.0, 0.0, 1.0],
+            "lift": [False, True, False],
+        }
+    )
+    fake = FakeChronos()
+    with fake.client() as client:
+        model = WeltForecaster(client=client, future_covariates=["flag", "code", "lift"], draws=20)
+        model.fit(data).forecast(3, future=later)
+    assert fake.refused == []
+    (body,) = fake.forecasts
+    assert body["categorical_covariates"] == ["flag", "code"]
+    row = body["history"]["table"]["rows"][3]
+    assert row[3:] == [1, 0, 0.0] and type(row[3]) is int and type(row[4]) is int
+    future = body["future"]["table"]["rows"]
+    assert [r[2:] for r in future] == [[1, 2, 0.0], [0, 0, 1.0], [0, 1, 0.0]]
+    assert type(future[0][4]) is float
+
+
+def test_the_fake_applies_the_server_cell_rules() -> None:
+    """F1: FakeChronos refuses what welt_api.forecasts.numeric/category refuse."""
+    fake = FakeChronos()
+    table: dict[str, Any] = {
+        "columns": ["t", "y", "c"],
+        "rows": [["2026-01-01T00:00:00Z", 1.0, True]],
+    }
+    body: dict[str, Any] = {
+        "model_id": "chronos-2",
+        "history": {"table": table},
+        "time_column": "t",
+        "targets": ["y"],
+        "past_covariates": ["c"],
+        "future_covariates": [],
+        "categorical_covariates": ["c"],
+        "horizon": 1,
+        "quantile_levels": [0.1, 0.5, 0.9],
+        "cross_learning": False,
+    }
+    assert fake._cells(body) is not None
+    table["rows"] = [["2026-01-01T00:00:00Z", True, 1]]
+    assert fake._cells(body) == "y cells must be numbers."
+    table["rows"] = [["2026-01-01T00:00:00Z", None, "a"]]
+    assert fake._cells(body) is None
+
+
+def test_a_refused_submission_does_not_count_against_the_budget() -> None:
+    """F6: only jobs Welt accepted count; a 422 and an old SDK cost nothing."""
+    fake = FakeChronos()
+    with fake.client() as client:
+        model = WeltForecaster(client=client, max_forecasts=1, draws=20)
+        fitted = model.fit(sales().select(["sales"]))
+        original = fake._cells
+        fake._cells = lambda body: "refused for the test"  # type: ignore[method-assign]
+        with pytest.raises(welt.WeltError):
+            fitted.forecast(3)
+        assert model.forecasts_used == 0
+        fake._cells = original  # type: ignore[method-assign]
+        fitted.forecast(3)
+        assert model.forecasts_used == 1
+        with pytest.raises(RuntimeError, match="max_forecasts=1"):
+            fitted.forecast(3)
+
+    class OldClient:
+        def model(self, model_id: str) -> dict[str, Any]:
+            return FakeChronos()._metadata()
+
+    old = WeltForecaster(client=OldClient(), draws=10)
+    with pytest.raises(RuntimeError, match=r"welt-client 0\.14"):
+        old.fit(sales().select(["sales"])).forecast(3)
+    assert old.forecasts_used == 0
+
+
+def test_a_hierarchy_node_named_as_a_covariate_is_refused_at_fit() -> None:
+    """F5: the default targets of a hierarchy are its nodes; a node cannot be both."""
+    with pytest.raises(ValueError, match="nodes of the hierarchy"):
+        WeltForecaster(future_covariates=["north"]).fit(regions())
+
+
+def test_a_float_index_with_a_fractional_step_is_evenly_spaced() -> None:
+    """F7: spacing is compared with a relative tolerance, not exact float equality."""
+    t = np.arange(30) * 0.1
+    data = timeseries(pd.DataFrame({"t": t, "y": np.sin(t)}), time="t")
+    fake = FakeChronos()
+    with fake.client() as client:
+        result = WeltForecaster(client=client, draws=20).fit(data).forecast(2)
+    assert result.diagnostics["y"].time_encoding == "steps-as-days"  # type: ignore[index]
+    assert fake.forecasts[0]["history"]["table"]["rows"][-1][0] == "2000-01-30T00:00:00Z"
+
+
+def test_a_business_day_index_is_sent_as_consecutive_days() -> None:
+    """F7: Welt refuses business days as irregular; Chronos-2 reads row order only."""
+    days = pd.bdate_range("2026-01-05", periods=30)
+    frame = pd.DataFrame({"day": days, "y": np.linspace(1, 2, 30), "promo": np.arange(30) % 5 == 0})
+    data = timeseries(frame, time="day", freq="B", types={"promo": "continuous"})
+    later = pd.DataFrame({"day": pd.bdate_range(days[-1] + pd.offsets.BDay(), periods=3)})
+    later["promo"] = [1.0, 0.0, 0.0]
+    fake = FakeChronos()
+    with fake.client() as client:
+        model = WeltForecaster(client=client, future_covariates=["promo"], draws=20).fit(data)
+        result = model.forecast(3, future=later)
+    (body,) = fake.forecasts
+    assert body["frequency"] == {"unit": "day", "every": 1}
+    assert body["history"]["table"]["rows"][29][0] == "2000-01-30T00:00:00Z"
+    assert body["future"]["table"]["rows"][0][0] == "2000-01-31T00:00:00Z"
+    assert result.diagnostics["y"].time_encoding == "steps-as-days"  # type: ignore[index]
+
+
+def test_month_ends_without_a_declared_freq_keep_their_timestamps() -> None:
+    """F7: pandas infers the month-end frequency, so Welt gets real dates and the unit."""
+    months = pd.date_range("2024-01-31", periods=24, freq="ME")
+    data = timeseries(pd.DataFrame({"m": months, "y": np.arange(24.0)}), time="m")
+    fake = FakeChronos()
+    with fake.client() as client:
+        WeltForecaster(client=client, draws=20).fit(data).forecast(2)
+    (body,) = fake.forecasts
+    assert body["frequency"] == {"unit": "month", "every": 1}
+    assert body["history"]["table"]["rows"][0][0] == "2024-01-31T00:00:00Z"
+
+
+def test_a_table_over_the_inline_threshold_is_uploaded_as_a_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F8: like welt.Forecast, a large table goes up as a workspace dataset first."""
+    from ergodic.welt import _forecast
+
+    monkeypatch.setattr(_forecast, "_inline_limit", lambda: 2_000)
+    fake = FakeChronos()
+    with fake.client() as client:
+        model = WeltForecaster(client=client, future_covariates=["promo"], draws=20)
+        later = pd.DataFrame(
+            {"day": pd.date_range("2026-03-02", periods=3), "promo": [0.0, 1.0, 0.0]}
+        )
+        result = model.fit(sales().select(["sales", "promo"])).forecast(3, future=later)
+    (body,) = fake.forecasts
+    assert body["history"] == {"dataset_id": "ds_1"}
+    assert "table" in body["future"]  # small enough to stay inline
+    assert fake.datasets["ds_1"]["columns"] == [
+        "day",
+        "__ergodic_series__",
+        "__ergodic_value__",
+        "promo",
+    ]
+    assert result.diagnostics["sales"].datasets == {"history": "ds_1"}  # type: ignore[index]
+
+
+def test_a_table_over_the_request_limit_is_refused_before_anything_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F8: past the API's body limit neither inline nor an upload can carry it."""
+    from ergodic.welt import _forecast
+
+    monkeypatch.setattr(_forecast, "_MAX_TABLE_BYTES", 1_000)
+    fake = FakeChronos()
+    with fake.client() as client, pytest.raises(ValueError, match="request limit"):
+        WeltForecaster(client=client).fit(sales().select(["sales"])).forecast(3)
+    assert fake.calls == []
+
+
+def test_a_result_without_versions_is_refused_and_pins_nothing() -> None:
+    """F10: no 'None' pin from a result that lacks its model version."""
+    fake = FakeChronos(drop_version=True)
+    with fake.client() as client:
+        model = WeltForecaster(client=client, draws=20)
+        with pytest.raises(ValueError, match="no model_version"):
+            model.fit(sales().select(["sales"])).forecast(3)
+    assert model._session.versions is None
+
+
+def test_the_result_versions_are_compared_with_the_pin_locally() -> None:
+    """F10: even if a server ignored the expectation headers, versions cannot mix."""
+    fake = FakeChronos(ignore_expectations=True)
+    with fake.client() as client:
+        fitted = WeltForecaster(client=client, draws=20).fit(sales().select(["sales"]))
+        fitted.forecast(3)
+        fake.version = "chronos-2-fixture-2"
+        with pytest.raises(ValueError, match="every job of this forecaster runs"):
+            fitted.forecast(3)

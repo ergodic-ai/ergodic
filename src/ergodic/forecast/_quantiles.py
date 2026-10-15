@@ -20,13 +20,23 @@ The method, step by step:
    gives a flat tail.
 4. Draw ``S`` independent uniforms per step and push them through.
 
-The draws match the model's marginal at every step and nothing more: each step
+The draws follow the model's marginal at every step and nothing more: each step
 is sampled on its own, so a path carries **no dependence across steps** and two
-series carry none between them. Anything that reads one step at a time is exact
-up to Monte Carlo error (the median, an interval, coverage, the per-step CRPS).
-Anything that adds steps or series up (a total over a window, a bottom-up
-aggregate) treats them as independent, which understates the spread of a sum
-when the real errors move together.
+series carry none between them.
+
+- One series, one step at a time (the median, an interval, coverage, the
+  per-step CRPS): the draws reproduce the quantiles at the given levels up to
+  Monte Carlo error. Between levels and in the tails they carry the assumed shape
+  (linear interpolation, exponential tails), so a reading there is only as good
+  as that assumption; more levels pin it down.
+- Anything that adds steps or series up (a total over a window, a bottom-up
+  aggregate) treats them as independent, which understates the spread of a sum
+  when the real errors move together.
+- Reconciliation that combines series draw by draw (``bottom_up``, ``mint``)
+  inherits that: the reconciled intervals, coverage and CRPS treat the series as
+  independent. MinT's posterior weights (per-node variances) and the reconciled
+  means do not depend on it, and neither does ``top_down`` with historical
+  shares, which scales one node's draws.
 """
 
 from __future__ import annotations

@@ -374,6 +374,8 @@ def backtest(
             result = reader.forecast(test_size, seed=forecast_seed, future=future)
         else:
             result = fitted.forecast(test_size, seed=forecast_seed)
+        # The last line of defence for a model that does not name its targets: it
+        # runs after the first fold's forecast, so such a model has run once.
         leaked = sorted(set(result.nodes) & set(known))
         if leaked:
             raise ValueError(
@@ -432,17 +434,34 @@ def backtest(
 
 
 def _future_covariates(model: Any, columns: set[str]) -> tuple[str, ...]:
-    """The columns ``model`` says it knows the future of, checked against the data.
+    """The columns ``model`` says it knows the future of, checked before any fit.
 
-    Read duck-typed: a model without the attribute reads no future covariates.
+    Read duck-typed: a model without the attribute reads no future covariates. A
+    model that also names its ``targets`` is checked against them here, before
+    anything is fitted or forecast (and so before a paying model pays); one that
+    does not is checked on the first fold's result instead.
     """
-    declared = tuple(str(name) for name in (getattr(model, "future_covariates", None) or ()))
+    raw = getattr(model, "future_covariates", None) or ()
+    if isinstance(raw, str):
+        raise TypeError(
+            f"future_covariates must be a sequence of column names, got the string {raw!r}; "
+            f"write ({raw!r},)"
+        )
+    declared = tuple(str(name) for name in raw)
     missing = sorted(set(declared) - columns)
     if missing:
         raise ValueError(
             f"the model reads future covariates {missing} that are not columns of the data "
             f"{sorted(columns)}"
         )
+    targets = getattr(model, "targets", None)
+    if declared and targets is not None and not isinstance(targets, str):
+        leaked = sorted(set(declared) & {str(name) for name in targets})
+        if leaked:
+            raise ValueError(
+                f"{leaked} are both forecast targets and declared future covariates; a "
+                "column whose future the model is handed cannot also be scored as a forecast"
+            )
     return declared
 
 
