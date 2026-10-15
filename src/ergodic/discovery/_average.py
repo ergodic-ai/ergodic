@@ -185,7 +185,11 @@ def adjustment_probability(
     (:func:`~ergodic.identification.is_valid_adjustment_set`), and the masses of
     the DAGs where it holds are summed. Exact (``mc_error`` 0) when every DAG was
     enumerated; otherwise an estimate from the draws (exact draws or MCMC) with
-    its Monte Carlo error. A posterior probability under the method.
+    its Monte Carlo error. A posterior probability under the method. On
+    observational data these probabilities typically stay well below 1, because
+    only the Markov equivalence class is identified; in the registered B4 run
+    (simulated linear-Gaussian graphs, the true parents of the treatment under the
+    BGe posterior) the medians were 0.37 at n = 200 and 0.48 at n = 1,000.
 
     Args:
         samples: A posterior from :func:`graph_posterior`.
