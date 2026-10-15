@@ -329,13 +329,31 @@ class DomainKnowledge:
                     "add hard constraints with the builders"
                 )
         object.__setattr__(self, "soft", soft)
-        object.__setattr__(self, "nonadjacent", frozenset(self.nonadjacent))
+        nonadjacent: set[frozenset[str]] = set()
+        for pair in self.nonadjacent:
+            names = frozenset(pair)
+            if len(names) != 2 or not all(isinstance(name, str) for name in names):
+                raise ValueError(
+                    f"nonadjacent holds pairs of two distinct variable names, got {pair!r}"
+                )
+            nonadjacent.add(names)
+        object.__setattr__(self, "nonadjacent", frozenset(nonadjacent))
+        # An adjacency ban forbids both directed edges too, however the object was
+        # built, so every reader of ``forbidden`` enforces it.
+        directed = {(a, b) for pair in nonadjacent for a, b in (tuple(pair), tuple(pair)[::-1])}
+        if not directed <= self.forbidden:
+            object.__setattr__(self, "forbidden", frozenset(self.forbidden | directed))
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        # A pickle from ergodic 0.2.x has no soft statements and no adjacency bans
-        # of its own; fill in the defaults so it loads.
+        # A pickle from ergodic 0.2.x has no soft statements and no ``nonadjacent``.
+        # In 0.2 a pair forbidden in both directions was an adjacency ban (a
+        # bidirected edge included), so it becomes one here and keeps that meaning.
         state.setdefault("soft", frozenset())
-        state.setdefault("nonadjacent", frozenset())
+        if "nonadjacent" not in state:
+            forbidden = state.get("forbidden", frozenset())
+            state["nonadjacent"] = frozenset(
+                frozenset((a, b)) for a, b in forbidden if a != b and (b, a) in forbidden
+            )
         self.__dict__.update(state)
 
     # -- builders ------------------------------------------------------------
@@ -862,8 +880,10 @@ class DomainKnowledge:
     def apply_to(self, graph: MixedGraph) -> MixedGraph:
         """Enforce the hard constraints on ``graph``: drop forbidden, add required edges.
 
-        A pair forbidden in both directions loses its edge whatever the marks; a
-        single-direction ban only drops the matching directed edge. Under a
+        A pair under an adjacency ban (:meth:`forbid_adjacency`) loses its edge
+        whatever the marks; a pair forbidden in both directions keeps a bidirected
+        edge (a hidden common cause, neither causing the other) and loses any
+        other; a single-direction ban only drops the matching directed edge. Under a
         skeleton restriction, every edge on a pair outside the allow-list is
         dropped too. Edges left undirected or with a circle are oriented when
         only one direction stays permitted. The result is returned as a new
@@ -878,7 +898,9 @@ class DomainKnowledge:
             edge = out.get_edge(u, v)
             if edge is None:
                 continue
-            if (v, u) in self.forbidden or edge.directed_pair() == (u, v):
+            banned = frozenset((u, v)) in self.nonadjacent
+            both = (v, u) in self.forbidden and not edge.is_bidirected
+            if banned or both or edge.directed_pair() == (u, v):
                 out = out.remove_edge(u, v)
         for u, v in self.required:
             out = out.orient(u, v)

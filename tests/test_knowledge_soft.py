@@ -249,23 +249,46 @@ def test_soft_takes_soft_statements_only() -> None:
     assert built.soft == DomainKnowledge().root("a", confidence=0.7).soft
 
 
-def test_a_pickle_from_0_2_loads() -> None:
+def test_a_pickle_from_0_2_loads_and_keeps_its_adjacency_ban() -> None:
     import pickle
 
-    old = DomainKnowledge().require("a", "b").forbid_adjacency("c", "d")
-    # Pickles from ergodic 0.2.x carry neither field.
+    old = DomainKnowledge().require("a", "b").forbid_adjacency("c", "d").forbid("e", "f")
+    # Pickles from ergodic 0.2.x carry neither field; there forbid_adjacency stored
+    # only the two directed bans, which meant an adjacency ban.
     del old.__dict__["soft"]
     del old.__dict__["nonadjacent"]
     loaded = pickle.loads(pickle.dumps(old))
-    assert loaded.soft == frozenset() and loaded.nonadjacent == frozenset()
-    assert loaded.required == {("a", "b")}
+    assert loaded.soft == frozenset()
+    assert loaded.nonadjacent == {frozenset("cd")}
+    assert loaded == DomainKnowledge().require("a", "b").forbid_adjacency("c", "d").forbid("e", "f")
+    assert loaded.violations(admg(["c <-> d"])) != []
     current = (
         DomainKnowledge().require("a", "b").forbid_adjacency("c", "d").root("e", confidence=0.8)
     )
     assert pickle.loads(pickle.dumps(current)) == current
 
 
-# -- log odds -----------------------------------------------------------------------
+def test_nonadjacent_is_checked_and_always_forbids_both_directions() -> None:
+    from dataclasses import replace
+
+    built = DomainKnowledge(nonadjacent={frozenset("ab")})  # type: ignore[arg-type]
+    assert built.forbidden == {("a", "b"), ("b", "a")}
+    assert not built.permits_edge("a", "b") and not built.permits_edge("b", "a")
+    assert built.violations(dag(["a -> b"])) != []
+    assert built.violations(admg(["a <-> b"])) != []
+    emptied = replace(DomainKnowledge().forbid_adjacency("a", "b"), forbidden=frozenset())
+    assert emptied.forbidden == {("a", "b"), ("b", "a")}
+    for bad in ({frozenset("a")}, {frozenset(("a", 1))}):
+        with pytest.raises(ValueError, match="nonadjacent"):
+            DomainKnowledge(nonadjacent=bad)  # type: ignore[arg-type]
+
+
+def test_apply_to_keeps_a_bidirected_edge_under_two_directed_bans() -> None:
+    both = DomainKnowledge().forbid("a", "b").forbid("b", "a")
+    assert both.apply_to(admg(["a <-> b"])) == admg(["a <-> b"])
+    assert both.apply_to(mixed(["a -- b"])).get_edge("a", "b") is None
+    banned = DomainKnowledge().forbid_adjacency("a", "b")
+    assert banned.apply_to(admg(["a <-> b"])).get_edge("a", "b") is None
 
 
 def _odds(knowledge: DomainKnowledge, names: str) -> dict[str, float]:
