@@ -327,3 +327,80 @@ def test_frozen_and_describe() -> None:
     text = tree.describe()
     assert "treat=" in text
     assert len(tree.leaves()) == 2
+
+
+# -- categorical covariates with three or more levels (review F1) ----------------
+
+
+def _three_level(n: int, seed: int, levels: tuple[str, ...] = ("a", "b", "c")) -> TabularData:
+    """tau = 2 in level "c", -1 elsewhere; Z moves the outcome only."""
+    rng = np.random.default_rng(seed)
+    c = rng.choice(levels, size=n)
+    z = rng.normal(size=n)
+    a = (rng.uniform(size=n) < 0.5).astype(float)
+    y = np.where(c == "c", 2.0, -1.0) * a + z + rng.normal(size=n)
+    frame = pd.DataFrame({"A": a, "C": pd.Categorical(c), "Z": z, "Y": y})
+    return tabular(frame)
+
+
+_CAT_GRAPH = dag(["C -> A", "Z -> A", "C -> Y", "Z -> Y", "A -> Y"])
+
+
+def test_a_three_level_covariate_is_named_per_column() -> None:
+    """Regression: the design had one-hot columns but variable names, so names shifted.
+
+    The probe's policy_tree reported a split on "Z" that was really the C==c
+    indicator, and BLP returned four coefficients for three names.
+    """
+    fit = cate(_CAT_GRAPH, _three_level(2000, 1), "A", "Y", random_state=0, uncertainty=False)
+    assert fit._scores is not None
+    assert fit._scores.covariate_names == ("C==b", "C==c", "Z")
+    assert fit._scores.column_variables == ("C", "C", "Z")
+    tree = policy_tree(fit, depth=1)
+    assert tree.root.feature == "C==c"  # the planted modifier, named for what it is
+    blp = fit.explain().blp()
+    assert blp.names == ("(intercept)", "C==b", "C==c", "Z")
+    assert blp.coef.shape == (4,)
+    assert blp.coef[2] == pytest.approx(3.0, abs=0.5)  # level c vs a: 2 - (-1)
+    # naming the variable selects its whole block
+    by_variable = policy_tree(fit, "C", depth=1)
+    assert by_variable.covariates == ("C==b", "C==c")
+
+
+def test_evaluate_refuses_a_differently_coded_categorical() -> None:
+    """A held-out sample with other categories would map a column to another group."""
+    fit = cate(_CAT_GRAPH, _three_level(2000, 1), "A", "Y", random_state=0, uncertainty=False)
+    tree = policy_tree(fit, "C", depth=1)
+    same = cate(_CAT_GRAPH, _three_level(2000, 2), "A", "Y", random_state=0, uncertainty=False)
+    value = tree.evaluate(same)
+    assert value.value == pytest.approx(2.0 / 3.0, abs=0.15)  # treat level c: 2 * 1/3
+    assert np.isfinite(value.regret_std_error) and value.regret_std_error > 0.0
+    missing = _three_level(2000, 3, levels=("b", "c"))
+    held = cate(_CAT_GRAPH, missing, "A", "Y", random_state=0, uncertainty=False)
+    with pytest.raises(ValueError, match="categories differ"):
+        tree.evaluate(held)
+    extra = _three_level(2000, 4, levels=("a", "b", "c", "d"))
+    held = cate(_CAT_GRAPH, extra, "A", "Y", random_state=0, uncertainty=False)
+    with pytest.raises(ValueError, match="categories differ"):
+        tree.evaluate(held)
+    # a tree on Z alone is unaffected by C's coding
+    z_tree = policy_tree(fit, "Z", depth=1)
+    assert np.isfinite(z_tree.evaluate(held).value)
+
+
+def test_dr_scores_refuse_unnamed_columns() -> None:
+    from ergodic.inference._scores import DRScores
+
+    n = 5
+    zeros = np.zeros(n)
+    with pytest.raises(ValueError, match="3 columns but 2 names"):
+        DRScores(
+            scores=zeros,
+            mu0=zeros,
+            mu1=zeros,
+            propensity=zeros + 0.5,
+            covariates=np.zeros((n, 3)),
+            treatment=zeros,
+            outcome=zeros,
+            covariate_names=("C", "Z"),
+        )

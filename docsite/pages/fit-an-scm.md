@@ -144,7 +144,9 @@ chains run one after another unless you raise it; the draws are the same either 
 - A categorical treatment with more than two levels needs explicit
   `levels=(low_code, high_code)`.
 - An effect identified only by an instrument, or only by the general ID formula,
-  raises `NotImplementedError`. Use `estimate_effect` for those.
+  raises `NotImplementedError`. Use `estimate_effect` for those. An instrument
+  identifies the effect only under a linear, homogeneous model, an assumption the
+  SCM's contrast doesn't make.
 - A jointly fitted group of more than 8 nodes still fits, with a warning that it may be
   slow. Raise `district_size_cap=` to silence it.
 

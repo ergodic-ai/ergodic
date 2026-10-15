@@ -186,6 +186,38 @@ def _covariate_matrix(
     return np.asarray(np.hstack(blocks), dtype=np.float64)
 
 
+def _covariate_columns(
+    data: TabularData, names: frozenset[str] | list[str] | tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Name every column :func:`_covariate_matrix` builds, and the variable it encodes.
+
+    A continuous column, or a discrete one that encodes to a single indicator (two
+    levels), keeps its variable name. A discrete covariate with ``k >= 3`` levels
+    encodes to ``k - 1`` indicators (the first level dropped), named ``"C==level"``.
+    Returns ``(column_names, column_variables)``, aligned to the design's columns.
+    """
+    columns: list[str] = []
+    variables: list[str] = []
+    for name in sorted(names):
+        col = data.schema[name]
+        if col.is_continuous or col.is_datetime:
+            columns.append(name)
+            variables.append(name)
+        elif col.is_discrete:
+            width = col.cardinality or 0
+            if width <= 1:
+                continue
+            if width == 2:
+                columns.append(name)
+                variables.append(name)
+                continue
+            categories = col.categories or tuple(range(width))
+            for level in categories[1:width]:
+                columns.append(f"{name}=={level}")
+                variables.append(name)
+    return tuple(columns), tuple(variables)
+
+
 def _dirichlet_weights(n: int, rng: np.random.Generator) -> npt.NDArray[np.float64]:
     """Bayesian-bootstrap weights: one Dirichlet(1, ..., 1) draw over ``n`` rows.
 
@@ -522,6 +554,7 @@ class _AdjustmentBase(CausalEstimator):
         covariates = identification.adjustment_set or frozenset()
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
+        self._covariate_columns, self._covariate_variables = _covariate_columns(data, covariates)
         self._treatment_name = treatment
         self._outcome_name = outcome
         a = self._treatment_vector(data, treatment)
@@ -729,7 +762,8 @@ class _MetaLearnerBase(_AdjustmentBase):
             covariates=z,
             treatment=a,
             outcome=y,
-            covariate_names=self._covariates,
+            covariate_names=self._covariate_columns,
+            covariate_variables=self._covariate_variables,
             tau_hat=tau_hat,
         )
 

@@ -108,7 +108,7 @@ names: `"r_learner"`, `"x_learner"`, `"t_learner"`, `"s_learner"`, `"dml"` and
   too few, the variance is clipped to zero and some bands have zero width. On a
   4,000-row simulation, 400 trees gave 25% zero-width bands and covered the true
   effect for 68% of units at a nominal 90%; 1,600 trees gave 1% and 87%. Set
-  `n_trees` to about half the number of rows or more when the per-unit intervals
+  `n_trees` to at least the number of rows when the per-unit intervals
   matter; `cate` warns when more than 5% of the bands have zero width, and
   `effects.diagnostics["ij_zero_se_share"]` records the share. The other learners
   bootstrap: `n_boot=` refits (default 1,000), which can be slow. Pass

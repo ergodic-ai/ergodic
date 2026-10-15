@@ -78,18 +78,21 @@ WARMUP = 300
 # forecast-proportion MAE vary across sampler seeds by more than 5 and 2 percent:
 # sampler seeds 11-15 on Apple arm64 (the locked stack, jax 0.11, pymc 6.0.1)
 # gave total moves 6.65, 8.11, 6.25, 8.26, 8.44 (trusted 0.95, 0.94, 0.78, 0.92,
-# 1.12) and forecast MAEs 6.81, 6.55, 6.79, 6.40, 6.88. Their tolerances cover
-# that seed-to-seed spread; the CRPS and historical-MAE goldens stay tight.
-GOLDEN_SEED_SPREAD_TOTAL_MOVE = 0.25
-GOLDEN_SEED_SPREAD_DRIFT_MAE = 0.06
+# 1.12) and forecast MAEs 6.81, 6.55, 6.79, 6.40, 6.88. Those three goldens are
+# the seed means, each with a tolerance of three seed standard deviations (review
+# F4): total move 7.54 +/- 3.05, trusted 0.944 +/- 0.367, forecast MAE 6.69 +/- 0.61.
+# The CRPS and historical-MAE goldens stay tight.
+GOLDEN_SEED_SPREAD_TOTAL_MOVE = 0.404
+GOLDEN_SEED_SPREAD_TOTAL_MOVE_TRUSTED = 0.388
+GOLDEN_SEED_SPREAD_DRIFT_MAE = 0.092
 GOLDEN_H1_TD_CRPS = 3.7034
 GOLDEN_H1_BU_CRPS = 4.1912
 GOLDEN_H1_WIDTH_RATIO = 2.0512
-GOLDEN_H1_TOTAL_MOVE = 8.2473
-GOLDEN_H1_TOTAL_MOVE_TRUSTED = 0.9921
+GOLDEN_H1_TOTAL_MOVE = 7.5412
+GOLDEN_H1_TOTAL_MOVE_TRUSTED = 0.9443
 GOLDEN_H2_BU_CRPS = 3.8954
 GOLDEN_H2_OWN_CRPS = 6.7761
-GOLDEN_DRIFT_FORECAST_MAE = 6.5948
+GOLDEN_DRIFT_FORECAST_MAE = 6.6865
 GOLDEN_DRIFT_HISTORICAL_MAE = 28.2888
 GOLDEN_SWEEP_MINT = 2.3312
 GOLDEN_SWEEP_BEST = 2.5614
@@ -773,7 +776,7 @@ def test_trust_moves_a_node_less(h1: World) -> None:
         GOLDEN_H1_TOTAL_MOVE, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE
     )
     assert _moved(trust_total, h1.result, ("total",)) == pytest.approx(
-        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE
+        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE_TRUSTED
     )
 
 

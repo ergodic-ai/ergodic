@@ -40,6 +40,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import numpy.typing as npt
 
     from .._perunit import CATEResult
@@ -94,13 +96,16 @@ class PolicyValue:
 
     ``value`` is the mean outcome gain over treating no one (outcome units per
     unit), ``std_error`` its standard error, and ``treat_all_value`` the
-    treat-everyone baseline (the ATE) on the same units.
+    treat-everyone baseline (the ATE) on the same units. ``regret_std_error`` is
+    the standard error of ``regret("treat_all")``, from the paired per-unit terms
+    ``(pi(X_i) - 1) Gamma_i``.
     """
 
     value: float
     std_error: float
     treat_all_value: float
     n: int
+    regret_std_error: float = float("nan")
 
     def interval(self, level: float = 0.9) -> tuple[float, float]:
         """A normal confidence interval for the value at ``level``."""
@@ -154,6 +159,10 @@ class PolicyTree:
     outcome: str = ""
     _scores: npt.NDArray[np.float64] = field(default_factory=lambda: np.empty(0), repr=False)
     _design: npt.NDArray[np.float64] = field(default_factory=lambda: np.empty((0, 0)), repr=False)
+    #: For each variable behind a split column, every design column the training
+    #: scores encoded it as (a categorical's whole one-hot block), so evaluate()
+    #: can refuse held-out scores that encode it differently.
+    _blocks: Mapping[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
 
     # -- evaluation ----------------------------------------------------------
 
@@ -215,13 +224,28 @@ class PolicyTree:
         ``result_or_scores`` carries doubly-robust scores for units the tree was not
         learned on (a :class:`~ergodic.inference.CATEResult` from a held-out sample,
         or a :class:`~ergodic.inference._scores.DRScores`); its covariates must
-        include the tree's split covariates by name. Returns a :class:`PolicyValue`:
+        include the tree's split covariates by name, encoded the same way: a
+        categorical with three or more levels is split on per-level columns
+        (``"C==level"``), and held-out scores whose data has different categories for
+        it (a level missing or new) raise, since the same column would mean a
+        different group. Build both datasets with the same categories (for example
+        one ``pandas.Categorical`` dtype). Passing the learning sample's own result
+        reproduces the optimistic in-sample :attr:`value`. Returns a :class:`PolicyValue`:
         the mean of ``pi(X_i) Gamma_i`` there (outcome units, against treating no
         one), its standard error, and the treat-all baseline on the same units.
         Because the rule was fixed before these scores were seen, the interval is
         valid, unlike the in-sample :attr:`value` the search maximized.
         """
-        scores, design, names, _, _ = _extract(result_or_scores)
+        scores, design, names, variables, _, _ = _extract(result_or_scores)
+        for variable, block in self._blocks.items():
+            held = tuple(c for c, v in zip(names, variables, strict=True) if v == variable)
+            if set(held) != set(block):
+                raise ValueError(
+                    f"the evaluation scores encode {variable!r} as {list(held)} but the "
+                    f"tree was learned with {list(block)}; its categories differ between "
+                    "the two datasets, so a column would name a different group. Build "
+                    "both with the same categories"
+                )
         index = {name: i for i, name in enumerate(names)}
         missing = [name for name in self.covariates if name not in index]
         if missing:
@@ -235,11 +259,13 @@ class PolicyTree:
         x = design[:, [index[name] for name in self.covariates]]
         actions = self.predict(x).astype(np.float64)
         influence = actions * scores
+        regret_terms = (actions - 1.0) * scores
         return PolicyValue(
             value=float(np.mean(influence)),
             std_error=float(np.std(influence, ddof=1) / np.sqrt(n)),
             treat_all_value=float(np.mean(scores)),
             n=n,
+            regret_std_error=float(np.std(regret_terms, ddof=1) / np.sqrt(n)),
         )
 
     def leaves(self) -> list[PolicyNode]:
@@ -441,8 +467,15 @@ def _greedy_split(
 
 def _extract(
     result_or_scores: CATEResult | DRScores,
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], tuple[str, ...], str, str]:
-    """Pull the AIPW scores, the covariate design, and the names out of either input."""
+) -> tuple[
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    str,
+]:
+    """Pull the AIPW scores, the design, its column names and their variables."""
     from .._perunit import CATEResult
     from .._scores import DRScores
 
@@ -464,6 +497,7 @@ def _extract(
         np.asarray(scores_obj.scores, dtype=np.float64),
         np.asarray(scores_obj.covariates, dtype=np.float64),
         tuple(scores_obj.covariate_names),
+        tuple(scores_obj.column_variables),
         scores_obj.treatment if isinstance(scores_obj.treatment, str) else "",
         scores_obj.outcome if isinstance(scores_obj.outcome, str) else "",
     )
@@ -472,20 +506,33 @@ def _extract(
 def _select_columns(
     design: npt.NDArray[np.float64],
     all_names: tuple[str, ...],
+    variables: tuple[str, ...],
     covariates: str | tuple[str, ...] | list[str] | None,
 ) -> tuple[npt.NDArray[np.float64], tuple[str, ...]]:
-    """Restrict the design to the requested split covariates by name."""
+    """Restrict the design to the requested split covariates by name.
+
+    A name is a design column (``"Z"``, ``"C==b"``) or a variable, which selects
+    every column encoding it (a categorical's whole one-hot block).
+    """
     if covariates is None:
         return design, all_names
     requested = (covariates,) if isinstance(covariates, str) else tuple(covariates)
     if not requested:
         raise ValueError("covariates is empty; pass at least one covariate name or None for all")
     index = {name: i for i, name in enumerate(all_names)}
-    missing = [name for name in requested if name not in index]
+    cols: list[int] = []
+    missing: list[str] = []
+    for name in requested:
+        if name in index:
+            picked = [index[name]]
+        else:
+            picked = [i for i, variable in enumerate(variables) if variable == name]
+        if not picked:
+            missing.append(name)
+        cols.extend(i for i in picked if i not in cols)
     if missing:
         raise ValueError(f"unknown split covariates {missing}; available: {list(all_names)}")
-    cols = [index[name] for name in requested]
-    return design[:, cols], requested
+    return design[:, cols], tuple(all_names[i] for i in cols)
 
 
 def policy_tree(
@@ -499,7 +546,10 @@ def policy_tree(
     ``result_or_scores`` is a :class:`~ergodic.inference.CATEResult` (its cached
     cross-fit scores are read) or a :class:`~ergodic.inference._scores.DRScores`
     directly. ``covariates`` names the split covariates (a name, a list of names, or
-    ``None`` for every covariate carried by the scores). The tree maximizes the
+    ``None`` for every covariate carried by the scores). A categorical covariate with
+    three or more levels is carried as one indicator column per non-first level,
+    named ``"C==level"``; naming the variable ``"C"`` selects its whole block, and
+    the tree's ``covariates`` lists the columns it can split on. The tree maximizes the
     doubly-robust welfare ``V(pi) = mean[pi(X) Gamma_i]`` (the mean outcome gain over
     treating no one, in outcome units); at ``depth <= 2``
     the search is exhaustive over thresholds and so globally optimal, and a deeper
@@ -511,11 +561,18 @@ def policy_tree(
     """
     if depth < 1:
         raise ValueError(f"depth must be at least 1, got {depth}")
-    scores, full_design, all_names, treatment, outcome = _extract(result_or_scores)
+    scores, full_design, all_names, variables, treatment, outcome = _extract(result_or_scores)
     n = scores.shape[0]
     if n < 2:
         raise ValueError(f"policy_tree needs at least 2 units, got {n}")
-    design, names = _select_columns(full_design, all_names, covariates)
+    design, names = _select_columns(full_design, all_names, variables, covariates)
+    variable_of = dict(zip(all_names, variables, strict=True))
+    blocks = {
+        variable_of[name]: tuple(
+            c for c, v in zip(all_names, variables, strict=True) if v == variable_of[name]
+        )
+        for name in names
+    }
 
     exhaustive = depth <= _EXHAUSTIVE_DEPTH
     if exhaustive:
@@ -545,4 +602,5 @@ def policy_tree(
         outcome=outcome,
         _scores=scores,
         _design=design,
+        _blocks=blocks,
     )

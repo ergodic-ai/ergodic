@@ -84,6 +84,23 @@ To be released together with welt-client 0.13.
   calibrate), and causal forests with policy trees.
 - Every public function, class and member has a docstring, and the reference
   build fails when one is missing.
+- `PolicyTree.evaluate(held_out)` scores a learned rule on doubly robust scores
+  from units it was not learned on and returns a `PolicyValue` (`value`,
+  `std_error`, `interval()`, `treat_all_value`, `regret()` and `regret_std_error`),
+  the honest out-of-sample value; the tree's own `value` is measured on the scores
+  it was chosen to maximize, so it is optimistic and its docstrings now say so.
+- `SCM(cores=)` and `PyMCLearner(cores=)` (default 1) cap the processes PyMC may
+  use for the chains; every SCM fit (singleton, latent district, sensitivity
+  refit, process-pool worker) honours it. PyMC otherwise ran up to four chains in
+  parallel processes. The draws do not depend on it.
+- `MediationEstimate.mediated_interaction`, `total - nde - nie`.
+- `LatentResult.rhat_max_unaligned`, the raw split R-hat (see Changed).
+- `ergodic.inference.learners.ConvergenceWarning`, which `LogisticRegression` emits
+  when it stops at `max_iter` before converging. It is ergodic's own class, so a
+  filter on scikit-learn's `ConvergenceWarning` does not catch it.
+- `MixedGraph.from_networkx(graph, kind=...)`, like the module-level function.
+- `SCMResult.kind="predictive"` for posterior-predictive draws, and
+  `CausalForest.cate()` records `diagnostics["ij_zero_se_share"]` (see Fixed).
 
 ### Changed
 - `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can
@@ -114,6 +131,21 @@ To be released together with welt-client 0.13.
   `discover` docstring now says it binds an unbound test.
 - Install hints in error messages and module docs quote their extras
   (`pip install 'ergodic[scm]'`), which zsh would otherwise read as a glob.
+- `LatentResult.rhat_max` is now the split R-hat after label alignment, over the
+  sign-corrected delta draws grouped by chain, and the R-hat warning reads it. It
+  was the raw R-hat, so chains sitting in mirror modes of a good fit reported 1.83
+  (the spread arm of the golden worlds; aligned, 1.01); that number is now
+  `rhat_max_unaligned`.
+- `MixedGraph` neighbourhood lookups (`parents`, `children`, `neighbors`,
+  `spouses`, `ancestors`, `descendants`, `markov_blanket`) and `Hierarchy` lookups
+  (`children_of`, `parent_of`, `is_leaf`, `leaf_descendants`) raise `ValueError` on
+  a name that is not a node instead of answering with an empty set (or, for
+  `is_leaf`, `True`), as identification and separation already did.
+  `get_edge`/`has_edge` still answer `None`/`False` for an absent edge, and
+  `HierarchicalTSData.aggregate` on an unknown node raises this `ValueError` rather
+  than a `KeyError`. KNN used before `fit` raises `RuntimeError`, and `set_params`
+  on the native KNN, OLS and logistic learners refuses unknown names, as sklearn
+  does.
 
 ### Fixed
 - `estimate_mediation`: the total effect is now computed directly as
@@ -124,7 +156,9 @@ To be released together with welt-client 0.13.
   -0.072 with a proportion mediated of 1.99; it is now the -0.142 raw gap and the
   proportion 1.01. `nde` and `nie` are unchanged (the pure effects), so under an
   interaction they no longer sum to the total; `proportion_mediated` stays
-  `nie / total`. The `Design.estimand` no longer repeats the `NDE =`/`NIE =`
+  `nie / total`, Pearl's share explained by mediation, and the docs now name the
+  other convention, `1 - nde / total` (VanderWeele's total NIE over TE, as CMAverse
+  reports; 1.50 on Berkeley). The `Design.estimand` no longer repeats the `NDE =`/`NIE =`
   prefix, and a treatment with more than two levels is told to recode to two
   levels instead of being pointed at `treated=` (which needs two levels too).
 - `CATEResult.ate()` no longer treats per-unit analytic standard errors as
@@ -189,11 +223,6 @@ To be released together with welt-client 0.13.
   world stopped at a lower-scoring graph (BIC -127.0 against the truth's -123.2)
   with an extra edge. Moves within a relative 1e-9 are now ties, and a tie keeps
   the first move.
-- The policy tree's docstrings no longer call its `value` and interval honest:
-  they are measured on the scores the tree was chosen to maximize, so they are
-  optimistic and the interval ignores the selection. `PolicyTree.evaluate`
-  (new) scores the fixed rule on held-out doubly-robust scores and returns a
-  `PolicyValue` with a valid interval and regret.
 - The best-linear-projection docstrings no longer say the intercept is the ATE:
   the covariates enter uncentred, so the intercept is the projected effect at
   covariates all zero (the ATE only when they are centred). Outputs unchanged.
@@ -202,20 +231,6 @@ To be released together with welt-client 0.13.
   weighted final stage ran unweighted with a KNN learner. `PyMCLearner` now
   declares `supports_sample_weight = False`, so the R-learner refuses it before
   any fit, and its `fit` raises on weights instead of ignoring them.
-- KNN used before `fit` raises `RuntimeError` naming the learner instead of an
-  `AssertionError`. `set_params` on the native KNN, OLS and logistic learners
-  refuses unknown names, as sklearn does. `LogisticRegression` warns with the
-  new `ergodic.inference.learners.ConvergenceWarning` when it stops at
-  `max_iter` before converging.
-- `MixedGraph.from_networkx` takes `kind=` like the module-level function (the
-  classmethod had no such parameter). `MixedGraph` neighbourhood lookups
-  (`parents`, `children`, `neighbors`, `spouses`, `ancestors`, `descendants`,
-  `markov_blanket`) and `Hierarchy` lookups (`children_of`, `parent_of`,
-  `is_leaf`, `leaf_descendants`) raise `ValueError` on a name that is not a node
-  instead of answering with an empty set (or, for `is_leaf`, `True`), as
-  identification and separation already did. `get_edge`/`has_edge` still answer
-  `None`/`False` for an absent edge. `HierarchicalTSData.aggregate` on an unknown node now
-  raises this `ValueError` rather than a `KeyError`.
 - `SCM` refuses a graph that is not a DAG or an ADMG. A MAG passed the
   acyclic-directed-plus-bidirected check and was fitted as an ADMG, reading
   ancestral edges as direct mechanisms; it now raises with the alternatives
@@ -227,28 +242,33 @@ To be released together with welt-client 0.13.
   and the guide said otherwise, and the repr printed a "95% CrI". These results
   now carry `kind="predictive"` and print "95% predictive interval"; `ate` and
   `counterfactual` keep `kind="posterior"` and the credible interval.
-- `SCM(cores=)` (new, default 1) caps the processes PyMC may use for the chains
-  in every SCM fit, including the latent-district and sensitivity refits. PyMC
-  otherwise ran up to four chains in parallel processes. The draws do not depend
-  on it.
-- `LatentResult.rhat_max` is the split R-hat after label alignment, over the
-  sign-corrected delta draws grouped by chain. It was the raw R-hat, so chains
-  sitting in mirror modes of a good fit reported 1.83 (the spread arm of the
-  golden worlds; aligned, 1.01). The raw number moves to the new
-  `rhat_max_unaligned`, and the R-hat warning now reads the aligned value.
-- `CausalForest.cate()` records the share of per-unit standard errors clipped to
-  zero (`diagnostics["ij_zero_se_share"]`) and warns when it exceeds 5%. With too
-  few trees for the rows, the infinitesimal-jackknife Monte-Carlo correction
-  exceeds the raw variance and the band has zero width; on a 4,000-row world 400
-  trees gave 25% zero-width bands and 68% coverage of a nominal 90%, 1,600 trees
-  1% and 87%. The estimator is unchanged; its docstring states these
-  measurements and recommends `n_trees` of the order of half the rows or more.
 - Process trees splice a nested sequence into its parent, so
   `seq(a, seq(b, c))` is `seq(a, b, c)`. `discover_model(noise=...)` could return
   an unflattened `seq(..., seq(xor(TAU, 'standard'), xor(TAU, 'expedite')), ...)`
   that did not compare equal to the same model written by hand, although the
   tree docstring promised a canonical form. Nested `xor` and `par` nodes are
   kept as built (`decision_points` reads each `xor` as its own decision).
+
+- `CausalForest.cate()` records the share of per-unit standard errors clipped to
+  zero (`diagnostics["ij_zero_se_share"]`) and warns when it exceeds 5%. With too
+  few trees for the rows, the infinitesimal-jackknife Monte-Carlo correction
+  exceeds the raw variance and the band has zero width; on a 4,000-row world 400
+  trees gave 25% zero-width bands and 68% coverage of a nominal 90%, 1,600 trees
+  1% and 87%. The estimator is unchanged; its docstring states these
+  measurements, names the variance correctly (the infinitesimal jackknife with the
+  Wager-Hastie-Efron Monte-Carlo correction, not a bootstrap of little bags) and
+  recommends at least as many trees as rows.
+- The heterogeneity layer (`explain()`: BLP, CLAN; `policy_tree`;
+  `PolicyTree.evaluate`) named the doubly robust design by variable while a
+  categorical covariate with three or more levels has one column per non-first
+  level, so names and columns drifted apart: a split reported on `Z` was really an
+  indicator of the categorical, and BLP returned four coefficients for three names.
+  The scores now name every column (`"C==level"` for such a categorical; a
+  continuous or two-level covariate keeps its name), `policy_tree(result, "C")`
+  selects the categorical's whole block, `DRScores` refuses a design whose width
+  does not match its names, and `evaluate()` refuses held-out scores that encode
+  the categorical with other levels. The forest's `variable_importance()` uses the
+  same column names.
 
 ## [0.1.1] - 2026-08-30
 

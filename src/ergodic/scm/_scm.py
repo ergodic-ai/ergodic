@@ -707,10 +707,12 @@ class SCM:
         clean and ``do`` severs the treatment from the district latent, leaving the
         identified value (the front-door mediated effect, the C1 world's 1.2). The
         **instrument** strategy still raises with a pointer to
-        :func:`~ergodic.inference.estimate_effect`: IV identification is linear and
-        rests on the instrument's exclusion restriction, which the latent-district fit
-        does not impose, so its treatment->outcome coefficient stays on the same
-        non-identified ridge as the bow. The **general ID functional** likewise
+        :func:`~ergodic.inference.estimate_effect`: an instrument identifies the effect
+        only under parametric assumptions (a linear, homogeneous effect), not
+        nonparametrically, so the SCM's do-contrast, which claims no such assumption,
+        does not report it. The latent-district fit can land near the IV value, but
+        its posterior then leans on the priors along the confounding ridge. The
+        **general ID functional** likewise
         raises (its latent-fit do-contrast was not verified against
         ``estimate_effect`` to tolerance). ``engine="dml"`` is reserved for a
         cross-fit reuse path that is not available; it raises with a pointer.
@@ -741,17 +743,16 @@ class SCM:
         # and front-door (the latent absorbs the X-Y confounding, so do() on the
         # treatment severs it from the district latent and the identified value
         # survives). Instruments and the general ID functional are NOT computed by
-        # this contrast (decision 3, verify-then-widen): IV rests on an exclusion
-        # restriction the latent fit does not impose, and the general functional was
-        # not validated to tolerance here, so both raise with a pointer rather than
-        # return a confident wrong number.
+        # this contrast: IV identifies only under parametric (linear, homogeneous)
+        # assumptions, and the general functional was not validated to tolerance here,
+        # so both raise with a pointer rather than return a number on a weaker footing.
         if ident.strategy not in ("adjustment", "null", "frontdoor"):
             raise NotImplementedError(
                 f"the effect of {treatment!r} on {outcome!r} is identified by the "
                 f"{ident.strategy!r} criterion, which the SCM latent-fit do-contrast "
                 f"does not yet compute (front-door, adjustment, and the null case do). "
                 f"Use estimate_effect(graph, data, {treatment!r}, {outcome!r}), which "
-                f"handles {ident.strategy}, or scm.ate(..., engine='dml')"
+                f"handles {ident.strategy}"
             )
         low, high = self._ate_levels(treatment, levels)
         draws = _compose.ate_contrast(

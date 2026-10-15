@@ -395,6 +395,11 @@ def test_berkeley_total_effect_is_the_raw_gap() -> None:
     assert raw_gap == pytest.approx(-0.1416, abs=1e-3)
     assert est.total.value == pytest.approx(raw_gap, abs=1e-6)
     assert est.proportion_mediated == pytest.approx(est.nie.value / raw_gap, abs=1e-6)
+    # the pure effects miss the mediated interaction; the two proportion conventions
+    # (explained, pure NIE / TE; owed, 1 - NDE / TE) differ by it (review F3)
+    assert est.mediated_interaction == pytest.approx(-0.0699, abs=2e-3)
+    assert 1.0 - est.nde.value / est.total.value == pytest.approx(1.50, abs=0.01)
+    assert est.proportion_mediated == pytest.approx(1.01, abs=0.01)
 
 
 def test_design_estimand_names_each_effect_once() -> None:

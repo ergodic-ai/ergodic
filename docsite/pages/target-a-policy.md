@@ -116,10 +116,14 @@ low, high = value.interval(0.95)
 The held-out `cate` result carries one doubly robust score per person: a noisy signal
 of their effect. `tree.evaluate` averages the score over the people the rule treats,
 with 0 for the rest, which estimates the gain over treating no one, in outcome units.
-It returns a `PolicyValue` with `value`, `std_error`, `interval()`, `treat_all_value`
-and `regret()`. Its standard error is valid because the rule is fixed before these
-rows are used. The held-out scores must carry the tree's split covariates; `evaluate`
-picks them by name.
+It returns a `PolicyValue` with `value`, `std_error`, `interval()`, `treat_all_value`,
+`regret()` and `regret_std_error` (the standard error of `regret("treat_all")`). Its
+standard errors are valid because the rule is fixed before these rows are used. The
+held-out scores must carry the tree's split covariates; `evaluate` picks them by name.
+A categorical covariate with three or more levels is split on one indicator column per
+level after the first, named like `"region==north"`, and `evaluate` raises if the
+held-out data has different levels for it: build both datasets with the same
+categories.
 
 ## How the tree is chosen
 

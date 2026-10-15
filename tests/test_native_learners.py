@@ -123,3 +123,29 @@ def test_r_learner_with_a_knn_final_uses_the_weights() -> None:
         uncertainty=False,
     )
     assert np.corrcoef(res.values, 1.0 + z)[0, 1] > 0.5
+
+
+def test_pymc_learner_caps_its_sampler_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review F7: PyMCLearner let PyMC fan out to four chain processes."""
+    pm = pytest.importorskip("pymc")
+    seen: list[int] = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_sample(**kwargs: Any) -> Any:
+        seen.append(kwargs["cores"])
+        raise _Stop
+
+    class _Model(PyMCLearner):
+        def build(self, X: Any, y: Any) -> Any:
+            return pm.Model()
+
+    monkeypatch.setattr(pm, "sample", fake_sample)
+    for learner, expected in ((_Model(chains=4), 1), (_Model(chains=2, cores=8), 2)):
+        with pytest.raises(_Stop):
+            learner.fit(np.zeros((3, 1)), np.zeros(3))
+        assert seen[-1] == expected
+    assert _Model().get_params()["cores"] == 1
+    with pytest.raises(ValueError, match="cores"):
+        _Model(cores=0)

@@ -27,7 +27,15 @@ import numpy as np
 if TYPE_CHECKING:
     import numpy.typing as npt
 
-_SAMPLER_KEYS = ("draws", "tune", "chains", "target_accept", "random_state", "progressbar")
+_SAMPLER_KEYS = (
+    "draws",
+    "tune",
+    "chains",
+    "cores",
+    "target_accept",
+    "random_state",
+    "progressbar",
+)
 
 
 class PyMCLearner:
@@ -36,7 +44,8 @@ class PyMCLearner:
     Implement :meth:`build` to return a ``pymc.Model``. ``predict`` is the
     posterior predictive mean and ``predict_draws`` the ``(S, n)`` posterior of the
     mean node, so the learner drops into a regression slot and also drives the
-    posterior path.
+    posterior path. ``cores`` (default 1) caps the processes PyMC may use for the
+    chains, so a fit runs its chains one after another unless you raise it.
     """
 
     _mean_node = "mu"
@@ -51,14 +60,18 @@ class PyMCLearner:
         draws: int = 1000,
         tune: int = 1000,
         chains: int = 2,
+        cores: int = 1,
         target_accept: float = 0.9,
         random_state: int | None = None,
         progressbar: bool = False,
         **build_kwargs: Any,
     ) -> None:
+        if cores < 1:
+            raise ValueError(f"cores must be at least 1, got {cores}")
         self.draws = draws
         self.tune = tune
         self.chains = chains
+        self.cores = cores
         self.target_accept = target_accept
         self.random_state = random_state
         self.progressbar = progressbar
@@ -100,6 +113,7 @@ class PyMCLearner:
                 draws=self.draws,
                 tune=self.tune,
                 chains=self.chains,
+                cores=max(1, min(self.cores, self.chains)),
                 target_accept=self.target_accept,
                 random_seed=self.random_state,
                 progressbar=self.progressbar,

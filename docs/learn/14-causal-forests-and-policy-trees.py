@@ -114,7 +114,7 @@ print(f"bands of zero width: {np.mean(width < 1e-9):.0%}")
 # have zero width: with 400 trees for 3,000 customers the jackknife's correction for
 # having finitely many trees outweighs the variance it corrects, and the estimate is
 # clipped at zero (`forest.cate()` warns when more than 5% of the bands have zero width).
-# More trees, of the order of half the rows or more, shrink that share; the forest's
+# More trees, at least as many as rows, shrink that share; the forest's
 # smoothing can still leave the bands short where the effect changes steeply. So treat the
 # forest's bands as a guide to *which* estimates are shaky (wider is shakier), not as a
 # calibrated 90% promise. If you need calibrated per-customer intervals, check them on a

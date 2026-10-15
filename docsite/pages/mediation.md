@@ -110,7 +110,10 @@ assumptions in words.
 
 `estimate_mediation` returns a `MediationEstimate`. `nde`, `nie` and `total` are
 `EffectEstimate` objects with `value`, `std_error` and `interval()`, from a bootstrap
-of `n_boot=1000` resamples by default.
+of `n_boot=1000` resamples by default. Each resample refits the models but averages
+them over all your rows, so the intervals are for the effect on these rows'
+covariates; for a wider population they are somewhat narrow when the effect varies
+with the covariates.
 
 The method is g-computation: fit the outcome given treatment, mediator and covariates,
 fit the mediator given treatment and covariates, then average the mediation formula
@@ -122,13 +125,18 @@ classifier.
 `nde` and `nie` are the pure effects: each holds the other path at the untreated
 level. `total` is the total effect of switching treatment on, computed directly. When
 treatment and mediator interact in their effect on the outcome, the pure effects don't
-add up to it, and `total - nde - nie` is the mediated interaction. The outcome model
+add up to it, and `total - nde - nie` is the mediated interaction, available as
+`split.mediated_interaction`. The outcome model
 includes that interaction, so it never quite vanishes in a fit, which is why the
 program's total is close to, but not exactly, the sum of its two parts.
 
-`proportion_mediated` is `nie / total`, the pure indirect effect's share. Under an
-interaction it and `nde / total` need not sum to one. It is unstable when the total
-effect is near zero, and `proportion_mediated_flagged` is then `True`.
+`proportion_mediated` is `nie / total` with the pure NIE: the share of the effect
+*explained* by the mediator (Pearl, 2001). Other software, such as R's CMAverse, often
+reports the share *owed* to mediation instead, `1 - split.nde.value /
+split.total.value`. The two agree without an interaction and differ by
+`mediated_interaction / total` with one; on the Berkeley admissions data they are 1.01
+and 1.50. Either is unstable when the total effect is near zero, and
+`proportion_mediated_flagged` is then `True`.
 
 <details markdown="1"><summary>What if my mediator is continuous?</summary>
 

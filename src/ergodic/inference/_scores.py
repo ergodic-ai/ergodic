@@ -28,6 +28,7 @@ import numpy as np
 from ._crossfit import _folds, _train_mask
 from ._estimator import (
     _AdjustmentBase,
+    _covariate_columns,
     _covariate_matrix,
     _outcome_vector,
     _require_complete,
@@ -65,6 +66,23 @@ class DRScores:
     outcome: npt.NDArray[np.float64]
     covariate_names: tuple[str, ...]
     tau_hat: npt.NDArray[np.float64] | None = None
+    covariate_variables: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        width = np.asarray(self.covariates).shape[1] if np.ndim(self.covariates) == 2 else 0
+        if width != len(self.covariate_names):
+            raise ValueError(
+                f"the covariate design has {width} columns but {len(self.covariate_names)} "
+                f"names {list(self.covariate_names)}; name every design column (a "
+                "categorical with three or more levels is one column per non-first level)"
+            )
+        if self.covariate_variables and len(self.covariate_variables) != width:
+            raise ValueError("covariate_variables must name the variable of every column")
+
+    @property
+    def column_variables(self) -> tuple[str, ...]:
+        """The variable each design column encodes (the column name when not given)."""
+        return self.covariate_variables or self.covariate_names
 
 
 class _ScoreHelper(_AdjustmentBase):
@@ -157,7 +175,7 @@ def dr_scores(
     outcome_name = _single(identification.outcome, "outcome")
     covariates = identification.adjustment_set or frozenset()
     _require_complete(data, {treatment_name, outcome_name, *covariates})
-    names = tuple(sorted(covariates))
+    names, variables = _covariate_columns(data, covariates)
 
     helper = _ScoreHelper(treated=treated, random_state=random_state)
     a = helper._treatment_vector(data, treatment_name)
@@ -185,6 +203,7 @@ def dr_scores(
         treatment=a,
         outcome=y,
         covariate_names=names,
+        covariate_variables=variables,
     )
 
 

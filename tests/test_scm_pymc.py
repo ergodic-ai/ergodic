@@ -1033,46 +1033,37 @@ def test_latent_gauge_is_reproducible_and_pins_the_sign(
 # -- ANCHOR: IV and general-ID keep raising (verify-then-widen, decision 3) ----
 
 
-def test_iv_latent_fit_does_not_impose_exclusion_so_ate_raises() -> None:
-    """IV stays raising: the latent-fit do-contrast misses a valid IV effect, but 2SLS
-    nails it -- so ate() points at estimate_effect rather than return the ridge value.
+def test_iv_identified_effect_makes_ate_raise_with_a_pointer() -> None:
+    """IV stays raising: an instrument identifies the effect only parametrically.
 
-    Z -> X -> Y with U -> X, U -> Y (U latent) and a WEAK instrument against HEAVY
-    confounding. The latent {X, Y} district fit does not impose Z's exclusion
-    restriction, so X's structural coefficient drifts onto the non-identification
-    ridge, while estimate_effect's 2SLS recovers 0.7. This is exactly why ate() keeps
-    raising for the iv strategy.
-
-    Where on the ridge the fit lands depends on the sampler path. The docstring once
-    quoted b_hat ~1.2; on the locked stack (pymc 6.0.1, Apple arm64) random_state 7-11
-    give 0.85, 0.88, 0.83, 0.87, 0.81 (API-149). The assertion is therefore that the
-    latent fit misses by more than 0.1, comfortably outside 2SLS's 0.06.
+    Z -> X -> Y with U -> X, U -> Y (U latent): the effect is identified through the
+    instrument Z, which needs a linear, homogeneous effect. The SCM's do-contrast
+    claims no such assumption, so ``ate()`` points at ``estimate_effect`` (2SLS)
+    instead of returning the latent fit's value. The decision is made before any
+    sampling. (Review F2, API-149: an earlier version also asserted that the latent
+    fit misses the truth, but its posterior covers it; the 2SLS standard error here
+    is about 0.16, so a single seed's distance from 0.7 tests noise.)
     """
-    b_true = 0.7
     rng = np.random.default_rng(7)
     n = 4000
     u = rng.normal(0, 1, n)
     z = rng.normal(0, 1, n)
     x = 0.2 * z + 2.0 * u + rng.normal(0, 0.6, n)  # weak Z, heavy confounding
-    y = b_true * x + 2.0 * u + rng.normal(0, 0.5, n)
+    y = 0.7 * x + 2.0 * u + rng.normal(0, 0.5, n)
     data = tabular({"Z": z, "X": x, "Y": y})
     graph = dag(["Z -> X", "X -> Y", "U -> X", "U -> Y"], latent=["U"])
 
-    # ate() raises with the pointer (decidable pre-MCMC on the iv strategy).
     scm = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=7)
     scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
     with pytest.raises(NotImplementedError) as exc:
         scm.ate("X", "Y")
-    assert "iv" in str(exc.value) and "estimate_effect" in str(exc.value)
-
-    # and the reason it must: the latent fit's coefficient misses the truth here,
-    # while 2SLS recovers it -- the exclusion restriction the latent fit cannot see.
-    fitted = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=7).fit()
-    parents = fitted.mechanisms["Y"].parents
-    b_hat = float(fitted._fits["Y"].param_means["Y__coef"][list(parents).index("X")])
-    iv_est = estimate_effect(graph, data, "X", "Y")
-    assert iv_est.value == pytest.approx(b_true, abs=0.06)  # 2SLS nails the truth
-    assert abs(b_hat - b_true) > 0.1  # the latent fit does not -- so ate() rightly raises
+    message = str(exc.value)
+    assert "iv" in message and "estimate_effect" in message
+    assert "engine='dml'" not in message  # no pointer at a path that does not exist
+    # estimate_effect takes the instrument route on the same graph
+    iv = estimate_effect(graph, data, "X", "Y")
+    lo, hi = iv.interval(0.95)
+    assert lo < 0.7 < hi
 
 
 def test_general_id_strategy_keeps_raising_with_pointer() -> None:

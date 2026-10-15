@@ -21,9 +21,13 @@ directly rather than as the sum.
 
 It handles a binary treatment, a discrete (binary or low-cardinality)
 mediator, and a continuous or binary outcome. A continuous mediator raises (it
-needs a density or multiply-robust estimator, which is not available). The standard error is a
-nonparametric bootstrap over the rows, refitting both models per resample, which
-also carries the model uncertainty.
+needs a density or multiply-robust estimator, which is not available). The
+standard error is a nonparametric bootstrap over the rows, refitting both models per
+resample, which carries the model uncertainty. Each resample's models are averaged
+over the full sample's covariates, so the standard error is for the effect on these
+units' covariate distribution (the sample-average effect); it leaves out the
+variation a new draw of the covariates would add, and so is somewhat narrow for the
+population effect when the effect varies with the covariates.
 
 Reuses the inference machinery: ``_covariate_matrix`` for the covariate design,
 the :class:`~ergodic.inference.Learner` resolution, and the
@@ -90,13 +94,28 @@ class MediationEstimate:
 
     @property
     def proportion_mediated(self) -> float:
-        """``NIE / TE``: the share of the total effect carried by the mediator.
+        """``NIE / TE``, with the pure NIE: the share *explained* by mediation.
 
-        Unstable when the total effect is near zero; see
-        :attr:`proportion_mediated_flagged`.
+        Pearl's (2001; 2012, "The Mediation Formula") fraction of the response
+        explained by the mediator. The other common convention, VanderWeele's total
+        NIE over TE (the share *owed* to mediation, which CMAverse and paramed
+        report), is ``1 - nde / total``. The two agree without a treatment-mediator
+        interaction and differ by :attr:`mediated_interaction` ``/ total`` with one
+        (on Berkeley admissions, 1.01 against 1.50). Unstable when the total effect is
+        near zero; see :attr:`proportion_mediated_flagged`.
         """
         te = self.total.value
         return self.nie.value / te if te != 0.0 else float("nan")
+
+    @property
+    def mediated_interaction(self) -> float:
+        """``total - nde - nie``: the part of the total effect the pure effects miss.
+
+        VanderWeele's mediated interaction (INTmed): zero without a
+        treatment-by-mediator interaction in the outcome. A point value, from the
+        three estimates.
+        """
+        return self.total.value - self.nde.value - self.nie.value
 
     @property
     def proportion_mediated_flagged(self) -> bool:
@@ -519,7 +538,9 @@ def estimate_mediation(
     with a continuous or binary outcome. ``learner`` is an alias, a learner, or a
     ``{"outcome": ..., "mediator": ...}`` mapping (the mediator slot needs a
     classifier). ``treated`` names the treatment level coded to 1. The standard
-    errors are a nonparametric bootstrap over the rows at ``random_state``.
+    errors are a nonparametric bootstrap over the rows at ``random_state``, with the
+    models averaged over the full sample's covariates (so they are for the
+    sample-average effect; see the module notes).
 
     A continuous mediator raises (it needs a density estimator, not available);
     a non-binary treatment raises. Returns a :class:`MediationEstimate` with a

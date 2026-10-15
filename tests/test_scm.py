@@ -995,3 +995,43 @@ def test_predictive_results_say_so() -> None:
     assert "CrI" not in repr(pred)
     post = SCMResult(query="ate", target="Y", kind="posterior", identified=True, _draws=draws)
     assert "95% CrI" in repr(post)
+
+
+def test_scm_cores_reaches_the_district_and_worker_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review F7: the cores test covered only the sequential singleton path."""
+    pm = pytest.importorskip("pymc")
+    from ergodic.scm._sampling import sampler_cores
+    from ergodic.scm._scm import _fit_one
+
+    seen: list[int] = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_sample(**kwargs: Any) -> Any:
+        seen.append(kwargs["cores"])
+        raise _Stop
+
+    monkeypatch.setattr(pm, "sample", fake_sample)
+    rng = np.random.default_rng(0)
+    n = 100
+    u = rng.normal(size=n)
+    x = u + rng.normal(size=n)
+    y = x + u + rng.normal(size=n)
+    data = tabular({"X": x, "Y": y})
+    bow = dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"])
+    with pytest.raises(_Stop):
+        SCM(bow, data, chains=4, cores=3).fit()  # the confounded district's joint fit
+    assert seen == [3]
+
+    # the process-pool worker sets the cap inside the spawned process
+    recorded: list[int] = []
+
+    def fake_fit(self: Any, data: Any, *, draws: int, tune: int, chains: int, seed: int) -> Any:
+        recorded.append(sampler_cores(chains))
+        return FitResult(params={}, param_means={})
+
+    monkeypatch.setattr(GaussianAdditive, "fit", fake_fit)
+    mech = SCM(dag(["X -> Y"]), data).mechanisms["Y"]
+    _fit_one(mech, data, 10, 10, 4, 0, 2)
+    assert recorded == [2]

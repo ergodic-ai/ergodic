@@ -3,9 +3,10 @@
 
 The meta-learners borrow a regressor and bootstrap it to get a band. A causal
 forest is different: the forest *is* the CATE learner, and it carries its own
-per-unit standard errors. Those come from the infinitesimal jackknife (the
-bootstrap-of-little-bags), which is valid because the forest is *honest* -- each
-tree splits on one half of its subsample and fills its leaves on the other, so a
+per-unit standard errors. Those come from the infinitesimal jackknife (with a
+Monte-Carlo correction for the finite number of trees), which is valid because the
+forest is *honest* -- each tree splits on one half of its subsample and fills its
+leaves on the other, so a
 unit's outcome never both places a split and is averaged into the effect there.
 The result is an analytic, per-unit band, not a bootstrap one.
 

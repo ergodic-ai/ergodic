@@ -36,9 +36,12 @@ class ProcessTree:
     which is the silent step :data:`TAU`). An operator node has ``op`` set,
     no label, and at least two children; ``loop`` takes exactly two, the do
     body and the redo body. A ``seq`` child of a ``seq`` is spliced into its
-    parent (sequence is associative), and the children of ``xor`` and ``par`` are stored sorted by
-    their activity alphabets (a silent child first), so equal models are equal
-    objects regardless of how they were assembled.
+    parent (sequence is associative), and the children of ``xor`` and ``par`` are
+    stored sorted by their activity alphabets (a silent child first), so two trees
+    that differ only in that order or in how sequences were nested are equal
+    objects. Nested ``xor`` and ``par`` nodes are kept as built, so
+    ``xor(a, xor(b, c))`` and ``xor(a, b, c)`` describe the same behaviour but are
+    not equal.
     """
 
     op: str | None = None
