@@ -66,13 +66,15 @@ Identification(not identifiable, ['mbsmoke'] -> ['bweight'])
 | Discovery: PC, GES | Independent rows; every common cause measured; independences in the data come from the graph (faithfulness); the test or score fits the data | Refuses time-series and panel data for these methods | Hidden causes, faithfulness |
 | Discovery: FCI, RFCI | As PC, but hidden common causes and selection are allowed | The same | Faithfulness |
 | Discovery: LiNGAM | Linear effects, independent non-Gaussian noise, no hidden causes | Nothing about Gaussianity: on Gaussian data the order it returns is arbitrary | Every assumption |
+| Testing a graph | Independent rows; the test fits the data | The independences each missing edge implies (`test_graph`) | Edges the graph has, and directions within its equivalence class |
 | Identification | The graph is right | Whether the graph identifies the effect, and how | The graph itself |
 | Instruments | The graph is right, and effects are linear | Instrument validity in the graph | Linearity |
 | Estimation | Overlap: every unit could get either treatment; the models fit, or for doubly robust estimators, one of the two models | Refuses an empty treatment arm | Overlap beyond that, model fit |
 | Mediation | No mediator-outcome confounder is affected by the treatment | That the graph certifies it | That the world agrees |
 
 The checks are graph checks. A graph you write down, or one discovery returns, is
-still an assumption about the world.
+still an assumption about the world. [Test a graph against data](test-a-graph.md) can
+reject one whose missing edges the data contradict, but a pass doesn't confirm it.
 
 !!! caution "A refutation does not prove an estimate"
     `refute_effect` reruns an estimate under a perturbation, such as a placebo
@@ -106,6 +108,7 @@ criterion it uses assumes no selection.
 <div class="cards" markdown="1">
 
 - [Graphs and edge marks](graphs-and-marks.md): what each kind of graph says.
+- [Test a graph against data](test-a-graph.md): check a graph's independences on your data.
 - [Refute an estimate](refute-an-estimate.md): stress-test a number you have.
 - [Estimate an average effect](estimate-average-effect.md): the full estimation walkthrough.
 

@@ -20,7 +20,10 @@ facade, and :func:`bootstrap` reruns any method on resamples and returns edge
 frequencies (:class:`BootstrapResult`), the first soft output.
 :class:`EdgeProbabilities` holds a model's directed-edge probabilities (or
 bootstrap frequencies) over named variables, and :func:`decode` turns one into
-a DAG with an explicit, versioned decoder (:class:`DecodeResult`). Background
+a DAG with an explicit, versioned decoder (:class:`DecodeResult`).
+:func:`test_graph` runs the other direction: it tests the independences a
+candidate graph implies against data and combines them with Fisher's C
+(:class:`GraphTest`). Background
 knowledge (including a skeleton restriction through ``restrict_to``) enters
 through :class:`ergodic.DomainKnowledge`.
 
@@ -39,6 +42,7 @@ from ._ci import CIResult, CITest, DSeparationOracle
 from ._decode import DECODERS, Decoder, DecodeResult, decode
 from ._discover import discover
 from ._granger import GrangerResult, granger
+from ._graphtest import GraphTest, ImpliedIndependence, test_graph
 from ._lagged import lagged_node, lagged_tabular, parse_lagged
 from ._probabilities import EdgeProbabilities
 from ._result import DiscoveryResult
@@ -88,7 +92,9 @@ __all__ = [
     "GRaSP",
     "Glasso",
     "GrangerResult",
+    "GraphTest",
     "HillClimb",
+    "ImpliedIndependence",
     "Linear",
     "Mixed",
     "MixedBIC",
@@ -101,4 +107,5 @@ __all__ = [
     "lagged_node",
     "lagged_tabular",
     "parse_lagged",
+    "test_graph",
 ]

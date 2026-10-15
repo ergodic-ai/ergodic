@@ -112,7 +112,9 @@ and shows how to swap the independence test or the score.
 The scores are score-equivalent: every DAG in an equivalence class gets the same
 score. So A* and HillClimb return one member of a class, picked by tie-breaking, and
 some of its directions are arbitrary. Before you identify an effect, turn the result
-back into its class with `ergodic.graph.cpdag_of_dag(result.graph)`.
+back into its class with `ergodic.graph.cpdag_of_dag(result.graph)`. To check a graph
+you wrote or were given against the data, see
+[Test a graph against data](test-a-graph.md).
 
 !!! caution "A CPDAG stands for a set of graphs"
     An undirected edge such as `lung --- smoke` means the data can't tell the
@@ -143,6 +145,7 @@ decodes the model's edge probabilities locally. See
 <div class="cards" markdown="1">
 
 - [Add domain knowledge](domain-knowledge.md): orient edges the data leaves open.
+- [Test a graph against data](test-a-graph.md): check the independences a candidate implies.
 - [Check whether an effect is identifiable](identify-an-effect.md): use the graph to answer a causal question.
 - [Python reference](reference-discovery.md): every method and its options.
 

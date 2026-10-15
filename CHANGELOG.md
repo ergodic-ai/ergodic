@@ -51,6 +51,36 @@ Planned as 0.3.0.
   and `Decoder(..., audit=False)` skip it.
 - `ergodic.KnowledgeConflictWarning` (a `UserWarning`), raised once by a decode whose
   knowledge strongly conflicts with the model, pointing at your call.
+- `test_graph(candidate, data)` (also `ergodic.discovery.test_graph`) tests a
+  candidate graph against data (API-152, DEC-082). It lists one implied
+  independence per pair of observed variables without an edge, tests each with the
+  conditional-independence test `discover` would pick from the columns (or `test=`),
+  and combines the p-values with Fisher's C on `2k` degrees of freedom. A DAG uses
+  Shipley's basis set (the parents of both); a CPDAG uses the same set in its
+  consistent extension; an ADMG, a MAG, a DAG with `latent=` or `selection=` nodes
+  and a PAG (through one member MAG) use m-separation, with the parents of both when
+  they separate and otherwise a minimal set of the pair's observed ancestors. Every
+  conditioning set is checked against the graph's separation routine, and a pair no
+  observed set separates is reported in `untestable`. The result, a frozen
+  `GraphTest`, carries the statistic, p-value, `k`, the test, `alpha`, notes, and the
+  claims (`ImpliedIndependence`) ranked by p-value with Holm-adjusted p-values and
+  decisions; `to_dict()` and `to_frame()` export it. The combined p-value is the
+  level-`alpha` decision (`rejected`); the Holm decisions locate the failing claims.
+  Claims whose test has zero degrees of freedom go to `vacuous` and are left out of
+  `k`. An infinite value in an observed continuous column, or a non-finite p-value or
+  statistic from the test, raises instead of reading as a pass; missing rows are
+  dropped with a note. Only the default partial-correlation test is calibrated; the
+  result notes any other test, and says that `GCM` with a nearest-neighbour learner
+  and G squared with fewer than 1,000 rows over-reject true graphs. Claims whose
+  p-values tie (for example, underflowed to 0) rank by the larger `|statistic|`. The
+  p-value cannot separate Markov-equivalent graphs and a pass does not confirm the
+  graph; the new guide "Test a graph against data" says so. Size with the default
+  partial-correlation test on six-variable linear-Gaussian worlds at `alpha = 0.05`:
+  the registered run (200 worlds per sample size) rejected the true graph in 9.5% of
+  worlds with 200 rows, outside its [2%, 8%] band, and 4.5% with 1,000; a
+  pre-registered replication on 2,000 fresh worlds per size gave 4.65% [3.77%, 5.67%]
+  and 4.85% [3.95%, 5.88%], inside its [3.5%, 6.5%] band. Power against one missing
+  edge of weight at least 0.5 is close to 1.
 
 ### Changed
 - A decode with knowledge, hard-only knowledge included, now audits it: one extra
