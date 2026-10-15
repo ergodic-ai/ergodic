@@ -92,13 +92,14 @@ its rules. A graph's `kind` says which reading applies.
 
 | Kind | Builder | Edges allowed | Where it comes from |
 | --- | --- | --- | --- |
-| DAG | `dag` | `->`, no cycles | Your assumptions, LiNGAM, Welt's Arrow |
+| DAG | `dag` | `->`, no cycles | Your assumptions; `hc`, `exact` and `lingam` discovery; Welt's Arrow |
 | ADMG | `admg` | `->` and `<->`, no directed cycles | Hidden confounders you name |
-| CPDAG | `cpdag` | `->` and `--` | PC and GES |
+| CPDAG | `cpdag` | `->` and `--` | `pc`, `ges`, `boss` and `grasp` discovery |
 | MAG | `mixed(..., kind=GraphKind.MAG)` | `->`, `<->`, `--` under ancestral rules | Projecting out latent and selection nodes |
-| PAG | `pag` | Any marks, circles included | FCI and RFCI |
+| PAG | `pag` | Any marks, circles included | `fci` and `rfci` discovery |
 
-`mixed` builds a graph with any marks and no kind rules. `as_kind("dag")` re-tags a
+`mixed` builds a graph with any marks and no kind rules; `mmpc` discovery returns
+one, an undirected skeleton. `as_kind("dag")` re-tags a
 graph after checking it.
 
 !!! note "One edge per pair"
@@ -118,11 +119,16 @@ reads it back; [Compatibility with Welt](compatibility.md) shows the layout.
 
 <details markdown="1"><summary>How does separation read a circle?</summary>
 
-On a CPDAG or PAG, `m_separated` and `d_separated` answer for the whole class. A path
-connects only when every node on it has a settled role: a collider by its
-arrowheads, or a non-collider by a tail. On a complete PAG the answer is the same
-in every member graph. Build the graph with `mixed(...)` to walk the marks
-literally instead.
+`d_separated` takes only a DAG and raises `ValueError` on any other kind. Use
+`m_separated` on the others. With circle marks, a path connects only when every
+node on it has a settled role. A node is a collider when both path marks at it are
+arrowheads. It is a definite non-collider when a path edge has a tail at it, or
+when both path marks at it are circles and its two path neighbours are not
+adjacent. On a complete PAG the answer is the same in every member graph.
+
+A CPDAG reads its `--` edges as circle pairs, so it answers for the class too. A
+`mixed` graph walks `--` edges literally as two tails. Circle marks get the
+settled-role reading in every kind.
 
 </details>
 

@@ -36,6 +36,16 @@ To be released together with welt-client 0.13.
   `upload_dataset` and `load_research_dataset` move tabular data between ergodic
   and Welt. `bootstrap` refuses `welt:` methods (each resample would be a paid
   job).
+- A new documentation site at https://ergodic.dev, one page per task. Each guide
+  runs one complete program on bundled data and shows its recorded output; the
+  docs check reruns every program and compares, and a program that needs a Welt
+  key is tested against a fake Welt service. The site is versioned, searchable,
+  and publishes each page as Markdown and an `llms.txt` index.
+- Three learn notebooks: structural causal models (interventions,
+  counterfactuals and sensitivity), hidden regimes (recover, certify and
+  calibrate), and causal forests with policy trees.
+- Every public function, class and member has a docstring, and the reference
+  build fails when one is missing.
 
 ### Changed
 - `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can
@@ -66,16 +76,6 @@ To be released together with welt-client 0.13.
   `discover` docstring now says it binds an unbound test.
 - Install hints in error messages and module docs quote their extras
   (`pip install 'ergodic[scm]'`), which zsh would otherwise read as a glob.
-
-### Fixed
-- Docs: the GCM example in the discovery guide passed data twice and raised;
-  the end-to-end discover-then-estimate example passed a `mixed` graph to
-  `estimate_effect` and now re-faces it with `as_kind("dag")`, and says an FCI
-  result goes in as it is or, when knowledge leaves it `mixed`, as a MAG and
-  never a DAG; the graph guide's
-  `as_kind` example imports `mixed`. The graph guide documents the format field.
-- The README quotes the install extras (`pip install 'ergodic[bayes]'`), which
-  zsh would otherwise read as a glob.
 
 ## [0.1.1] - 2026-08-30
 

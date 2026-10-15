@@ -48,6 +48,8 @@ enough for all four. Combine extras with commas: `pip install "ergodic[scm,welt]
 ## Check your environment
 
 Run this program to print the installed version and the optional packages it finds.
+The recording shows only the first line, because the rest depends on what you
+installed.
 
 ```python file="install_check.py"
 import importlib.util
@@ -57,7 +59,7 @@ import ergodic
 # 1. Print the installed version and the graph format it writes.
 print("ergodic", ergodic.__version__, "writes", ergodic.GRAPH_FORMAT)
 
-# 2. Check which optional packages this environment has.
+# 2. Check which optional packages this environment has: found or missing.
 optional = {
     "pymc": "bayes, scm, forecast and latent",
     "jax": "faster sampling, with numpyro",
@@ -69,18 +71,14 @@ for module, use in optional.items():
     print(f"{module:8} {status:8} {use}")
 ```
 
-```output from="install_check.py"
+```output from="install_check.py" lines="1"
 ergodic 0.2.0 writes ergodic.graph/1
-pymc     found    bayes, scm, forecast and latent
-jax      found    faster sampling, with numpyro
-numpyro  found    faster sampling, with jax
-welt     found    welt
 ```
 
 - **Step 1.** The version, and `ergodic.graph/1`: the format `MixedGraph.to_dict()`
   writes. Welt reads this format to convert its graphs.
-- **Step 2.** One line per optional package. This recording comes from an
-  environment with every extra; `missing` means you have not installed it.
+- **Step 2.** One line per optional package, such as `welt     missing  welt`.
+  `missing` means you have not installed the extra in the last column.
 
 ## Speed up sampling
 
