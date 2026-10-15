@@ -118,7 +118,8 @@ To be released together with Welt.
   `AssertionError` (which `python -O` would also have skipped).
 - Error messages and docstrings state limits plainly instead of internal planning
   words ("reserved seam", "not built yet", "phase 1", "MVP", "post-MVP", "when the
-  causal layer lands", "E1", "v1", "lands in D2"): the neural and foundation CATE method names, `ITEResult.explain`,
+  causal layer lands", "E1", "v1", "lands in D2", "in this phase", "Phase-2",
+  "Track-D", "deferred"): the neural and foundation CATE method names, `ITEResult.explain`,
   multi-unit synthetic control, a continuous mediator, per-member ID on a PAG,
   count and categorical forecast columns, scenario pins on endogenous nodes, the
   SCM's custom-mechanism and `engine="dml"` refusals, soft knowledge, and the

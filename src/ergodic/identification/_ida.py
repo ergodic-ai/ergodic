@@ -122,7 +122,7 @@ def ida(
     :func:`identify_effect` per member, returning the multiset as an :class:`IDA`.
     On a PAG or MAG, return the class-level generalized-adjustment answer where it
     applies (a single member-invariant result), and raise when the case needs
-    general per-member ID (deferred: it needs a DAG realization of each MAG
+    general per-member ID (not available: it needs a DAG realization of each MAG
     member). A single graph (DAG or ADMG) raises with a pointer to
     :func:`identify_effect`.
     """

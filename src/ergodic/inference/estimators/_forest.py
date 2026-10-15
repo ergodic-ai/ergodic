@@ -27,8 +27,8 @@ The construction, following the literature review's GRF section:
 * Per-unit variance is the infinitesimal jackknife (the bootstrap-of-little-bags
   grouping), valid under honesty plus subsampling.
 
-Binary treatment in this phase; a continuous treatment via the same local moment is
-a documented deferral (it raises). The variable importance is a depth-weighted,
+Binary treatment only; a continuous treatment via the same local moment is not
+supported (it raises). The variable importance is a depth-weighted,
 normalized split frequency, a driver signal exposed on the result and the estimator.
 """
 

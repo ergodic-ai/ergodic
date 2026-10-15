@@ -5,8 +5,8 @@ Build it with :func:`panel`, naming the entity and time columns. The pair keys
 the rows, so it has to be unique, and rows come back grouped by entity and
 ordered in time. Both index columns stay out of the modeled variables.
 
-Panel identification (fixed effects, difference-in-differences, synthetic
-control) lands later. This is the container, with the panel-specific queries
+The panel designs (difference-in-differences, event studies, synthetic control)
+live in :mod:`ergodic.inference`. This is the container, with the panel-specific queries
 those methods need: the entity and period counts, whether the grid is balanced,
 and which variables are constant within an entity.
 """

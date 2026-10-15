@@ -216,9 +216,8 @@ class SCM:
         A Markovian singleton district fits per node (cheap and exact); a
         confounded district (nodes sharing a ``<->``) does not factorize -- the latent
         couples it -- so it fits as one joint NUTS block with the explicit latents,
-        the gauge, a non-centered parameterization, and a high ``target_accept`` (the
-        Track-D recipe). The composed posterior merges the two the same way it merges
-        per-node fits.
+        the gauge, a non-centered parameterization, and a high ``target_accept``. The
+        composed posterior merges the two the same way it merges per-node fits.
 
         Sequential by default (robust, CI-safe). ``parallel=True`` spreads the
         *singleton* nodes over a process pool with the BLAS/OMP threads pinned in the
@@ -983,7 +982,7 @@ class SCM:
         needs codes); a continuous node as floats. Only the *observed* nodes (those
         carrying a fitted mechanism) are read: a latent node has no column and is
         abducted implicitly into its district children's residuals (the district
-        counterfactual pins the latent at its factual value, the Track-D semantics),
+        counterfactual pins the latent at its factual value),
         so iterating ``self.graph.nodes`` would ``KeyError`` on the latent.
         """
         from ..data import Dataset as _Dataset

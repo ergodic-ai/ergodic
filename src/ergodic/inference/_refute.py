@@ -10,7 +10,7 @@ failure is a real warning, and they cost nothing beyond re-fitting.
 
 This is the model-agnostic layer. Sensitivity to a specific unobserved confounder
 (the Cinelli-Hazlett partial-R-squared, the E-value) is a separate, sharper tool
-that comes later.
+that is not implemented here.
 """
 
 from __future__ import annotations

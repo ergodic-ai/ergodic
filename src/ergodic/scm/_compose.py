@@ -152,7 +152,7 @@ def fit_district(
     seed: int,
     target_accept: float = 0.95,
 ) -> dict[str, FitResult]:
-    """Joint NUTS fit of a confounded district, the Track-D recipe.
+    """Joint NUTS fit of a confounded district.
 
     A district whose nodes share a ``<->`` does not factorize -- the latent couples
     them -- so the district fits as one model rather than per node. Each latent is a

@@ -25,9 +25,9 @@ deep-copy one spec per control world and a typo costs an exception now rather
 than at the twentieth world.
 
 The implicit graph is one hidden regime driving one observed series. A
-``graph=`` keyword exists so the multi-series form has a named seam, and
-anything except ``None`` is refused; internally the engine already takes a
-list of emission tensors, so the seam is real rather than decorative.
+``graph=`` keyword is reserved for a multi-series form, and anything except
+``None`` is refused; internally the engine already takes a list of emission
+tensors.
 """
 
 from __future__ import annotations

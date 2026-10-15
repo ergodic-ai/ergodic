@@ -8,10 +8,10 @@ frame spectra with level, spread, freq, and amp deltas, seconds per fit.
 contract generalizes, with level, rhythm, and spread deltas and a documented
 structural blindness to amplitude.
 
-Deferred by name: a volatility (GARCH) likelihood, whose amp/spread consensus
+Not available: a volatility (GARCH) likelihood, whose amp/spread consensus
 rule the ``consensus()`` helper reserves a slot for, and a harmonic emission.
-Both are new :class:`~ergodic.latent.RegimeLikelihood` subclasses when they
-land, with no engine changes.
+Either would be a new :class:`~ergodic.latent.RegimeLikelihood` subclass, with
+no engine changes.
 """
 
 from __future__ import annotations
