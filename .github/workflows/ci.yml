@@ -19,7 +19,8 @@ jobs:
   check:
     name: make check (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The full suite takes 40-60 minutes on a hosted runner with a cold pytensor cache.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
