@@ -28,7 +28,7 @@ import numpy as np
 from ...inference import KNNRegressor
 from ...inference._learner import _as_learner, _fresh
 from .._ci import CITest
-from .._stats import _norm_cdf
+from .._stats import _norm_two_sided
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -88,7 +88,7 @@ class GCM(CITest):
         mean_r = float(np.mean(product))
         var_r = max(float(np.var(product)), _VAR_FLOOR)
         stat = math.sqrt(n) * mean_r / math.sqrt(var_r)
-        p = 2.0 * (1.0 - _norm_cdf(abs(stat)))
+        p = _norm_two_sided(stat)
         return stat, p, None
 
     # -- internals -----------------------------------------------------------

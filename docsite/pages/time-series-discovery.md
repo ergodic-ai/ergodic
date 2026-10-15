@@ -54,14 +54,14 @@ print(f"{pruned} links pruned; {tests[0]} tests instead of {tests[1]}")
 
 ```output from="time_series.py"
 TimeSeriesDiscoveryResult(pcmci/linear: dag on 9 window nodes, max_lag=2, 5 lagged links, 0 contemporaneous, alpha=0.05, n=496)
-ads[t-1] -> ads[t]  p=0
-ads[t-1] -> visits[t]  p=0
-sales[t-1] -> sales[t]  p=0
-visits[t-2] -> sales[t]  p=4.4e-15
-visits[t-1] -> visits[t]  p=0
+ads[t-1] -> ads[t]  p=1.9e-38
+ads[t-1] -> visits[t]  p=6.1e-35
+sales[t-1] -> sales[t]  p=6.1e-34
+visits[t-2] -> sales[t]  p=4.5e-15
+visits[t-1] -> visits[t]  p=1.5e-26
 granger: [('ads', 'visits'), ('visits', 'sales')]
 True
-9 links pruned; 37 tests instead of 49
+9 links pruned; 37 tests instead of 47
 ```
 
 - **Step 2.** The result holds a window graph over nodes such as `ads[t-1]`. With
@@ -69,8 +69,8 @@ True
   condition on up to twice `max_lag` weeks of history, so the first four weeks start
   no window and `n=496`.
 - **Step 3.** PCMCI finds exactly the five true links: the two cross effects at their
-  true lags and each series' memory of its last week. A p-value smaller than
-  floating-point precision prints as 0.
+  true lags and each series' memory of its last week. The strong links have tiny
+  p-values, and they still rank in order of strength.
 - **Step 4.** Granger finds the same two cross effects, as ordered pairs without lags.
 - **Step 5.** The tiers forbid later variables from causing earlier ones at every
   lag. The links don't change, but the search skips the forbidden ones and runs fewer
