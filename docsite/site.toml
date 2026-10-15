@@ -63,8 +63,13 @@ groups = ["Get started"]
 
 [[nav]]
 label = "Guides"
-page = "estimate-average-effect"
-groups = ["Guides"]
+page = "discover-a-graph"
+groups = ["Discovery", "Identification", "Effects", "Structural causal models", "Forecasting", "Hidden regimes", "Process intelligence"]
+
+[[nav]]
+label = "Concepts"
+page = "graphs-and-marks"
+groups = ["Concepts"]
 
 [[nav]]
 label = "Notebooks"
@@ -76,22 +81,105 @@ label = "Reference"
 page = "reference"
 groups = ["Reference"]
 
+[[nav]]
+label = "Releases"
+page = "changelog"
+groups = ["Releases"]
+
 # Sidebar groups; their order defines the previous/next pager.
 [[groups]]
 label = "Get started"
-pages = [["Your first causal effect", "start"]]
+pages = [
+    ["Your first causal effect", "start"],
+    ["Discover in Welt, estimate in ergodic", "welt"],
+    ["Install and extras", "install"],
+]
 
 [[groups]]
-label = "Guides"
-pages = [["Estimate an average effect", "estimate-average-effect"]]
+label = "Discovery"
+pages = [
+    ["Discover a graph", "discover-a-graph"],
+    ["Add domain knowledge", "domain-knowledge"],
+    ["Choose a method and test", "choose-a-method"],
+    ["Check stability with the bootstrap", "bootstrap-stability"],
+    ["Discover from time series", "time-series-discovery"],
+]
+
+[[groups]]
+label = "Identification"
+pages = [
+    ["Check whether an effect is identifiable", "identify-an-effect"],
+    ["Find adjustment sets, front-door sets and instruments", "adjustment-sets"],
+    ["Estimate a mediated effect", "mediation"],
+]
+
+[[groups]]
+label = "Effects"
+pages = [
+    ["Estimate an average effect", "estimate-average-effect"],
+    ["Refute an estimate", "refute-an-estimate"],
+    ["Estimate heterogeneous effects", "heterogeneous-effects"],
+    ["Target a policy", "target-a-policy"],
+    ["Difference-in-differences and event studies", "difference-in-differences"],
+    ["Synthetic control and interrupted time series", "synthetic-control"],
+]
+
+[[groups]]
+label = "Structural causal models"
+pages = [
+    ["Fit a structural causal model", "fit-an-scm"],
+    ["Simulate interventions and counterfactuals", "interventions-and-counterfactuals"],
+]
+
+[[groups]]
+label = "Forecasting"
+pages = [
+    ["Forecast with causal drivers", "forecast-with-drivers"],
+    ["Backtest a forecast", "backtest-a-forecast"],
+    ["Reconcile a hierarchy", "reconcile-a-hierarchy"],
+    ["Run scenarios", "run-scenarios"],
+]
+
+[[groups]]
+label = "Hidden regimes"
+pages = [
+    ["Recover hidden regimes", "recover-hidden-regimes"],
+    ["Certify and calibrate", "certify-and-calibrate"],
+]
+
+[[groups]]
+label = "Process intelligence"
+pages = [
+    ["Map a process from an event log", "map-a-process"],
+    ["Check conformance and decision points", "conformance-and-decisions"],
+]
+
+[[groups]]
+label = "Concepts"
+pages = [
+    ["Graphs and edge marks", "graphs-and-marks"],
+    ["Assumptions behind each step", "assumptions"],
+    ["Glossary", "glossary"],
+]
 
 [[groups]]
 label = "Notebooks"
-pages = [["All notebooks", "notebooks"]]
+pages = [
+    ["All notebooks", "notebooks"],
+]
 
 [[groups]]
 label = "Reference"
-pages = [["Python reference", "reference"]]
+pages = [
+    ["Python reference", "reference"],
+]
+
+[[groups]]
+label = "Releases"
+pages = [
+    ["Changelog", "changelog"],
+    ["Compatibility with Welt", "compatibility"],
+]
 
 [landing]
 eyebrow = "Python 3.11+ · Apache-2.0"
@@ -131,6 +219,7 @@ modules = [
     ["forecast", "Forecasting"],
     ["latent", "Hidden regimes"],
     ["datasets", "Datasets"],
+    ["welt", "Welt integration"],
 ]
 
 [notebooks]
