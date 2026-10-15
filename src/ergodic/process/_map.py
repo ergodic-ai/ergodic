@@ -46,18 +46,39 @@ def _is_boundary(pair: tuple[str, str]) -> bool:
     return pair[0] == START or pair[1] == END
 
 
-@dataclass(frozen=True)
+def _same_gap(a: float, b: float) -> bool:
+    return a == b or (math.isnan(a) and math.isnan(b))
+
+
+@dataclass(frozen=True, eq=False)
 class ArcStats:
     """Traversal count and gap timing for one arc of the map.
 
     ``mean_gap`` and ``median_gap`` are seconds between the two events. A
-    START or END arc has no second event, so both are NaN there (the one
-    shared ``math.nan`` object, which keeps identically built maps equal).
+    START or END arc has no second event, so both are NaN there. Equality treats
+    two NaN gaps as equal, so identically built maps compare equal on every
+    Python (dataclass equality compares fields one by one from 3.13 on, where
+    ``nan == nan`` is false).
     """
 
     count: int
     mean_gap: float
     median_gap: float
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ArcStats):
+            return NotImplemented
+        return (
+            self.count == other.count
+            and _same_gap(self.mean_gap, other.mean_gap)
+            and _same_gap(self.median_gap, other.median_gap)
+        )
+
+    def __hash__(self) -> int:
+        def key(gap: float) -> float | None:
+            return None if math.isnan(gap) else gap
+
+        return hash((self.count, key(self.mean_gap), key(self.median_gap)))
 
 
 @dataclass(frozen=True)

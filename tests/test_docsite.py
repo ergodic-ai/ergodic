@@ -227,7 +227,12 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     changelog = (output / "changelog.html").read_text()
     release = re.search(r"^## \[(\d+\.\d+\.\d+)\]", (ROOT / "CHANGELOG.md").read_text(), re.M)
     assert release is not None and f">{release[1]}</a> - " in changelog
-    assert check_links(output) == []
+    # The retained versions come from their own tags' builds; until those are placed,
+    # links into them are the only problems, and --retained-elsewhere excuses them.
+    assert check_links(output, site.previous_versions) == []
+    missing = check_links(output)
+    assert missing  # The picker links to every retained version.
+    assert all(any(f"v{v}/" in problem for v in site.previous_versions) for problem in missing)
 
 
 def test_build_fails_on_an_undocumented_public_name(

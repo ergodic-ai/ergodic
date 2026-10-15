@@ -36,6 +36,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     links = commands.add_parser("links", help="check internal links of a built site")
     links.add_argument("output", type=Path, nargs="?", default=ROOT / "site")
+    links.add_argument(
+        "--retained-elsewhere",
+        action="store_true",
+        help="count links into the retained versions (site.toml previous) as present",
+    )
     notebooks = commands.add_parser("notebooks", help="execute every notebook (release CI)")
     notebooks.add_argument("--timeout", type=int, default=1800)
     notebooks.add_argument("--workers", type=int, default=1)
@@ -93,7 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "links":
             from .links import check_links
 
-            problems = check_links(args.output)
+            elsewhere = load_site().previous_versions if args.retained_elsewhere else ()
+            problems = check_links(args.output, elsewhere)
             for problem in problems:
                 print(problem, file=sys.stderr)
             print(f"Links: {len(problems)} problem(s) in {args.output}")

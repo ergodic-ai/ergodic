@@ -22,9 +22,16 @@ def target_file(base: Path, reference: str) -> Path:
     return target / "index.html" if target.is_dir() else target
 
 
-def check_links(output: Path) -> list[str]:
+def check_links(output: Path, elsewhere: tuple[str, ...] = ()) -> list[str]:
+    """Problems with the site's internal links, assets and anchors.
+
+    ``elsewhere`` names version folders (``"0.2.0"`` for ``v0.2.0/``) that another
+    build publishes next to this one: links into them count as present. The full
+    published site is checked without it.
+    """
     problems = []
     root = output.resolve()
+    retained = [root / f"v{version}" for version in elsewhere]
     for page in sorted(root.rglob("*.html")):
         text = page.read_text()
         for match in ATTRIBUTE.finditer(text):
@@ -38,6 +45,8 @@ def check_links(output: Path) -> list[str]:
             where = page.relative_to(root)
             if not target.is_relative_to(root):
                 problems.append(f"{where}: {reference} leaves the site")
+                continue
+            if any(target == folder or target.is_relative_to(folder) for folder in retained):
                 continue
             if not target.exists():
                 problems.append(f"{where}: missing {reference}")

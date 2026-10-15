@@ -1,7 +1,8 @@
 # Discover in Welt, estimate in ergodic
 
 Learn a causal graph with a hosted Welt model, then identify and estimate an effect
-on it in ergodic. Welt also fits the nuisance models inside the estimate.
+on it in ergodic. When the graph leaves variables to adjust for, Welt also fits the
+nuisance models inside the estimate.
 
 !!! need "You'll need"
     - Python 3.11, 3.12 or 3.13.
@@ -72,8 +73,10 @@ depends on the Arrow version Welt serves. Each step prints:
   variables, so a directed path from `nprenatal` to `bweight` is identified by
   adjustment. The record names the adjustment set.
 - **Step 4.** An `EffectEstimate(dml, analytic: …)` line: the average change in
-  grams per extra prenatal visit, its standard error and 95% interval. Then
-  `paid fits: 4`.
+  grams per extra prenatal visit, its standard error and 95% interval. Then the
+  paid fits: 4 (two slots times two folds) when the adjustment set has variables,
+  or 0 when it is empty, because a slot with no features is just a mean and runs
+  locally.
 
 ## Read the provenance
 
@@ -215,8 +218,10 @@ With no directed path from `nprenatal` to `bweight`, `identify_effect` returns t
 `null` strategy: by the graph, the effect is zero. `strategy="dml"` then raises,
 because DML estimates adjustment effects only.
 
-With an empty adjustment set, DML's nuisance models have no features, and
-`WeltLearner` raises before it fits. Leave those slots to the default learner.
+With an empty adjustment set, DML's nuisance models have no features: each one is
+just the training mean. `WeltLearner` fits that locally, with no upload and no paid
+fit, so the program prints `paid fits: 0` and the estimate is the regression slope
+of `bweight` on `nprenatal` across folds.
 
 </details>
 

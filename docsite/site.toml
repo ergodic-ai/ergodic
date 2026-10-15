@@ -31,7 +31,7 @@ commands = [
 
 [versions]
 # Published versions older than this build that stay in the picker (v<version>/), oldest first.
-previous = []
+previous = ["0.2.0"]
 
 [[products]]
 name = "ergodic"

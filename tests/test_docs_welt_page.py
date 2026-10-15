@@ -26,9 +26,7 @@ from scripts.docsite.examples import programs_of  # noqa: E402
 from tests.test_welt import FakeWelt  # noqa: E402
 
 
-def test_the_welt_page_program_runs_against_the_fake(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def _run_page_program(fake: FakeWelt, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
     site = load_site()
     page = site.pages_dir / "welt.md"
     (program,) = [p for p in programs_of(page, site) if p.name == "welt_effect.py"]
@@ -36,7 +34,6 @@ def test_the_welt_page_program_runs_against_the_fake(
 
     monkeypatch.delenv("WELT_WORKSPACE", raising=False)
     monkeypatch.delenv("WELT_BASE_URL", raising=False)
-    fake = FakeWelt()
     real = welt.Client
 
     def client(*args: Any, **kwargs: Any) -> Any:
@@ -49,7 +46,14 @@ def test_the_welt_page_program_runs_against_the_fake(
     printed = io.StringIO()
     with contextlib.redirect_stdout(printed):
         runpy.run_path(str(script), run_name="__main__")
-    lines = printed.getvalue().splitlines()
+    return printed.getvalue().splitlines()
+
+
+def test_the_welt_page_program_runs_against_the_fake(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake = FakeWelt()
+    lines = _run_page_program(fake, monkeypatch, tmp_path)
 
     # The fake's discovery returns a chain over the uploaded column order (the last
     # column left unconnected), so the page's story holds: a path from nprenatal to
@@ -67,6 +71,34 @@ def test_the_welt_page_program_runs_against_the_fake(
     assert sent[("POST", "fits")] == 4
     assert sent[("POST", "predictors")] == 8
     assert sent[("POST", "datasets")] == 5
+
+
+def test_the_welt_page_program_runs_when_the_graph_leaves_nothing_to_adjust(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The graph production Arrow returned on 2026-10-15: nprenatal has no parents.
+
+    The adjustment set is empty, so both DML slots are training means fitted locally:
+    the page still prints an estimate, and the only paid request is the discovery.
+    """
+    edges = [
+        ("nprenatal", "bweight"),
+        ("fage", "mage"),
+        ("fage", "medu"),
+        ("mage", "medu"),
+    ]
+    flat = [[0.0 if i == j else 0.25 for j in range(5)] for i in range(5)]
+    fake = FakeWelt(native={"arrow": {"values": flat, "edges": edges, "decoder": {"name": "x"}}})
+    lines = _run_page_program(fake, monkeypatch, tmp_path)
+
+    assert "bweight <-- nprenatal" in lines
+    assert any(line.startswith("Identification(adjustment:") for line in lines)
+    assert any(line.startswith("EffectEstimate(dml, analytic:") for line in lines)
+    assert lines[-1] == "paid fits: 0"
+    sent = Counter((method, path.split("/")[2]) for method, path in fake.calls)
+    assert sent[("POST", "discoveries")] == 1
+    assert sent[("POST", "fits")] == 0
+    assert sent[("POST", "predictors")] == 0
 
 
 # CDFM in the fake: an adaptive threshold of 0.3 and four native edges above it, three

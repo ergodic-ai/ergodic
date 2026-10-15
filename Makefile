@@ -32,7 +32,7 @@ docs: ## Build the Graphite docs site into site/ (v<version>/ plus the current r
 docs-check: ## Run page programs one at a time (slow ones with DOCS_SLOW=1); check excerpts, outputs, links
 	uv run python -m scripts.docsite check
 	uv run python -m scripts.docsite build --output build/docs-check
-	uv run python -m scripts.docsite links build/docs-check
+	uv run python -m scripts.docsite links --retained-elsewhere build/docs-check
 
 docs-record: ## Rerun page programs and write their output panels (review the diff)
 	uv run python -m scripts.docsite record

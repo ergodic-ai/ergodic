@@ -51,11 +51,6 @@ def _features(X: Any) -> npt.NDArray[np.float64]:
     matrix = np.asarray(X, dtype=np.float64)
     if matrix.ndim != 2:
         raise ValueError(f"X must be a 2-D matrix; got shape {matrix.shape}")
-    if matrix.shape[1] == 0:
-        raise ValueError(
-            "WeltLearner needs at least one feature column, and this slot has none (an "
-            "empty adjustment set). Leave this slot to the default learner"
-        )
     if matrix.shape[0] == 0:
         raise ValueError("X has no rows")
     return matrix
@@ -85,6 +80,11 @@ class WeltLearner:
     is a paid prediction, sent in batches no larger than the model's prediction-row
     limit. DML with ``n_folds=k`` fits ``2 * k`` times.
 
+    A slot with no feature columns (an empty adjustment set) has nothing for a model
+    to learn: its conditional mean is the training mean, or the class frequencies for
+    classification. The learner fits that locally, with no upload, no paid fit and no
+    charge to ``max_fits``, and ``predictor_id_`` is ``None``.
+
     The learner and its clones share one budget of ``max_fits`` fits. It caps paid
     fits only, not predictions: each fit is followed by one prediction call per
     batch of held-out rows (DML on 8,000 rows with five folds and a 100-row limit
@@ -113,8 +113,10 @@ class WeltLearner:
             leaves the job running in Welt.
 
     Attributes:
-        predictor_id_: The fitted Welt predictor's id.
-        model_version_: The exact model version Welt fitted.
+        predictor_id_: The fitted Welt predictor's id; ``None`` after a no-feature
+            (local) fit.
+        model_version_: The exact model version Welt fitted; ``None`` after a
+            no-feature fit.
         classes_: The class labels, sorted (classification only).
         supports_sample_weight: Always ``False``; read by ergodic's weighted slots.
     """
@@ -224,7 +226,8 @@ class WeltLearner:
         """Fit a Welt predictor on these rows: one paid fit.
 
         Args:
-            X: The feature matrix, one row per unit and at least one column.
+            X: The feature matrix, one row per unit. With no columns the fit is the
+                local training mean (or class frequencies) and costs nothing.
             y: The target, one value per row: numbers for regression, labels for
                 classification.
             sample_weight: Must be ``None``. Welt fits take no row weights, and a
@@ -234,8 +237,8 @@ class WeltLearner:
             This learner, fitted.
 
         Raises:
-            ValueError: ``sample_weight`` was given, ``X`` has no columns or rows,
-                or ``y`` does not match ``X``. Nothing is uploaded.
+            ValueError: ``sample_weight`` was given, ``X`` has no rows, or ``y``
+                does not match ``X``. Nothing is uploaded.
             RuntimeError: The shared ``max_fits`` budget is spent.
         """
         if sample_weight is not None:
@@ -254,10 +257,12 @@ class WeltLearner:
                 raise ValueError("regression targets must be finite")
         else:
             labels = [_label(value) for value in target]
+        for name in ("predictor_id_", "model_version_", "classes_", "_order", "_local"):
+            self.__dict__.pop(name, None)
+        if matrix.shape[1] == 0:
+            return self._fit_local(labels)
         columns = [f"x{i}" for i in range(matrix.shape[1])]
         rows = [[*row, label] for row, label in zip(matrix_rows(matrix), labels, strict=True)]
-        for name in ("predictor_id_", "model_version_", "classes_", "_order"):
-            self.__dict__.pop(name, None)
         with using(self.client) as client:
             # The free catalogue read comes first, so a failed lookup costs no fit
             # and cannot strand a paid predictor.
@@ -278,13 +283,27 @@ class WeltLearner:
             predictor = job.result(timeout=self.timeout)
         if predictor.get("task") != self.task:
             raise ValueError("Welt fitted a predictor for a different task")
-        self.predictor_id_: str = predictor["id"]
-        self.model_version_: str = predictor["model_version"]
+        self.predictor_id_: str | None = predictor["id"]
+        self.model_version_: str | None = predictor["model_version"]
         self._n_features = matrix.shape[1]
         if self.task == "classification":
             classes = np.asarray(predictor["classes"])
             self._order = np.argsort(classes, kind="stable")
             self.classes_ = classes[self._order]
+        return self
+
+    def _fit_local(self, labels: list[Any]) -> Self:
+        """The no-feature fit: the training mean, or the class frequencies, kept here."""
+        self.predictor_id_ = None
+        self.model_version_ = None
+        self._n_features = 0
+        if self.task == "regression":
+            self._local: npt.NDArray[Any] = np.asarray([np.mean(labels)], dtype=np.float64)
+            return self
+        classes, counts = np.unique(np.asarray(labels), return_counts=True)
+        self.classes_ = classes
+        self._order = np.arange(len(classes))
+        self._local = counts / counts.sum()
         return self
 
     def _limit(self, client: Any) -> int | None:
@@ -295,12 +314,16 @@ class WeltLearner:
                 return int(limit) if limit else None
         return None
 
-    def _predict(self, X: npt.NDArray[np.float64], probabilities: bool) -> list[dict[str, Any]]:
+    def _checked(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         if not hasattr(self, "predictor_id_"):
             raise RuntimeError("WeltLearner is not fitted; call fit first")
         matrix = _features(X)
         if matrix.shape[1] != self._n_features:
             raise ValueError(f"X has {matrix.shape[1]} columns; the fit had {self._n_features}")
+        return matrix
+
+    def _predict(self, X: npt.NDArray[np.float64], probabilities: bool) -> list[dict[str, Any]]:
+        matrix = self._checked(X)
         columns = [f"x{i}" for i in range(matrix.shape[1])]
         rows = matrix_rows(matrix)
         size = self._budget.prediction_rows.get((self.model, self.task)) or len(rows)
@@ -334,6 +357,11 @@ class WeltLearner:
             Numbers in the target's units for regression, class labels for
             classification.
         """
+        if "_local" in self.__dict__:
+            n = self._checked(X).shape[0]
+            if self.task == "regression":
+                return np.full(n, self._local[0], dtype=np.float64)
+            return np.full(n, self.classes_[int(np.argmax(self._local))])
         answers = self._predict(X, probabilities=False)
         values = [value for answer in answers for value in answer["predictions"]]
         if self.task == "regression":
@@ -341,6 +369,8 @@ class WeltLearner:
         return np.asarray(values)
 
     def _predict_proba(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        if "_local" in self.__dict__:
+            return np.tile(self._local, (self._checked(X).shape[0], 1))
         answers = self._predict(X, probabilities=True)
         blocks = []
         for answer in answers:
