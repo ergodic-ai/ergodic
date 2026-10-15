@@ -80,7 +80,7 @@ effect by predicted fifth: [-1.63 -0.07  0.95  2.12  3.92]
 `effects.explain()` returns a `Heterogeneity` record. Its methods summarize the
 doubly robust scores, not the per-unit points, so their intervals are valid even
 when the per-unit model is wrong (Semenova and Chernozhukov, 2021; Chernozhukov,
-Demirer, Duflo and Fernández-Val, 2018; Yadlowsky and others, 2021).
+Demirer, Duflo and Fernández-Val, 2025; Yadlowsky and others, 2024).
 
 | Method | Question it answers |
 | --- | --- |

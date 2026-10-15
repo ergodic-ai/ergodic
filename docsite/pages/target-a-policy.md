@@ -55,6 +55,7 @@ tree = policy_tree(effects, depth=2)
 print(tree.describe())
 in_sample = (tree.value - tree.treat_none_value) / 2  # value is on a doubled scale
 print(f"gain over treating no one, in sample: {in_sample:.3f}")
+print(f"best possible gain, learning half: {np.mean(np.maximum(true_effect[learn], 0)):.3f}")
 
 # 4. Evaluate the rule on the held-out half, with fresh doubly robust scores.
 held_out = dr_scores(identify_effect(graph, "coached", "outcome"), test, random_state=0)
@@ -68,7 +69,7 @@ print(f"held-out share treated: {treat.mean():.2f}")
 # 5. Check the rule against the truth on the held-out half.
 truth = true_effect[~learn]
 print(f"true gain: {np.mean(treat * truth):.3f}")
-print(f"best possible gain: {np.mean(np.maximum(truth, 0)):.3f}")
+print(f"best possible gain, held-out half: {np.mean(np.maximum(truth, 0)):.3f}")
 ```
 
 ```output from="target_policy.py"
@@ -83,18 +84,19 @@ else:  # need > -0.01998
   else:  # age > -0.04976
     -> treat=1 (n=503)
 gain over treating no one, in sample: 0.204
+best possible gain, learning half: 0.190
 gain over treating no one, held out: 0.143 [0.095, 0.192]
 held-out share treated: 0.26
 true gain: 0.188
-best possible gain: 0.195
+best possible gain, held-out half: 0.195
 ```
 
 - **The rule.** The tree splits on `need` near 0 and then on `age`, the two
   variables that drive the effect. One small leaf, 13 people with very low `age`,
   is noise.
 - **In sample.** On the half it was learned from, the rule seems to add 0.20 per
-  person over treating no one. That is above even the best possible gain, 0.195,
-  because the tree was chosen to make exactly those scores look good.
+  person over treating no one. That is above even the best possible gain on that
+  half, 0.190, because the tree was chosen to make exactly those scores look good.
 - **Held out.** On the other half the estimate is 0.14, with a 95% interval
   from 0.10 to 0.19. Use this number.
 - **Truth.** The rule's true gain on the held-out half is 0.19, inside the
