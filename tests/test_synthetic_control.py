@@ -84,8 +84,10 @@ def test_result_record_shape() -> None:
     est = synthetic_control(data, "y", treated="treated", at=POST_FROM)
     assert est.target is EffectTarget.ATT
     assert est.estimator == "synthetic_control"
-    assert est.kind == "analytic"
+    # regression (API-149): the kind said "analytic" with no standard error
+    assert est.kind == "placebo"
     assert est.std_error is None
+    assert repr(est).startswith("SyntheticControlEffect(synthetic_control, placebo:")
     assert est.learners == {}
     assert est.n == (1 + N_DONORS) * N_PERIODS
     assert est.treated_unit == "treated"

@@ -112,6 +112,12 @@ To be released together with Welt.
   licensed; they say which files derive from public-domain US government data
   and which are authors' replication data without an explicit licence, as the
   NOTICE does.
+- Reprs: `CATEResult`, `ITEResult`, `DiDEffect`, `SyntheticControlEffect`, and
+  `ITSEffect` print the short one-line summary again (with their own class name)
+  instead of a field-by-field dump of every array, and `DiscoveryResult` prints
+  the graph kind as `cpdag` rather than `GraphKind.CPDAG`.
+- `SyntheticControlEffect.kind` is `"placebo"` instead of `"analytic"`: there is
+  no standard error, and the interval is a placebo band.
 
 ## [0.1.1] - 2026-08-30
 

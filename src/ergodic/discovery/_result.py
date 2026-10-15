@@ -41,7 +41,7 @@ class DiscoveryResult:
 
     def __repr__(self) -> str:
         ingredient = self.test if self.test is not None else self.score
-        body = f"{self.method}/{ingredient}: {self.graph.kind}"
+        body = f"{self.method}/{ingredient}: {self.graph.kind.value}"
         body += f", {len(self.graph.nodes)} nodes, {len(self.graph.edges)} edges"
         if self.alpha is not None:
             body += f", alpha={self.alpha:g}"

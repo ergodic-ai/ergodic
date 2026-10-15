@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 __all__ = ["SyntheticControlEffect", "synthetic_control"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class SyntheticControlEffect(EffectEstimate):
     """A synthetic-control fit: the weights, the two paths, and placebo inference.
 
@@ -42,7 +42,8 @@ class SyntheticControlEffect(EffectEstimate):
     treated unit's post-to-pre RMSPE ratio among the donor placebos, and
     ``placebo_gaps`` holds each donor's post-period placebo gaps. There is no
     sampling story for one treated unit, so ``std_error`` stays ``None`` on
-    purpose and ``interval`` is a placebo band instead.
+    purpose, ``interval`` is a placebo band instead, and ``kind`` is
+    ``"placebo"``.
     """
 
     design: Design | None = None
@@ -334,7 +335,7 @@ def synthetic_control(
         estimator="synthetic_control",
         learners={},
         n=(1 + len(kept)) * len(periods),
-        kind="analytic",
+        kind="placebo",
         diagnostics={
             "n_donors": float(len(kept)),
             "n_pre": float(n_pre),

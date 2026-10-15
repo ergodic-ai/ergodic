@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 __all__ = ["ITSEffect", "interrupted_time_series"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class ITSEffect(EffectEstimate):
     """A segmented-regression fit around one break.
 

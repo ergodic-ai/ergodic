@@ -271,7 +271,7 @@ class PerUnitEffect:
         return f"{name}({self.source or head}, {self.kind}: {body}, n={self.n})"
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class CATEResult(PerUnitEffect):
     """Conditional average treatment effects, with an explainability hook.
 
@@ -323,7 +323,7 @@ class CATEResult(PerUnitEffect):
         )
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class ITEResult(PerUnitEffect):
     """Individual treatment effects from a structural model (the twin network).
 
