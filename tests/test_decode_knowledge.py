@@ -597,3 +597,42 @@ def test_the_latent_searches_keep_a_confounded_pair_neither_side_causes(name: st
     graph = search.fit(knowledge=knowledge).graph
     assert graph.get_edge("X", "Y").is_bidirected
     assert knowledge.violations(graph) == []
+
+
+# -- versioned cardinality decoders (DEC-079: an id never changes its results) -----------
+
+# Recorded with ergodic 0.2.1 (main 3caba1a) on the research matrix with
+# forbid_adjacency(A, B), root(C) and require(D, B): its expected_count and soft_f1.
+V021_BUDGET = 4
+V021_EDGES = ["A <-- C", "B <-- C", "B <-- D", "C --> D"]
+
+
+@EXPECTED_CONFLICTS
+@pytest.mark.parametrize("rule", ["expected_count", "soft_f1"])
+def test_v1_reproduces_0_2_1_under_hard_knowledge_and_v2_settles_the_budget(rule: str) -> None:
+    knowledge = DomainKnowledge().forbid_adjacency("A", "B").root("C").require("D", "B")
+    v1 = decode(pair_state(), f"{rule}_v1", knowledge=knowledge)
+    assert v1.diagnostics["edge_budget"] == V021_BUDGET
+    assert _edges(v1) == V021_EDGES
+    v2 = decode(pair_state(), f"{rule}_v2", knowledge=knowledge)
+    # A -> B (0.80) and the edges into C no longer count toward the budget.
+    assert v2.diagnostics["edge_budget"] == 3
+    assert _edges(v2) == ["A <-- C", "B <-- D", "C --> D"]
+    assert decode(pair_state(), rule, knowledge=knowledge).graph == v2.graph
+
+
+@pytest.mark.parametrize("rule", ["expected_count", "soft_f1"])
+def test_v1_and_v2_agree_without_knowledge(rule: str) -> None:
+    rng = np.random.default_rng(21)
+    for size in (3, 5, 7):
+        for probs in (
+            EdgeProbabilities(NAMES_7[:size], random_independent(size, rng)),
+            EdgeProbabilities(NAMES_7[:size], random_pair_state(size, rng), kind="pair_state"),
+        ):
+            v1 = decode(probs, f"{rule}_v1")
+            v2 = decode(probs, f"{rule}_v2")
+            assert v1.graph == v2.graph
+            assert v1.diagnostics["edge_budget"] == v2.diagnostics["edge_budget"]
+
+
+NAMES_7 = tuple("ABCDEFG")

@@ -54,9 +54,12 @@ Planned as 0.3.0.
   knowledge-free decode, which can cost more than the constrained one, and a
   `KnowledgeConflictWarning` on strong conflicts. Code that turns warnings into
   errors will see it; pass `audit=False` or filter the category.
-- `expected_count_v1` and `soft_f1_v1` with hard knowledge take their edge budget
-  from the pair states with the constraints applied (a forbidden direction holds no
-  mass, a required one all of it). Without knowledge nothing changes.
+- The decoder aliases `"expected_count"` and `"soft_f1"` now resolve to the new
+  `expected_count_v2` and `soft_f1_v2`, which take their edge budget from the pair
+  states with the hard knowledge applied (a forbidden direction holds no mass, a
+  required one all of it), so a soft statement near 1 gives the hard result's budget.
+  `expected_count_v1` and `soft_f1_v1` keep their 0.2 results; without knowledge the
+  two versions agree.
 - The discovery searches (`PC`, `FCI`, `RFCI`, `GES`, `BOSS`, `GRaSP`, `HillClimb`,
   `AStar`, `MMPC`, `DirectLiNGAM`, `Glasso`, `PCMCI`) and `bootstrap` raise
   `ValueError` on soft statements instead of dropping them; pass `knowledge.hard()`.

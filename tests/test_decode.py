@@ -428,13 +428,20 @@ def test_versioned_ids_and_aliases_resolve_alike() -> None:
         "greedy_v1",
         "exact_map_v1",
         "expected_count_v1",
+        "expected_count_v2",
         "soft_f1_v1",
+        "soft_f1_v2",
         "pair_sampler_v1",
         "perturb_and_map_v1",
     }
     with pytest.raises(TypeError):
         DECODERS["greedy_v1"] = "changed"  # type: ignore[index]
     assert all(isinstance(summary, str) for summary in DECODERS.values())
+    # A short name reads as the latest version.
+    assert Decoder("expected_count").method == "expected_count_v2"
+    assert Decoder("soft_f1").method == "soft_f1_v2"
+    assert Decoder("expected_count_v1").method == "expected_count_v1"
+    assert "superseded by expected_count_v2" in DECODERS["expected_count_v1"]
     config = Decoder("exact_map")
     assert config.method == "exact_map_v1" and not config.stochastic
     assert config.decode(probs).graph == decode(probs, "exact_map").graph

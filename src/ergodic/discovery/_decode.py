@@ -83,13 +83,27 @@ _SPECS: Final[dict[str, _Spec]] = {
         "expected_count_cardinality_v1",
         False,
         True,
-        "the MAP order's best K edges, K the rounded expected edge count",
+        "superseded by expected_count_v2: budget counts hard-forbidden mass",
+    ),
+    "expected_count_v2": _Spec(
+        "expected_count_cardinality_v1",
+        False,
+        True,
+        "the MAP order's best K edges, K the rounded expected edge count left open "
+        "by the hard knowledge",
     ),
     "soft_f1_v1": _Spec(
         "soft_f1_cardinality_v1",
         False,
         True,
-        "the MAP order's best K edges, K from a label-free soft-F1 proxy",
+        "superseded by soft_f1_v2: budget counts hard-forbidden mass",
+    ),
+    "soft_f1_v2": _Spec(
+        "soft_f1_cardinality_v1",
+        False,
+        True,
+        "the MAP order's best K edges, K from a label-free soft-F1 proxy over what "
+        "the hard knowledge leaves open",
     ),
     "pair_sampler_v1": _Spec(
         "independent_pair_cycle_rejection_v1",
@@ -110,11 +124,25 @@ DECODERS: Final[Mapping[str, str]] = MappingProxyType(
 )
 """The registered decoders: versioned id to a one-line summary (read-only)."""
 
-_ALIASES: Final = {name.rsplit("_v", 1)[0]: name for name in _SPECS}
+# A short name reads as its latest version.
+_ALIASES: Final = {
+    base: max((n for n in _SPECS if n.rsplit("_v", 1)[0] == base), key=lambda n: int(n[-1]))
+    for base in {name.rsplit("_v", 1)[0] for name in _SPECS}
+}
+_CARDINALITY: Final = {
+    "expected_count_v1": ("expected_count", False),
+    "expected_count_v2": ("expected_count", True),
+    "soft_f1_v1": ("soft_f1", False),
+    "soft_f1_v2": ("soft_f1", True),
+}
 
 
 def resolve_decoder(method: str) -> str:
-    """The versioned decoder id for ``method`` (``"greedy"`` reads as ``"greedy_v1"``)."""
+    """The versioned decoder id for ``method``.
+
+    A short name reads as its latest version: ``"greedy"`` as ``"greedy_v1"``,
+    ``"expected_count"`` as ``"expected_count_v2"``.
+    """
     if not isinstance(method, str):
         raise TypeError(f"method must be a decoder id string, got {type(method).__name__}")
     key = method.lower()
@@ -123,7 +151,9 @@ def resolve_decoder(method: str) -> str:
     if key in _ALIASES:
         return _ALIASES[key]
     names = ", ".join(sorted(DECODERS))
-    raise ValueError(f"unknown decoder {method!r}; use one of: {names} (or drop the _v1)")
+    raise ValueError(
+        f"unknown decoder {method!r}; use one of: {names} (or drop the version for the latest)"
+    )
 
 
 @dataclass(frozen=True)
@@ -333,10 +363,15 @@ def decode(
       own cut (CDFM's adaptive one) choose the edges instead.
     - ``"exact_map"`` (``exact_map_v1``): the DAG maximizing the factorized pair
       score, solved exactly by A* over topological orders.
-    - ``"expected_count"`` / ``"soft_f1"`` (``expected_count_v1``,
-      ``soft_f1_v1``): the best ``K`` edges compatible with the exact MAP
+    - ``"expected_count"`` / ``"soft_f1"`` (``expected_count_v2``,
+      ``soft_f1_v2``): the best ``K`` edges compatible with the exact MAP
       order, ``K`` the rounded expected edge count or the size that maximizes a
-      label-free soft-F1 proxy. They may keep edges a MAP decoder drops.
+      label-free soft-F1 proxy, both over the pair states with the hard
+      knowledge applied (a forbidden direction holds no mass, a required one all
+      of it). They may keep edges a MAP decoder drops. ``expected_count_v1`` and
+      ``soft_f1_v1`` stay available with their 0.2 budget, which also counts the
+      mass of directions the hard knowledge forbids; without knowledge the two
+      versions agree.
     - ``"pair_sampler"`` / ``"perturb_and_map"`` (``pair_sampler_v1``,
       ``perturb_and_map_v1``): ``samples`` candidate DAGs, from independent
       pair-state draws with random-order cycle rejection, or from exact MAP under
@@ -365,8 +400,8 @@ def decode(
     states are multiplied by ``exp(knowledge.log_odds(variables))`` and the pair
     is renormalized; every decoder then runs unchanged on those states, so
     ``exact_map`` is exact on the combined score (pair score plus
-    :meth:`~ergodic.DomainKnowledge.log_prior`). The cardinality decoders take
-    their edge budget from the same weighted states with the hard constraints
+    :meth:`~ergodic.DomainKnowledge.log_prior`). The ``_v2`` cardinality decoders
+    take their edge budget from the same weighted states with the hard constraints
     applied (a forbidden direction holds no mass, a required one all of it). A
     soft weight on a direction a hard constraint forbids, or on a pair a required
     edge settles, is dropped, so it changes nothing for any decoder. Greedy with
@@ -568,8 +603,8 @@ def _run(
         if decoder == "exact_map_v1":
             graph = _graph_for_order(weights, order, constraints)
         else:
-            rule = "expected_count" if decoder == "expected_count_v1" else "soft_f1"
-            budget_states = _settled_pair_states(pair, constraints)
+            rule, settled = _CARDINALITY[decoder]
+            budget_states = _settled_pair_states(pair, constraints) if settled else pair
             edge_budget = (
                 _expected_edge_count(budget_states)
                 if rule == "expected_count"

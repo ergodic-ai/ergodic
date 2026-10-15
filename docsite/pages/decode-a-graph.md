@@ -94,8 +94,8 @@ Every decoder reads the pair-state view (see
 | --- | --- | --- |
 | `"greedy"` (`greedy_v1`, default) | Each pair's better direction when `w > 0` (or its value is above `threshold`), strongest first, skipping cycles. | `threshold` |
 | `"exact_map"` (`exact_map_v1`) | The DAG with the best total score, found exactly by A* search over orderings. | `max_nodes` |
-| `"expected_count"` (`expected_count_v1`) | The best `K` edges compatible with the exact ordering, `K` the rounded expected edge count. | `max_nodes` |
-| `"soft_f1"` (`soft_f1_v1`) | The same, with `K` from a label-free F1 estimate. | `max_nodes` |
+| `"expected_count"` (`expected_count_v2`) | The best `K` edges compatible with the exact ordering, `K` the rounded expected edge count of what the hard knowledge leaves open. | `max_nodes` |
+| `"soft_f1"` (`soft_f1_v2`) | The same, with `K` from a label-free F1 estimate. | `max_nodes` |
 | `"pair_sampler"` (`pair_sampler_v1`) | Draws each pair's state, adds edges in random order, drops those that close a cycle. | `samples`, `seed` |
 | `"perturb_and_map"` (`perturb_and_map_v1`) | Exact MAP under randomly perturbed pair scores, once per sample. | `samples`, `seed`, `max_nodes` |
 
@@ -103,6 +103,11 @@ Greedy is the default. In the research it came from it matched exact MAP on 238 
 graphs. It isn't best everywhere: on one physical benchmark the expected-count decoder
 scored better. The decoders that search orderings exactly refuse more than `max_nodes`
 variables (20 by default), because that search can grow exponentially.
+
+A short name reads as the latest version, and a versioned id never changes its
+results. `expected_count_v1` and `soft_f1_v1` are the 0.2 decoders: their budget `K`
+also counts the probability of edges your hard knowledge forbids. Without knowledge
+they agree with `_v2`.
 
 ## Read the result
 
@@ -256,7 +261,7 @@ exactly. `knowledge.log_odds(variables)` shows the weights and
 - **0.5 changes nothing.** Below 0.5 is refused: state the opposite instead.
 - **A hard constraint wins.** A soft weight on a direction a hard constraint forbids,
   or on a pair a required edge settles, is dropped, for every decoder and for the
-  edge budget of `"expected_count"` and `"soft_f1"`.
+  edge budget of `"expected_count"` and `"soft_f1"` (their `_v2`).
 - **Close to 1 acts like the hard constraint** whenever the hard result is reachable.
   Two exceptions follow from what soft means. A soft order isn't transitive:
   `order("a", "b", confidence=c)` weighs only the direct edge `b --> a`, while hard
