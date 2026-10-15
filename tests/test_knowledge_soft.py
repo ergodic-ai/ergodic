@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pytest
@@ -58,7 +59,7 @@ def test_hard_only_repr_and_equality_are_unchanged() -> None:
         "DomainKnowledge(vars=8, required=1, forbidden=0, precedes=23, roots=0, sinks=0, "
         "confounded=0)"
     )
-    # The statement log takes no part in equality: built another way, still equal.
+    # Built another way, still equal.
     rebuilt = DomainKnowledge(
         variables=knowledge.variables,
         required=knowledge.required,
@@ -130,53 +131,138 @@ def test_soft_statements_leave_every_hard_projection_alone() -> None:
     assert soft.apply_to(graph) == graph
 
 
-def test_statements_list_what_was_said_once_each() -> None:
+def test_statements_read_the_stored_fields_so_equal_knowledge_lists_alike() -> None:
     knowledge = (
         DomainKnowledge()
         .with_tiers([["x", "a"], ["b"]])
-        .forbid_between(["a"], ["c", "b"])
+        .forbid_between(["a"], ["c"])
         .root("r1", "r2")
         .confound("a", "c")
-        .restrict_to([("a", "b"), ("b", "c")])
+        .forbid_adjacency("b", "c")
+        .restrict_to([("a", "b"), ("b", "c"), ("a", "c")])
         .order("b", "c", confidence=0.6)
         .forbid_adjacency("a", "x", confidence=0.9)
     )
     texts = [str(s) for s in knowledge.statements()]
     assert texts == [
-        "tiers [a, x] < [b]",
-        "no edge from [a] into [b, c]",
+        "no edge between b and c",
+        "no a -> c",
+        "a before b",
+        "x before b",
         "r1 is a root",
         "r2 is a root",
         "a <-> c",
-        "edges only on 2 skeleton pairs",
+        "edges only on 3 skeleton pairs",
         "no edge between a and x",
         "b before c",
     ]
     assert [s.confidence for s in knowledge.statements()][-2:] == [0.9, 0.6]
-
-
-def test_statements_cover_hard_content_set_without_a_builder() -> None:
-    knowledge = DomainKnowledge(
-        required=frozenset({("a", "b")}),
-        forbidden=frozenset({("c", "d"), ("d", "c"), ("a", "c")}),
-        precedes=frozenset({("a", "d")}),
-        confounded=frozenset({frozenset({"b", "d"})}),
-        allowed_adjacencies=frozenset({frozenset({"a", "b"})}),
+    # Equal knowledge, however it was built, lists the same statements.
+    assert DomainKnowledge().order("A", "C") == DomainKnowledge().with_tiers([["A"], ["C"]])
+    assert (
+        DomainKnowledge().order("A", "C").statements()
+        == DomainKnowledge().with_tiers([["A"], ["C"]]).statements()
     )
-    assert [str(s) for s in knowledge.statements()] == [
-        "a -> b",
-        "no a -> c",
-        "no edge between c and d",
-        "a before d",
-        "b <-> d",
-        "edges only on 1 skeleton pair",
-    ]
+    rebuilt = DomainKnowledge(
+        variables=knowledge.variables,
+        required=knowledge.required,
+        forbidden=knowledge.forbidden,
+        nonadjacent=knowledge.nonadjacent,
+        precedes=knowledge.precedes,
+        roots=knowledge.roots,
+        confounded=knowledge.confounded,
+        allowed_adjacencies=knowledge.allowed_adjacencies,
+        soft=knowledge.soft,
+    )
+    assert rebuilt == knowledge and rebuilt.statements() == knowledge.statements()
 
 
-def test_a_confounded_pair_banned_from_adjacency_is_a_conflict() -> None:
-    knowledge = DomainKnowledge().confound("a", "b").forbid_adjacency("b", "a")
-    assert any("banned from being adjacent" in c for c in knowledge.conflicts())
-    assert DomainKnowledge().confound("a", "b").forbid("a", "b").conflicts() == []
+def test_replace_leaves_no_stale_statement() -> None:
+    from dataclasses import replace
+
+    emptied = replace(DomainKnowledge().require("A", "B"), required=frozenset())
+    assert emptied.statements() == ()
+
+
+def test_two_directed_bans_differ_from_an_adjacency_ban() -> None:
+    both = DomainKnowledge().forbid("a", "b").forbid("b", "a")
+    ban = DomainKnowledge().forbid_adjacency("a", "b")
+    assert both.forbidden == ban.forbidden and ban.nonadjacent == {frozenset("ab")}
+    assert both != ban
+    assert [str(s) for s in both.statements()] == ["no a -> b", "no b -> a"]
+    assert [str(s) for s in ban.statements()] == ["no edge between a and b"]
+
+
+def test_confounded_and_neither_causes_the_other_is_consistent() -> None:
+    knowledge = DomainKnowledge().confound("a", "b").forbid("a", "b").forbid("b", "a")
+    assert knowledge.conflicts() == []
+    assert knowledge.violations(admg(["a <-> b"])) == []
+    assert knowledge.violations(dag(["a -> b"])) != []
+    banned = DomainKnowledge().confound("a", "b").forbid_adjacency("b", "a")
+    assert any("banned from being adjacent" in c for c in banned.conflicts())
+    assert banned.violations(admg(["a <-> b"])) != []
+    skeleton = DomainKnowledge().confound("a", "b").restrict_to([("a", "c")])
+    assert any("outside the skeleton" in c for c in skeleton.conflicts())
+
+
+def test_hard_drops_the_soft_statements() -> None:
+    knowledge = DomainKnowledge().require("a", "b").root("c", confidence=0.9)
+    assert knowledge.hard() == DomainKnowledge().require("a", "b").with_variables("c")
+    assert knowledge.hard().soft == frozenset()
+
+
+# -- direct construction is checked --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("kind", "args", "confidence", "error", "match"),
+    [
+        ("maybe", ("a", "b"), 0.8, ValueError, "unknown statement kind"),
+        ("require", ("a",), 0.8, ValueError, "two variable names"),
+        ("require", ["a", "b"], 0.8, TypeError, "args must be a tuple"),
+        ("root", ("a", "b"), 0.8, ValueError, "one variable name"),
+        ("forbid_between", (("a",),), 0.8, ValueError, "two tuples"),
+        ("tiers", ("a", "b"), 0.8, ValueError, "tiers"),
+        ("restrict_to", (("a", "a"),), 0.8, ValueError, "distinct"),
+        ("require", ("a", "b"), 1.0, ValueError, r"\[0.5, 1\)"),
+        ("require", ("a", "b"), 0.3, ValueError, r"\[0.5, 1\)"),
+        ("require", ("a", "b"), float("nan"), ValueError, r"\[0.5, 1\)"),
+        ("require", ("a", "b"), True, TypeError, "confidence"),
+        ("confound", ("a", "b"), 0.8, ValueError, "hard only"),
+        ("order", ("a", "a"), 0.8, ValueError, "distinct"),
+    ],
+)
+def test_a_statement_is_validated_on_construction(
+    kind: str, args: Any, confidence: Any, error: type[Exception], match: str
+) -> None:
+    with pytest.raises(error, match=match):
+        KnowledgeStatement(kind, args, confidence)
+
+
+def test_soft_takes_soft_statements_only() -> None:
+    with pytest.raises(ValueError, match="soft statements only"):
+        DomainKnowledge(soft=frozenset({KnowledgeStatement("require", ("a", "b"))}))
+    with pytest.raises(TypeError, match="KnowledgeStatement"):
+        DomainKnowledge(soft=frozenset({("require", "a", "b")}))  # type: ignore[arg-type]
+    built = DomainKnowledge(soft={KnowledgeStatement("root", ("a",), 0.7)})  # type: ignore[arg-type]
+    assert isinstance(built.soft, frozenset)
+    assert built.soft == DomainKnowledge().root("a", confidence=0.7).soft
+
+
+def test_a_pickle_from_0_2_loads() -> None:
+    import pickle
+
+    old = DomainKnowledge().require("a", "b").forbid_adjacency("c", "d")
+    # Pickles from ergodic 0.2.x carry neither field.
+    del old.__dict__["soft"]
+    del old.__dict__["nonadjacent"]
+    loaded = pickle.loads(pickle.dumps(old))
+    assert loaded.soft == frozenset() and loaded.nonadjacent == frozenset()
+    assert loaded.required == {("a", "b")}
+    current = (
+        DomainKnowledge().require("a", "b").forbid_adjacency("c", "d").root("e", confidence=0.8)
+    )
+    assert pickle.loads(pickle.dumps(current)) == current
 
 
 # -- log odds -----------------------------------------------------------------------
@@ -318,3 +404,17 @@ def test_a_latent_parent_reads_as_hidden_confounding() -> None:
     soft = DomainKnowledge().root("a", confidence=0.9)
     # The latent node is not a variable: root(a) speaks about b -> a only.
     assert soft.log_prior(bow) == pytest.approx(math.log(0.9))
+
+
+def test_a_latent_with_two_children_joins_them_like_a_bidirected_edge() -> None:
+    hidden = admg([("U", "a"), ("U", "c")], nodes=["b"], latent=["U"])
+    bidirected = admg(["a <-> c"], nodes=["b"])
+    restricted = DomainKnowledge().restrict_to([("a", "b")])
+    banned = DomainKnowledge().forbid_adjacency("a", "c")
+    directed = DomainKnowledge().forbid("a", "c").forbid("c", "a")
+    for knowledge in (restricted, banned):
+        assert knowledge.violations(hidden) == knowledge.violations(bidirected) != []
+    assert directed.violations(hidden) == directed.violations(bidirected) == []
+    # A latent with one observed child joins nothing.
+    lonely = admg([("U", "a")], nodes=["b", "c"], latent=["U"])
+    assert restricted.violations(lonely) == []

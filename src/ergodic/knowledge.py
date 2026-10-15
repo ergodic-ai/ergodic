@@ -9,23 +9,27 @@ It is an immutable value object built up with small methods, and two knowledge
 objects combine with ``&`` (more knowledge means fewer admissible graphs).
 
 Every builder but ``confound`` also takes ``confidence=``. Left out (or 1), the
-statement is a hard constraint, stored exactly as before. A value in ``[0.5, 1)``
-makes it soft: a statement you believe with that probability, which
-:func:`ergodic.decode` weighs against a model's edge probabilities instead of
-enforcing. Soft statements live in :attr:`DomainKnowledge.soft`; every
-constraint projection (``conflicts``, ``violations``, ``permits_edge``,
-``edge_mask``, ``apply_to``) reads the hard ones only. :meth:`DomainKnowledge.log_odds`,
+statement is a hard constraint, stored as before. A value in ``[0.5, 1)`` makes it
+soft: :func:`ergodic.decode` weighs it against a model's edge probabilities
+instead of enforcing it. The confidence applies to each pair the statement
+covers: soft tiers over 16 cross-tier pairs act as 16 beliefs of that confidence,
+not one belief that the whole tiering holds. Soft statements live in
+:attr:`DomainKnowledge.soft`; every constraint projection (``conflicts``,
+``violations``, ``permits_edge``, ``edge_mask``, ``apply_to``) reads the hard ones
+only, and the discovery searches refuse soft statements rather than drop them
+(:meth:`DomainKnowledge.hard` removes them). :meth:`DomainKnowledge.log_odds`,
 :meth:`DomainKnowledge.log_prior` and :meth:`DomainKnowledge.energy` read the soft
 ones.
 
-Each statement is about pairs of variables. On one pair there are three
-exclusive states (no edge, ``a -> b``, ``b -> a``), and a soft statement with
-confidence ``c`` multiplies the chance of each state by ``c`` when the state makes
-it hold and by ``1 - c`` when it makes it fail. Against "no edge" that is a
-likelihood ratio on each directed state: ``c / (1 - c)`` for a state that makes
-the statement hold where "no edge" fails it, ``(1 - c) / c`` for the reverse, and
-1 otherwise. Statements multiply. A soft order (``order``, tiers) is read pair by
-pair and is not closed transitively, as a hard one is.
+On one pair there are three exclusive states (no edge, ``a -> b``, ``b -> a``),
+and a soft statement with confidence ``c`` multiplies the chance of each state by
+``c`` when the state makes it hold and by ``1 - c`` when it makes it fail. Against
+"no edge" that is a likelihood ratio on each directed state: ``c / (1 - c)`` for a
+state that makes the statement hold where "no edge" fails it, ``(1 - c) / c`` for
+the reverse, and 1 otherwise. Different statements multiply; the same statement
+made twice is one statement (``soft`` is a set). A soft order (``order``, tiers)
+is weighed pair by pair, on the direct edge against it, and is not closed
+transitively, as a hard one is.
 """
 
 from __future__ import annotations
@@ -48,13 +52,23 @@ class InconsistentKnowledgeError(ValueError):
     """Domain knowledge contradicts itself (for example a required edge cycle)."""
 
 
+class KnowledgeConflictWarning(UserWarning):
+    """The model strongly disagrees with a knowledge statement.
+
+    :func:`ergodic.decode` raises it once per decode when some pair a statement
+    covers gets a model probability below 0.1 for the statement's part on that
+    pair. Filter it by category, for example
+    ``warnings.simplefilter("ignore", KnowledgeConflictWarning)``.
+    """
+
+
 def _pairs(value: Iterable[str]) -> frozenset[str]:
     return frozenset(value)
 
 
 # The three states of one pair (a, b): no edge, a -> b, b -> a. A rule says in which
 # of them a statement holds on that pair.
-PairRule = tuple[str, str, tuple[bool, bool, bool]]
+_PairRule = tuple[str, str, tuple[bool, bool, bool]]
 _REQUIRE = (False, True, False)
 _FORBID = (True, False, True)
 _NO_EDGE = (True, False, False)
@@ -72,6 +86,7 @@ _KIND_ORDER = (
     "restrict_to",
     "confound",
 )
+_PAIR_KINDS = ("require", "forbid", "forbid_adjacency", "order", "confound")
 
 
 def _confidence(value: Any) -> float | None:
@@ -95,17 +110,43 @@ def _names(group: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(set(group)))
 
 
+def _is_names(value: Any) -> bool:
+    return isinstance(value, tuple) and all(isinstance(name, str) for name in value)
+
+
+def _check_args(kind: str, args: tuple[Any, ...]) -> None:
+    """Raise unless ``args`` has the shape ``kind`` takes."""
+    if kind in _PAIR_KINDS:
+        ok = len(args) == 2 and _is_names(args)
+        shape = "two variable names"
+    elif kind in ("root", "sink"):
+        ok = len(args) == 1 and _is_names(args)
+        shape = "one variable name"
+    elif kind == "forbid_between":
+        ok = len(args) == 2 and all(_is_names(group) for group in args)
+        shape = "two tuples of variable names"
+    elif kind == "tiers":
+        ok = all(_is_names(tier) for tier in args)
+        shape = "a tuple of tiers, each a tuple of variable names"
+    else:  # restrict_to
+        ok = all(_is_names(pair) and len(pair) == 2 and pair[0] != pair[1] for pair in args)
+        shape = "a tuple of (u, v) pairs of distinct variable names"
+    if not ok:
+        raise ValueError(f"a {kind!r} statement takes {shape} as args, got {args!r}")
+
+
 @dataclass(frozen=True)
 class KnowledgeStatement:
-    """One knowledge statement, as a builder recorded it.
+    """One knowledge statement.
 
     ``kind`` names the builder: ``"require"``, ``"forbid"``,
     ``"forbid_adjacency"``, ``"order"`` and ``"confound"`` take two names in
-    ``args``, as given; ``"forbid_between"`` two sorted groups; ``"tiers"`` the
-    tiers in order, each sorted; ``"root"`` and ``"sink"`` one name (a call naming
-    several makes one statement per name); ``"restrict_to"`` the sorted skeleton
-    pairs. ``confidence`` is ``None`` for a hard statement and in ``[0.5, 1)`` for
-    a soft one.
+    ``args``; ``"forbid_between"`` two groups of names; ``"tiers"`` the tiers in
+    order, each a tuple of names; ``"root"`` and ``"sink"`` one name (a builder call
+    naming several makes one statement per name); ``"restrict_to"`` the skeleton
+    pairs. The builders sort groups, tiers and pairs. ``confidence`` is ``None`` for
+    a hard statement and in ``[0.5, 1)`` for a soft one; ``confound`` is hard only.
+    Everything is checked on construction.
 
     Attributes:
         kind: The builder that made the statement.
@@ -117,6 +158,32 @@ class KnowledgeStatement:
     args: tuple[Any, ...]
     confidence: float | None = None
 
+    def __post_init__(self) -> None:
+        if self.kind not in _KIND_ORDER:
+            raise ValueError(
+                f"unknown statement kind {self.kind!r}; use one of {', '.join(_KIND_ORDER)}"
+            )
+        if not isinstance(self.args, tuple):
+            raise TypeError(f"args must be a tuple, got {type(self.args).__name__}")
+        _check_args(self.kind, self.args)
+        if self.confidence is None:
+            return
+        if self.kind == "confound":
+            raise ValueError("a confound statement is hard only; its confidence must be None")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, Real):
+            raise TypeError("confidence must be None or a number in [0.5, 1)")
+        level = float(self.confidence)
+        if math.isnan(level) or not 0.5 <= level < 1.0:
+            raise ValueError(
+                f"a soft statement's confidence must be in [0.5, 1), got {self.confidence!r}; "
+                "a hard statement has confidence None"
+            )
+        if self.kind in ("require", "forbid", "forbid_adjacency", "order") and (
+            self.args[0] == self.args[1]
+        ):
+            raise ValueError(f"a soft {self.kind} needs two distinct variables")
+        object.__setattr__(self, "confidence", level)
+
     @property
     def is_soft(self) -> bool:
         """Whether the statement is soft (it has a confidence below 1)."""
@@ -125,10 +192,8 @@ class KnowledgeStatement:
     @property
     def variables(self) -> frozenset[str]:
         """Every variable the statement names."""
-        if self.kind in ("forbid_between", "tiers"):
+        if self.kind in ("forbid_between", "tiers", "restrict_to"):
             return frozenset(name for group in self.args for name in group)
-        if self.kind == "restrict_to":
-            return frozenset(name for pair in self.args for name in pair)
         return frozenset(self.args)
 
     def __str__(self) -> str:
@@ -162,14 +227,14 @@ def _statement_key(statement: KnowledgeStatement) -> tuple[int, str, float]:
     )
 
 
-def _pair_rules(statement: KnowledgeStatement, names: Sequence[str]) -> list[PairRule]:
+def _pair_rules(statement: KnowledgeStatement, names: Sequence[str]) -> list[_PairRule]:
     """The pairs ``statement`` speaks about, each with the states that satisfy it.
 
     ``names`` is the universe for statements about every other variable (root,
     sink) or every pair (restrict_to). A confounder speaks about no edge state.
     """
     kind, args = statement.kind, statement.args
-    rules: list[PairRule] = []
+    rules: list[_PairRule] = []
     if kind == "require":
         rules = [(args[0], args[1], _REQUIRE)]
     elif kind == "forbid":
@@ -201,7 +266,7 @@ def _pair_rules(statement: KnowledgeStatement, names: Sequence[str]) -> list[Pai
             for v in ordered[i + 1 :]
             if frozenset((u, v)) not in allowed
         ]
-    unique: list[PairRule] = []
+    unique: list[_PairRule] = []
     seen: set[tuple[str, str]] = set()
     for a, b, holds in rules:
         if a != b and (a, b) not in seen:
@@ -210,15 +275,34 @@ def _pair_rules(statement: KnowledgeStatement, names: Sequence[str]) -> list[Pai
     return unique
 
 
+def _refuse_soft(knowledge: DomainKnowledge | None, where: str) -> None:
+    """Raise when a reader of hard knowledge only is handed soft statements."""
+    if knowledge is None or not knowledge.soft:
+        return
+    listed = "; ".join(
+        f"{statement} ({statement.confidence:g})"
+        for statement in sorted(knowledge.soft, key=_statement_key)
+    )
+    raise ValueError(
+        f"{where} reads hard knowledge only, and this knowledge holds "
+        f"{len(knowledge.soft)} soft statement(s): {listed}. Soft statements apply only "
+        "when decoding edge probabilities (ergodic.decode, and ergodic.welt.discover, "
+        "which decodes); pass knowledge.hard() to drop them, or state them without "
+        "confidence= to enforce them"
+    )
+
+
 @dataclass(frozen=True)
 class DomainKnowledge:
     """Prior constraints on a causal graph over named variables.
 
     The hard constraints live in the set fields (``required``, ``forbidden``,
-    ``precedes``, ``roots``, ``sinks``, ``confounded``, ``allowed_adjacencies``),
-    the soft statements in ``soft``. ``stated`` keeps the hard statements as the
-    builders recorded them, for :meth:`statements`; it takes no part in equality,
-    hashing or the repr.
+    ``nonadjacent``, ``precedes``, ``roots``, ``sinks``, ``confounded``,
+    ``allowed_adjacencies``), the soft statements in ``soft``.
+    :meth:`forbid_adjacency` records its pair in ``nonadjacent`` as well as both
+    directions in ``forbidden``: an adjacency ban rules out a bidirected edge too,
+    while two directed bans (``forbid(a, b)`` and ``forbid(b, a)``) do not, so
+    ``confound(a, b)`` with them says "confounded, and neither causes the other".
     """
 
     variables: frozenset[str] = field(default_factory=frozenset)
@@ -230,28 +314,47 @@ class DomainKnowledge:
     confounded: frozenset[frozenset[str]] = field(default_factory=frozenset)
     allowed_adjacencies: frozenset[frozenset[str]] | None = None
     soft: frozenset[KnowledgeStatement] = field(default_factory=frozenset)
-    stated: tuple[KnowledgeStatement, ...] = field(default=(), compare=False, repr=False)
+    nonadjacent: frozenset[frozenset[str]] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        soft = frozenset(self.soft)
+        for statement in soft:
+            if not isinstance(statement, KnowledgeStatement):
+                raise TypeError(
+                    f"soft holds KnowledgeStatement objects, got {type(statement).__name__}"
+                )
+            if not statement.is_soft:
+                raise ValueError(
+                    f"soft holds soft statements only, and {statement} has no confidence; "
+                    "add hard constraints with the builders"
+                )
+        object.__setattr__(self, "soft", soft)
+        object.__setattr__(self, "nonadjacent", frozenset(self.nonadjacent))
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # A pickle from ergodic 0.2.x has no soft statements and no adjacency bans
+        # of its own; fill in the defaults so it loads.
+        state.setdefault("soft", frozenset())
+        state.setdefault("nonadjacent", frozenset())
+        self.__dict__.update(state)
 
     # -- builders ------------------------------------------------------------
 
-    def _hard(self, statement: KnowledgeStatement, **changes: Any) -> DomainKnowledge:
-        return replace(
-            self,
-            variables=self.variables | statement.variables,
-            stated=(*self.stated, statement),
-            **changes,
-        )
-
     def _soft(self, statement: KnowledgeStatement) -> DomainKnowledge:
-        if statement.kind in ("require", "forbid", "forbid_adjacency", "order"):
-            a, b = statement.args
-            if a == b:
-                raise ValueError(f"a soft {statement.kind} needs two distinct variables")
         return replace(
             self,
             soft=self.soft | {statement},
             variables=self.variables | statement.variables,
         )
+
+    def hard(self) -> DomainKnowledge:
+        """This knowledge without its soft statements.
+
+        The discovery searches read hard constraints only and refuse soft
+        statements rather than drop them silently; pass ``knowledge.hard()`` to
+        run one with the hard part. The variables stay listed.
+        """
+        return replace(self, soft=frozenset())
 
     def with_variables(self, *names: str) -> DomainKnowledge:
         """Return knowledge that also lists ``names`` in :attr:`variables`.
@@ -272,35 +375,50 @@ class DomainKnowledge:
             confidence: ``None`` or 1 for a hard constraint; a value in
                 ``[0.5, 1)`` makes it soft (0.5 changes nothing).
         """
-        statement = KnowledgeStatement("require", (cause, effect), _confidence(confidence))
-        if statement.is_soft:
-            return self._soft(statement)
-        return self._hard(statement, required=self.required | {(cause, effect)})
+        level = _confidence(confidence)
+        if level is not None:
+            return self._soft(KnowledgeStatement("require", (cause, effect), level))
+        return replace(
+            self,
+            required=self.required | {(cause, effect)},
+            variables=self.variables | {cause, effect},
+        )
 
     def forbid(
         self, cause: str, effect: str, *, confidence: float | None = None
     ) -> DomainKnowledge:
         """Forbid the directed edge ``cause -> effect`` (the reverse stays allowed).
 
-        ``confidence`` makes it soft, as for :meth:`require`.
+        ``confidence`` makes it soft, as for :meth:`require`. Forbidding both
+        directions bans every edge but a bidirected one, so it can sit beside
+        :meth:`confound`.
         """
-        statement = KnowledgeStatement("forbid", (cause, effect), _confidence(confidence))
-        if statement.is_soft:
-            return self._soft(statement)
-        return self._hard(statement, forbidden=self.forbidden | {(cause, effect)})
+        level = _confidence(confidence)
+        if level is not None:
+            return self._soft(KnowledgeStatement("forbid", (cause, effect), level))
+        return replace(
+            self,
+            forbidden=self.forbidden | {(cause, effect)},
+            variables=self.variables | {cause, effect},
+        )
 
     def forbid_adjacency(
         self, a: str, b: str, *, confidence: float | None = None
     ) -> DomainKnowledge:
-        """Forbid any edge between two variables, in either direction.
+        """Forbid any edge between two variables, bidirected included.
 
         ``confidence`` makes it soft, as for :meth:`require`; a soft ban weighs the
         two directed edges (decoders see no other edge type).
         """
-        statement = KnowledgeStatement("forbid_adjacency", (a, b), _confidence(confidence))
-        if statement.is_soft:
-            return self._soft(statement)
-        return self._hard(statement, forbidden=self.forbidden | {(a, b), (b, a)})
+        level = _confidence(confidence)
+        if level is not None:
+            return self._soft(KnowledgeStatement("forbid_adjacency", (a, b), level))
+        return replace(
+            self,
+            forbidden=self.forbidden | {(a, b), (b, a)},
+            nonadjacent=self.nonadjacent | {frozenset((a, b))},
+            variables=self.variables | {a, b},
+        )
 
     def order(self, before: str, after: str, *, confidence: float | None = None) -> DomainKnowledge:
         """Record that ``before`` precedes ``after`` in time, so ``after`` cannot cause it.
@@ -308,10 +426,14 @@ class DomainKnowledge:
         ``confidence`` makes it soft, as for :meth:`require`. A soft order weighs
         only the direct edge ``after -> before`` and is not closed transitively.
         """
-        statement = KnowledgeStatement("order", (before, after), _confidence(confidence))
-        if statement.is_soft:
-            return self._soft(statement)
-        return self._hard(statement, precedes=self.precedes | {(before, after)})
+        level = _confidence(confidence)
+        if level is not None:
+            return self._soft(KnowledgeStatement("order", (before, after), level))
+        return replace(
+            self,
+            precedes=self.precedes | {(before, after)},
+            variables=self.variables | {before, after},
+        )
 
     def with_tiers(
         self, tiers: Sequence[Iterable[str]], *, confidence: float | None = None
@@ -319,35 +441,40 @@ class DomainKnowledge:
         """Add a tiered order: no variable in a later tier causes one in an earlier tier.
 
         ``confidence`` makes it soft, as for :meth:`require`: one statement that
-        weighs every edge from a later tier into an earlier one. It says nothing
-        about pairs within a tier, as the hard form does not.
+        weighs every edge from a later tier into an earlier one, each with that
+        confidence. It says nothing about pairs within a tier, as the hard form
+        does not.
         """
         groups = [_pairs(t) for t in tiers]
-        statement = KnowledgeStatement(
-            "tiers", tuple(_names(group) for group in groups), _confidence(confidence)
-        )
-        if statement.is_soft:
-            return self._soft(statement)
+        level = _confidence(confidence)
+        if level is not None:
+            return self._soft(
+                KnowledgeStatement("tiers", tuple(_names(group) for group in groups), level)
+            )
         precedes = set(self.precedes)
+        variables = set(self.variables)
         for i, earlier in enumerate(groups):
+            variables |= earlier
             for later in groups[i + 1 :]:
                 for a in earlier:
                     for b in later:
                         precedes.add((a, b))
-        return self._hard(statement, precedes=frozenset(precedes))
+        return replace(self, precedes=frozenset(precedes), variables=frozenset(variables))
 
     def root(self, *names: str, confidence: float | None = None) -> DomainKnowledge:
         """Mark variables as roots: no incoming directed edges.
 
         ``confidence`` makes it soft, as for :meth:`require`, with one statement
-        per name.
+        per name, weighing every edge into it.
         """
         level = _confidence(confidence)
-        out = self
         if level is None:
-            for name in names:
-                out = out._hard(KnowledgeStatement("root", (name,)))
-            return replace(out, roots=self.roots | frozenset(names))
+            return replace(
+                self,
+                roots=self.roots | frozenset(names),
+                variables=self.variables | frozenset(names),
+            )
+        out = self
         for name in names:
             out = out._soft(KnowledgeStatement("root", (name,), level))
         return out
@@ -356,14 +483,16 @@ class DomainKnowledge:
         """Mark variables as sinks: no outgoing directed edges.
 
         ``confidence`` makes it soft, as for :meth:`require`, with one statement
-        per name.
+        per name, weighing every edge out of it.
         """
         level = _confidence(confidence)
-        out = self
         if level is None:
-            for name in names:
-                out = out._hard(KnowledgeStatement("sink", (name,)))
-            return replace(out, sinks=self.sinks | frozenset(names))
+            return replace(
+                self,
+                sinks=self.sinks | frozenset(names),
+                variables=self.variables | frozenset(names),
+            )
+        out = self
         for name in names:
             out = out._soft(KnowledgeStatement("sink", (name,), level))
         return out
@@ -373,6 +502,8 @@ class DomainKnowledge:
 
         A confounder is hard only: ``confidence`` must be ``None`` or 1. A hidden
         common cause is not an edge state, so edge probabilities cannot weigh it.
+        Add ``forbid(a, b)`` and ``forbid(b, a)`` to say that neither causes the
+        other as well.
         """
         if _confidence(confidence) is not None:
             raise ValueError(
@@ -381,9 +512,10 @@ class DomainKnowledge:
             )
         if a == b:
             raise ValueError(f"a confounded pair needs two distinct variables, got {a!r} twice")
-        return self._hard(
-            KnowledgeStatement("confound", (a, b)),
+        return replace(
+            self,
             confounded=self.confounded | {frozenset({a, b})},
+            variables=self.variables | {a, b},
         )
 
     def forbid_between(
@@ -396,17 +528,17 @@ class DomainKnowledge:
         """Forbid every directed edge from ``group_a`` into ``group_b``.
 
         ``confidence`` makes it soft, as for :meth:`require`: one statement that
-        weighs every such edge.
+        weighs every such edge, each with that confidence.
         """
         a = list(group_a)
         b = list(group_b)
-        statement = KnowledgeStatement(
-            "forbid_between", (_names(a), _names(b)), _confidence(confidence)
-        )
-        if statement.is_soft:
-            return self._soft(statement)
+        level = _confidence(confidence)
+        if level is not None:
+            return self._soft(KnowledgeStatement("forbid_between", (_names(a), _names(b)), level))
         bans = {(x, y) for x in a for y in b}
-        return self._hard(statement, forbidden=self.forbidden | bans)
+        return replace(
+            self, forbidden=self.forbidden | bans, variables=self.variables | set(a) | set(b)
+        )
 
     def restrict_to(
         self,
@@ -425,8 +557,8 @@ class DomainKnowledge:
 
         ``confidence`` makes it soft, as for :meth:`require`: one statement that
         weighs both directed edges of every pair outside the skeleton (among the
-        variables being decoded). Soft restrictions do not intersect; each is its
-        own statement.
+        variables being decoded), each pair with that confidence. Soft
+        restrictions do not intersect; each is its own statement.
         """
         from .graph import MixedGraph
 
@@ -436,27 +568,33 @@ class DomainKnowledge:
             raw = skeleton
         level = _confidence(confidence)
         pairs: set[frozenset[str]] = set()
+        names: set[str] = set()
         for u, v in raw:
             if u == v:
                 raise ValueError(
                     f"a skeleton adjacency needs two distinct variables, got {u!r} twice"
                 )
             pairs.add(frozenset({u, v}))
-        listed = tuple(sorted(_names(pair) for pair in pairs))
-        statement = KnowledgeStatement("restrict_to", listed, level)
-        if statement.is_soft:
-            return self._soft(statement)
+            names.update((u, v))
+        if level is not None:
+            listed = tuple(sorted(_names(pair) for pair in pairs))
+            return self._soft(KnowledgeStatement("restrict_to", listed, level))
         allowed = frozenset(pairs)
         if self.allowed_adjacencies is not None:
             allowed &= self.allowed_adjacencies
-        return self._hard(statement, allowed_adjacencies=allowed)
+        return replace(
+            self,
+            allowed_adjacencies=allowed,
+            variables=self.variables | names,
+        )
 
     def __and__(self, other: DomainKnowledge) -> DomainKnowledge:
         """Combine two knowledge objects by taking the union of their constraints.
 
         Skeleton allow-lists intersect: an adjacency survives only when both
         sides allow it, and ``None`` (unrestricted) defers to the other side.
-        Soft statements are pooled.
+        Soft statements are pooled as a set, so a statement both sides make (same
+        kind, arguments and confidence) counts once.
         """
         if self.allowed_adjacencies is None:
             allowed = other.allowed_adjacencies
@@ -474,47 +612,39 @@ class DomainKnowledge:
             confounded=self.confounded | other.confounded,
             allowed_adjacencies=allowed,
             soft=self.soft | other.soft,
-            stated=(*self.stated, *other.stated),
+            nonadjacent=self.nonadjacent | other.nonadjacent,
         )
 
     combine = __and__
 
     def statements(self) -> tuple[KnowledgeStatement, ...]:
-        """Every statement as it was made: the hard ones in order, then the soft ones.
+        """Every statement, read from what is stored: the hard ones, then the soft ones.
 
-        Hard constraints set without a builder (through the constructor or
-        ``dataclasses.replace``) are listed one per stored item: a required or
-        forbidden pair, a precedence pair, a root, a sink, a confounded pair, and
-        one ``restrict_to`` for the allow-list. Soft statements come sorted by
-        kind, then arguments.
+        Hard constraints are listed one per stored item, so equal knowledge lists
+        equal statements however it was built: a required pair (``require``), an
+        adjacency ban (``forbid_adjacency``), any other forbidden direction
+        (``forbid``; ``forbid_between`` and two-way forbids show up this way), a
+        precedence pair (``order``; tiers show up as their cross-tier pairs), a
+        root, a sink, a confounded pair, and one ``restrict_to`` for the
+        allow-list. Soft statements are listed as made, sorted by kind, then
+        arguments.
         """
-        covered = DomainKnowledge()
-        hard: list[KnowledgeStatement] = []
-        for statement in dict.fromkeys(self.stated):  # stated twice, listed once
-            covered = _apply(covered, statement)
-            hard.append(statement)
+        hard = [KnowledgeStatement("require", pair) for pair in sorted(self.required)]
+        banned = sorted(_names(pair) for pair in self.nonadjacent)
+        hard += [KnowledgeStatement("forbid_adjacency", pair) for pair in banned]
         hard += [
-            KnowledgeStatement("require", pair) for pair in sorted(self.required - covered.required)
+            KnowledgeStatement("forbid", (u, v))
+            for u, v in sorted(self.forbidden)
+            if frozenset((u, v)) not in self.nonadjacent
         ]
-        rest = self.forbidden - covered.forbidden
-        for u, v in sorted(rest):
-            if (v, u) not in rest:
-                hard.append(KnowledgeStatement("forbid", (u, v)))
-            elif u < v:
-                hard.append(KnowledgeStatement("forbid_adjacency", (u, v)))
-        hard += [
-            KnowledgeStatement("order", pair) for pair in sorted(self.precedes - covered.precedes)
-        ]
-        hard += [KnowledgeStatement("root", (name,)) for name in sorted(self.roots - covered.roots)]
-        hard += [KnowledgeStatement("sink", (name,)) for name in sorted(self.sinks - covered.sinks)]
+        hard += [KnowledgeStatement("order", pair) for pair in sorted(self.precedes)]
+        hard += [KnowledgeStatement("root", (name,)) for name in sorted(self.roots)]
+        hard += [KnowledgeStatement("sink", (name,)) for name in sorted(self.sinks)]
         hard += [
             KnowledgeStatement("confound", _names(pair))
-            for pair in sorted(self.confounded - covered.confounded, key=sorted)
+            for pair in sorted(self.confounded, key=sorted)
         ]
-        if (
-            self.allowed_adjacencies is not None
-            and covered.allowed_adjacencies != self.allowed_adjacencies
-        ):
+        if self.allowed_adjacencies is not None:
             listed = tuple(sorted(_names(pair) for pair in self.allowed_adjacencies))
             hard.append(KnowledgeStatement("restrict_to", listed))
         return (*hard, *sorted(self.soft, key=_statement_key))
@@ -525,17 +655,17 @@ class DomainKnowledge:
         """Return a list of internal contradictions among the hard constraints.
 
         Empty when consistent. Soft statements never conflict: they are weighed,
-        not enforced. A confounded pair whose adjacency is banned (both
-        directions forbidden) is a contradiction, as is one outside a skeleton
-        restriction.
+        not enforced. A confounded pair under an adjacency ban
+        (:meth:`forbid_adjacency`) or outside a skeleton restriction is a
+        contradiction; a confounded pair with both directed edges forbidden is not
+        (confounded, and neither causes the other).
         """
         out: list[str] = []
         for u, v in sorted(self.required & self.forbidden):
             out.append(f"edge {u}->{v} is both required and forbidden")
-        for pair in sorted(self.confounded, key=sorted):
+        for pair in sorted(self.confounded & self.nonadjacent, key=sorted):
             a, b = sorted(pair)
-            if (a, b) in self.forbidden and (b, a) in self.forbidden:
-                out.append(f"confounded pair {a},{b} is banned from being adjacent")
+            out.append(f"confounded pair {a},{b} is banned from being adjacent")
         for u, v in sorted(self.required):
             if (v, u) in self.precedes:
                 out.append(f"required edge {u}->{v} contradicts order {v} before {u}")
@@ -658,40 +788,52 @@ class DomainKnowledge:
         """Return the ways ``graph`` breaks the hard constraints, empty when consistent.
 
         Soft statements are not checked. A node in ``graph.latent`` is read as a
-        hidden cause, not as one of the variables: a latent parent shared by both
-        ends of a confounded pair stands for its bidirected edge (the way a bow,
-        ``a -> b`` plus ``a <-> b``, is written), and edges at a latent node count
-        neither against a root, a sink nor a skeleton restriction.
+        hidden cause, not as one of the variables: a latent node with two or more
+        observed children joins each pair of them as ``a <-> b`` would (the way a
+        bow, ``a -> b`` plus ``a <-> b``, is written), for confounded pairs,
+        adjacency bans and a skeleton restriction alike, and its edges count
+        against neither a root nor a sink. Two directed bans on one pair
+        (``forbid(a, b)`` and ``forbid(b, a)``) rule out every edge there but a
+        bidirected one; :meth:`forbid_adjacency` rules out that too.
         """
         out: list[str] = []
         latent = graph.latent
+        hidden: set[frozenset[str]] = set()
+        for node in latent & graph.nodes:
+            children = sorted(graph.children(node) - latent)
+            hidden.update(
+                frozenset((a, b)) for i, a in enumerate(children) for b in children[i + 1 :]
+            )
         for u, v in sorted(self.required):
             edge = graph.get_edge(u, v)
             if edge is None or edge.directed_pair() != (u, v):
                 out.append(f"missing required edge {u}->{v}")
-        # A pair forbidden in both directions is an adjacency ban, so any edge
-        # between the two (bidirected and undirected included) violates it.
         reported: set[frozenset[str]] = set()
         for u, v in sorted(self.forbidden):
+            pair = frozenset((u, v))
             edge = graph.get_edge(u, v)
-            if edge is None:
+            if pair in self.nonadjacent:
+                if pair not in reported and (edge is not None or pair in hidden):
+                    reported.add(pair)
+                    out.append(f"present edge between {u} and {v}, banned from being adjacent")
+            elif edge is None:
                 continue
-            if (v, u) in self.forbidden:
-                pair = frozenset((u, v))
-                if pair not in reported:
+            elif (v, u) in self.forbidden:
+                # Both directions forbidden: any edge but a bidirected one breaks it.
+                if pair not in reported and not edge.is_bidirected:
                     reported.add(pair)
                     out.append(f"present edge between {u} and {v}, forbidden in both directions")
             elif edge.directed_pair() == (u, v):
                 out.append(f"present forbidden edge {u}->{v}")
         if self.allowed_adjacencies is not None:
-            for edge in graph.edge_list():
-                if edge.u in latent or edge.v in latent:
-                    continue
-                if frozenset({edge.u, edge.v}) not in self.allowed_adjacencies:
-                    a, b = sorted((edge.u, edge.v))
-                    out.append(
-                        f"present edge between {a} and {b}, outside the skeleton restriction"
-                    )
+            outside = {
+                frozenset((edge.u, edge.v))
+                for edge in graph.edge_list()
+                if edge.u not in latent and edge.v not in latent
+            } | hidden
+            for pair in sorted(outside - self.allowed_adjacencies, key=sorted):
+                a, b = sorted(pair)
+                out.append(f"present edge between {a} and {b}, outside the skeleton restriction")
         for before, after in sorted(self._precedence_closure()):
             if (
                 before in graph.nodes
@@ -708,13 +850,7 @@ class DomainKnowledge:
         for pair in sorted(self.confounded, key=sorted):
             a, b = sorted(pair)
             edge = graph.get_edge(a, b)
-            if edge is not None and edge.is_bidirected:
-                continue
-            if (
-                a in graph.nodes
-                and b in graph.nodes
-                and graph.parents(a) & graph.parents(b) & latent
-            ):
+            if (edge is not None and edge.is_bidirected) or pair in hidden:
                 continue
             out.append(f"confounded pair {a},{b} lacks a bidirected edge")
         return out
@@ -890,20 +1026,3 @@ class DomainKnowledge:
             f"roots={len(self.roots)}, sinks={len(self.sinks)}, "
             f"confounded={len(self.confounded)}{restricted}{soft})"
         )
-
-
-def _apply(knowledge: DomainKnowledge, statement: KnowledgeStatement) -> DomainKnowledge:
-    """``knowledge`` with ``statement`` added through its builder."""
-    kind, args = statement.kind, statement.args
-    level = statement.confidence
-    if kind == "tiers":
-        return knowledge.with_tiers(args, confidence=level)
-    if kind == "forbid_between":
-        return knowledge.forbid_between(args[0], args[1], confidence=level)
-    if kind == "restrict_to":
-        return knowledge.restrict_to(args, confidence=level)
-    if kind == "confound":
-        return knowledge.confound(args[0], args[1])
-    builder = getattr(knowledge, kind)
-    result: DomainKnowledge = builder(*args, confidence=level)
-    return result
