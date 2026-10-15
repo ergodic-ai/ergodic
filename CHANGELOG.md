@@ -57,7 +57,9 @@ To be released together with welt-client 0.13.
   `decoded` with the decoder, parameters, seed, rejected cycles, objective and source
   provenance, and the note "not a graph posterior; orientation not certified".
   `DomainKnowledge` constrains decoding (forbidden edges, tiers, roots, sinks,
-  `restrict_to`, order as a topological-order constraint, required edges first);
+  `restrict_to`, required edges first); order statements and tiers are enforced as
+  one time order consistent with every order statement and every edge, which is
+  stricter than `DomainKnowledge.violations` for separate `order()` pairs.
   `confound` is refused.
   `ergodic.discovery.Decoder` holds a decoder and its settings.
 - `ergodic.welt.discover(..., decoder=...)` and
@@ -67,8 +69,10 @@ To be released together with welt-client 0.13.
   `DecodeResult` whose graph is the decoded DAG, with `edge_probabilities`,
   `welt_native_edges` and the decode labels in `diagnostics`. Greedy defaults to the
   model's native threshold (0.5 for AVICI, the recorded adaptive threshold for CDFM).
-  With a decoder, `knowledge=` constrains the local decoding and is checked before
-  anything is uploaded. Without `decoder=` nothing changes: non-DAG models are still
+  With a decoder, `knowledge=` constrains the local decoding; it and every decoder
+  setting, `max_nodes` against the variable count included, are checked before
+  anything is uploaded. A decode that still fails after the paid run raises
+  `WeltDecodeError` with the result and its scores attached. Without `decoder=` nothing changes: non-DAG models are still
   refused before paying.
 
 ### Changed

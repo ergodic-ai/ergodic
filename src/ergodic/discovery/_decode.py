@@ -10,11 +10,11 @@ scores a directed edge by ``w(i -> j) = log P(i -> j) - log P(no edge)``, both
 floored at ``1e-12``. A DAG's factorized pair score is the sum of the log
 probabilities of the states it picks.
 
-The decoders are ported from Ergodic's research library (``ergodic-ai/welt``,
-WELT-292 / EXP-0386 and EXP-0626, where greedy pair-MAP matched exact MAP on 238
-of 240 graphs). Each id carries a version, and a decoded graph always says it
-was decoded, by which decoder, with which parameters and seed. It is never a
-graph posterior, and its orientations are not certified by anything.
+The decoders are ported from Ergodic's research library, where greedy pair-MAP
+matched exact MAP on 238 of 240 graphs. Each id carries a version, and a decoded
+graph always says it was decoded, by which decoder, with which parameters and
+seed. It is never a graph posterior, and its orientations are not certified by
+anything.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from __future__ import annotations
 import heapq
 import math
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
@@ -54,7 +55,7 @@ class _Spec:
     summary: str
 
 
-DECODERS: Final[Mapping[str, _Spec]] = {
+_SPECS: Final[dict[str, _Spec]] = {
     "greedy_v1": _Spec(
         "greedy_pair_map_v1",
         False,
@@ -92,9 +93,13 @@ DECODERS: Final[Mapping[str, _Spec]] = {
         "Gumbel-perturb the pair states, then solve exact MAP per sample",
     ),
 }
-"""The registered decoders by versioned id."""
 
-_ALIASES: Final = {name.rsplit("_v", 1)[0]: name for name in DECODERS}
+DECODERS: Final[Mapping[str, str]] = MappingProxyType(
+    {name: spec.summary for name, spec in _SPECS.items()}
+)
+"""The registered decoders: versioned id to a one-line summary (read-only)."""
+
+_ALIASES: Final = {name.rsplit("_v", 1)[0]: name for name in _SPECS}
 
 
 def resolve_decoder(method: str) -> str:
@@ -102,7 +107,7 @@ def resolve_decoder(method: str) -> str:
     if not isinstance(method, str):
         raise TypeError(f"method must be a decoder id string, got {type(method).__name__}")
     key = method.lower()
-    if key in DECODERS:
+    if key in _SPECS:
         return key
     if key in _ALIASES:
         return _ALIASES[key]
@@ -119,13 +124,15 @@ class DecodeResult(DiscoveryResult):
     (medoid) of the candidates for a sampler. ``method`` is
     ``"decode:<decoder id>"`` (a Welt run decoded locally keeps ``"welt:<model>"``).
 
-    ``diagnostics`` always labels the graph: ``decoded`` is ``True``, ``native``
-    is ``False``, and it records ``decoder``, ``parameters``, ``seed``,
-    ``samples``, ``rejected_cycles`` and ``search_expansions`` (one per
-    candidate), ``edge_budget``, ``objective`` (the factorized pair log score of
-    ``graph``), ``n_edges``, ``source_kind``, ``source_provenance``,
-    ``knowledge_applied`` and ``note`` ("not a graph posterior; orientation not
-    certified").
+    ``diagnostics`` always labels the graph: ``decoded`` is ``True``, ``native`` is
+    ``False``, and it records ``decoder``, ``parameters``, ``seed``,
+    ``samples``, ``rejected_cycles`` (nominated edges skipped because they would
+    close a directed cycle), ``order_skipped`` (skipped only because they would
+    break the order knowledge) and ``search_expansions`` (each one per
+    candidate), ``threshold_source``, ``edge_budget``, ``objective`` (the
+    factorized pair log score of ``graph``), ``n_edges``, ``source_kind``,
+    ``source_provenance``, ``knowledge_applied`` and ``note`` ("not a graph
+    posterior; orientation not certified").
 
     Attributes:
         decoder: The versioned decoder id, for example ``"greedy_v1"``.
@@ -180,7 +187,7 @@ class Decoder:
     @property
     def stochastic(self) -> bool:
         """Whether this decoder samples candidates (and so needs a seed)."""
-        return DECODERS[self.method].stochastic
+        return _SPECS[self.method].stochastic
 
     def decode(
         self, probabilities: EdgeProbabilities, *, knowledge: DomainKnowledge | None = None
@@ -200,7 +207,7 @@ class Decoder:
 def _check_settings(
     decoder: str, threshold: float | None, samples: int, seed: int | None, max_nodes: int
 ) -> None:
-    spec = DECODERS[decoder]
+    spec = _SPECS[decoder]
     if threshold is not None:
         if decoder != "greedy_v1":
             raise ValueError(f"threshold applies to the greedy decoder only, not {decoder!r}")
@@ -224,6 +231,15 @@ def _check_settings(
             raise ValueError(f"{decoder!r} is deterministic, so samples must be 1")
         if seed is not None:
             raise ValueError(f"{decoder!r} is deterministic and takes no seed")
+
+
+def check_size(decoder: str, size: int, max_nodes: int) -> None:
+    """Raise when an exact order search would exceed ``max_nodes`` variables."""
+    if _SPECS[resolve_decoder(decoder)].order_search and size > max_nodes:
+        raise ValueError(
+            f"{decoder!r} searches topological orders exactly and refuses {size} variables "
+            f"above max_nodes={max_nodes}; use 'greedy' or 'pair_sampler', or raise max_nodes"
+        )
 
 
 # -- the facade ----------------------------------------------------------------------
@@ -261,7 +277,8 @@ def decode(
       ``perturb_and_map_v1``): ``samples`` candidate DAGs, from independent
       pair-state draws with random-order cycle rejection, or from exact MAP under
       Gumbel-perturbed pair states. ``graph`` is their medoid (the candidate with
-      the smallest total pair-state distance to the others, earliest on a tie).
+      the smallest total pair-state distance to the others, earliest on an exact
+      tie; the research ``posterior_medoid`` can pick another tied candidate).
       Candidates are not posterior samples.
 
     Ties are broken by variable order, so a decoder is deterministic given its
@@ -270,10 +287,15 @@ def decode(
 
     Knowledge constrains the decode. Forbidden edges, tiers, roots, sinks and a
     skeleton restriction remove directed edges (their weight becomes minus
-    infinity). Precedence (``order``, tiers) is enforced on ancestry, not just
-    on edges. Required edges go in first, whatever their weight, and must not
-    form a cycle. ``confound`` is refused: a DAG cannot hold a latent
-    confounder. The decoded graph is checked against the knowledge afterwards.
+    infinity). Order (``order``, tiers) is enforced as one time order: the
+    decoded graph has a topological order consistent with every order statement
+    and every edge at once. That is exactly the tier reading, and stricter than
+    :meth:`~ergodic.DomainKnowledge.violations` for separate ``order`` pairs (it
+    only asks that no later variable be an ancestor of an earlier one), so a DAG
+    that satisfies each pair alone but no single order is ruled out. Required
+    edges go in first, whatever their weight, and must not form a cycle.
+    ``confound`` is refused: a DAG cannot hold a latent confounder. The decoded
+    graph is checked against the knowledge afterwards.
 
     Args:
         probabilities: The edge probabilities to decode.
@@ -303,14 +325,9 @@ def decode(
         )
     decoder = resolve_decoder(method)
     _check_settings(decoder, threshold, samples, seed, max_nodes)
-    spec = DECODERS[decoder]
+    spec = _SPECS[decoder]
     names = probabilities.variables
-    size = len(names)
-    if spec.order_search and size > max_nodes:
-        raise ValueError(
-            f"{decoder!r} searches topological orders exactly and refuses {size} variables "
-            f"above max_nodes={max_nodes}; use 'greedy' or 'pair_sampler', or raise max_nodes"
-        )
+    check_size(decoder, len(names), max_nodes)
     constraints = _Constraints.build(names, knowledge)
     pair = probabilities.to_pair_states().values
     weights = _relative_log_weights(pair, PROBABILITY_FLOOR)
@@ -319,15 +336,16 @@ def decode(
     edge_budget: int | None = None
     if decoder == "greedy_v1":
         parameters["threshold"] = threshold
-        graph, rejected = _greedy(weights, probabilities.values, threshold, constraints)
-        graphs, rejections, expansions = [graph], [rejected], [0]
+        graph, rejected, skipped = _greedy(weights, probabilities.values, threshold, constraints)
+        graphs, rejections, order_skips, expansions = [graph], [rejected], [skipped], [0]
     elif decoder == "pair_sampler_v1":
-        graphs, rejections = _pair_sampler(pair, samples, seed or 0, constraints)
+        graphs, rejections, order_skips = _pair_sampler(pair, samples, seed or 0, constraints)
         expansions = [0] * samples
     elif decoder == "perturb_and_map_v1":
         parameters["max_nodes"] = max_nodes
         graphs, expansions = _perturb_and_map(pair, samples, seed or 0, constraints)
         rejections = [0] * samples
+        order_skips = [0] * samples
     else:
         parameters["max_nodes"] = max_nodes
         order, expanded = _maximum_weight_order(_order_weights(weights, constraints), constraints)
@@ -340,7 +358,7 @@ def decode(
             )
             parameters["edge_budget_rule"] = rule
             graph = _cardinality_graph(weights, order, edge_budget, constraints)
-        graphs, rejections, expansions = [graph], [0], [expanded]
+        graphs, rejections, order_skips, expansions = [graph], [0], [0], [expanded]
     chosen = graphs[_medoid(graphs)] if len(graphs) > 1 else graphs[0]
     candidates = tuple(_to_dag(names, g) for g in graphs)
     result_graph = _to_dag(names, chosen)
@@ -354,9 +372,11 @@ def decode(
         "decoder": decoder,
         "decoder_port_of": spec.port_of,
         "parameters": parameters,
+        "threshold_source": "decoder" if threshold is not None else None,
         "seed": seed,
         "samples": samples,
         "rejected_cycles": tuple(rejections),
+        "order_skipped": tuple(order_skips),
         "search_expansions": tuple(expansions),
         "edge_budget": edge_budget,
         "objective": _pair_log_score(chosen, pair, PROBABILITY_FLOOR),
@@ -532,7 +552,7 @@ def _greedy(
     values: FloatArray,
     threshold: float | None,
     constraints: _Constraints,
-) -> tuple[BoolArray, int]:
+) -> tuple[BoolArray, int, int]:
     size = weights.shape[0]
     fixed = constraints.required_pairs
     nominations: list[tuple[float, int, int]] = []
@@ -555,14 +575,17 @@ def _greedy(
     for source, target in constraints.required:
         graph[source, target] = True
     reach = constraints.base_graph(size)
-    rejected = 0
+    rejected = skipped = 0
     for _, source, target in nominations:
         if _reaches(reach, target, source):
-            rejected += 1
+            if _reaches(graph, target, source):
+                rejected += 1
+            else:
+                skipped += 1
             continue
         graph[source, target] = True
         reach[source, target] = True
-    return graph, rejected
+    return graph, rejected, skipped
 
 
 # -- exact order search -------------------------------------------------------------------
@@ -710,7 +733,7 @@ def _cardinality_graph(
 
 def _pair_sampler(
     pair: FloatArray, samples: int, seed: int, constraints: _Constraints
-) -> tuple[list[BoolArray], list[int]]:
+) -> tuple[list[BoolArray], list[int], list[int]]:
     rng = np.random.default_rng(seed)
     size = pair.shape[0]
     fixed = constraints.required_pairs
@@ -718,6 +741,7 @@ def _pair_sampler(
     upper = tuple(zip(*np.triu_indices(size, k=1), strict=True))
     graphs: list[BoolArray] = []
     rejections: list[int] = []
+    order_skips: list[int] = []
     for _ in range(samples):
         proposed: list[tuple[int, int]] = []
         for low_value, high_value in upper:
@@ -739,17 +763,21 @@ def _pair_sampler(
         for source, target in constraints.required:
             graph[source, target] = True
         reach = constraints.base_graph(size)
-        rejected = 0
+        rejected = skipped = 0
         for index in rng.permutation(len(proposed)):
             source, target = proposed[int(index)]
             if _reaches(reach, target, source):
-                rejected += 1
+                if _reaches(graph, target, source):
+                    rejected += 1
+                else:
+                    skipped += 1
                 continue
             graph[source, target] = True
             reach[source, target] = True
         graphs.append(graph)
         rejections.append(rejected)
-    return graphs, rejections
+        order_skips.append(skipped)
+    return graphs, rejections, order_skips
 
 
 def _perturb_and_map(

@@ -78,7 +78,8 @@ MixedGraph(kind=dag, nodes=4, edges=[rain <-- sprinkler, rain --> wet, slippery 
   here. The expected-count decoder keeps as many edges as the probabilities expect,
   rounded (four), so it adds `rain --> sprinkler` too.
 - **Step 5.** The sampler draws 200 DAGs. `graph` is their medoid, the candidate closest
-  to all the others; every candidate is in `candidates`.
+  to all the others (the earliest one on an exact tie); every candidate is in
+  `candidates`.
 - **Step 6.** `root("sprinkler")` forbids every edge into `sprinkler`, so the pair
   flips to `sprinkler --> rain`, its other direction at 0.40.
 
@@ -112,8 +113,10 @@ variables (20 by default), because that search can grow exponentially.
 | --- | --- |
 | `decoded`, `native` | Always `True` and `False`. |
 | `decoder`, `parameters` | The versioned id and its settings, such as `threshold`. |
+| `threshold_source` | `"decoder"` when you passed a threshold, `None` otherwise. Through Welt it can be `"welt_native"`. |
 | `seed`, `samples` | The sampler's seed and draw count (`None` and 1 otherwise). |
-| `rejected_cycles` | Per candidate, how many nominated edges were skipped for closing a cycle. |
+| `rejected_cycles` | Per candidate, how many nominated edges were skipped for closing a directed cycle. |
+| `order_skipped` | Per candidate, how many were skipped only because they'd break the order knowledge. |
 | `objective` | The total log score of `graph`. |
 | `edge_budget` | `K`, for the cardinality decoders. |
 | `source_kind`, `source_provenance` | Where the probabilities came from. |
@@ -134,11 +137,13 @@ same candidates, and neither the input nor numpy's global random state changes.
 
 - **Forbidden edges, tiers, roots, sinks and `restrict_to`** remove directed edges before
   decoding.
-- **Order** (`order`, tiers) is enforced as an ordering: the decoded DAG has one
-  topological order that puts every "before" variable first. For tiers that's exactly
-  "no later variable is an ancestor of an earlier one". For separate `order()` pairs
-  it's a little stricter: a DAG that keeps each pair's ancestry right but has no single
-  order satisfying all the pairs is ruled out.
+- **Order** (`order`, tiers) is enforced as one time order: the decoded DAG has a
+  single topological order that agrees with every order statement and every edge at
+  once. For tiers that's the same as "no later variable is an ancestor of an earlier
+  one". For separate `order()` statements it's stricter than
+  `DomainKnowledge.violations`, which checks each statement on its own: with
+  `order("a", "b")` and `order("c", "d")`, the edges `b --> c` and `d --> a` pass
+  `violations` together, but no single order fits them, so a decoder keeps only one.
 - **Required edges** go in first, whatever their probability. A required set with a
   cycle raises.
 - **`confound`** raises: a DAG can't hold a latent confounder.
@@ -154,7 +159,9 @@ opt in: `discover(data, "cdfm", decoder="greedy")` runs the model once, reads it
 scores as independent edge probabilities and decodes them. Greedy then uses the model's
 own threshold (0.5 for AVICI, CDFM's adaptive one). The result keeps the scores in
 `diagnostics["edge_probabilities"]`, so you can try another decoder locally without a
-new run. See [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm).
+new run. The exact decoders' `max_nodes` cap (20 by default) is checked against your
+data's variables before anything is uploaded. See
+[Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm).
 
 Arrow returns a DAG of its own, so ergodic uses that by default. Its scores are decoded
 only if you ask, with `decoder=`, and are then read as independent marginals, like

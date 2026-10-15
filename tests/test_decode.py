@@ -329,7 +329,8 @@ def test_decoding_is_deterministic_and_never_mutates_its_input() -> None:
     probs = EdgeProbabilities(tuple("UVWXYZ"), values)
     snapshot = probs.values.copy()
     for method in DECODERS:
-        kwargs: dict[str, Any] = {"samples": 4, "seed": 1} if DECODERS[method].stochastic else {}
+        stochastic = method in ("pair_sampler_v1", "perturb_and_map_v1")
+        kwargs: dict[str, Any] = {"samples": 4, "seed": 1} if stochastic else {}
         first = decode(probs, method, **kwargs)
         second = decode(probs, method, **kwargs)
         assert first.graph == second.graph
@@ -431,6 +432,9 @@ def test_versioned_ids_and_aliases_resolve_alike() -> None:
         "pair_sampler_v1",
         "perturb_and_map_v1",
     }
+    with pytest.raises(TypeError):
+        DECODERS["greedy_v1"] = "changed"  # type: ignore[index]
+    assert all(isinstance(summary, str) for summary in DECODERS.values())
     config = Decoder("exact_map")
     assert config.method == "exact_map_v1" and not config.stochastic
     assert config.decode(probs).graph == decode(probs, "exact_map").graph
@@ -535,3 +539,60 @@ def test_top_level_exports() -> None:
     assert ergodic.EdgeProbabilities is EdgeProbabilities
     assert ergodic.decode is decode
     assert ergodic.DecodeResult is DecodeResult
+
+
+def test_order_knowledge_is_one_time_order_stricter_than_violations() -> None:
+    """order(a, b) and order(c, d) with strong b -> c and d -> a (the review's probe).
+
+    {b -> c, d -> a} breaks neither statement on its own reading (no later variable is
+    an ancestor of an earlier one), but no single time order puts a before b, c before
+    d and every edge forward. The decoders enforce that one order, so they keep only
+    one of the two edges and report the other as skipped for the order.
+    """
+    names = ("a", "b", "c", "d")
+    values = np.full((4, 4), 0.01)
+    np.fill_diagonal(values, 0.0)
+    values[1, 2] = values[3, 0] = 0.95
+    knowledge = DomainKnowledge().order("a", "b").order("c", "d")
+    both = ergodic.dag([("b", "c"), ("d", "a")], nodes=names)
+    assert knowledge.violations(both) == []
+    probs = EdgeProbabilities(names, values, kind="pair_state")
+    for method in ("greedy", "exact_map"):
+        result = decode(probs, method, knowledge=knowledge)
+        assert len(result.graph.edges) == 1
+        assert knowledge.violations(result.graph) == []
+    greedy = decode(probs, knowledge=knowledge)
+    # Equal weights: the tie goes to the earlier source, b.
+    assert [e.glyph() for e in greedy.graph.edges] == ["b --> c"]
+    assert greedy.diagnostics["order_skipped"] == (1,)
+    assert greedy.diagnostics["rejected_cycles"] == (0,)
+    # Without the order statements both edges stay.
+    assert len(decode(probs).graph.edges) == 2
+
+
+def test_threshold_source_is_recorded_locally() -> None:
+    assert decode(pair_state()).diagnostics["threshold_source"] is None
+    assert decode(pair_state(), threshold=0.2).diagnostics["threshold_source"] == "decoder"
+
+
+def test_from_bootstrap_reads_names_with_spaces() -> None:
+    result = BootstrapResult(
+        method="pc",
+        n_runs=4,
+        n_failed=0,
+        edges={frozenset(("blood pressure", "heart rate")): 1.0},
+        marks={"blood pressure --> heart rate": 1.0},
+        variables=("blood pressure", "heart rate"),
+    )
+    probs = EdgeProbabilities.from_bootstrap(result)
+    assert probs.values[0, 1] == 1.0
+    window = BootstrapResult(
+        method="pcmci",
+        n_runs=1,
+        n_failed=0,
+        edges={},
+        marks={"x[t-1] --> y[t]": 1.0},
+        variables=("x", "y"),
+    )
+    with pytest.raises(ValueError, match="window graphs"):
+        EdgeProbabilities.from_bootstrap(window)

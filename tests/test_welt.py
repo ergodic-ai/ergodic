@@ -472,6 +472,35 @@ def test_facade_passes_the_decoder_through() -> None:
     assert result.method == "welt:avici" and result.diagnostics["decoded"] is True
 
 
+def test_an_order_search_too_large_for_the_data_is_refused_before_paying() -> None:
+    fake = _decoding_fake()
+    with fake.client() as client, pytest.raises(ValueError, match="max_nodes=3"):
+        welt_discover(
+            continuous(), "avici", decoder=Decoder("exact_map", max_nodes=3), client=client
+        )
+    assert fake.calls == []
+
+
+def test_a_decode_failure_after_the_paid_run_keeps_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ergodic.welt import WeltDecodeError
+    from ergodic.welt import _discovery as bridge
+
+    def failing(*args: Any, **kwargs: Any) -> Any:
+        raise ValueError("simulated decoder failure")
+
+    monkeypatch.setattr(bridge, "decode", failing)
+    fake = _decoding_fake()
+    with fake.client() as client, pytest.raises(WeltDecodeError) as error:
+        welt_discover(continuous(), "avici", decoder="greedy", client=client)
+    assert error.value.result.job_id == "job_d1"
+    assert list(error.value.scores.columns) == ORDER
+    assert error.value.decoder == "greedy_v1"
+    assert "simulated decoder failure" in str(error.value)
+    assert fake.count("POST", "/v1/discoveries") == 1
+
+
 def test_decoder_refusals_happen_before_any_request() -> None:
     fake = _decoding_fake()
     with fake.client() as client:

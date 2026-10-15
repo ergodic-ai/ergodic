@@ -10,7 +10,7 @@ The shared objects live at the top level of `ergodic`, and the pillars under the
 | Estimate per-unit effects (CATE) | `cate` | [Causal inference](inference.md) |
 | Stress-test an estimate | `refute_effect` | [Checking an estimate](inference.md#checking-an-estimate) |
 | Learn a graph from data | `discover`, `bootstrap` | [Causal discovery](discovery.md) |
-| Decode edge probabilities into a DAG | `EdgeProbabilities`, `decode` | [Causal discovery](discovery.md) |
+| Decode edge probabilities into a DAG | `EdgeProbabilities`, `decode` | [Decode a DAG from edge probabilities](https://ergodic.dev/decode-a-graph.html) |
 | Measure a rollout with no graph | `did`, `synthetic_control`, `interrupted_time_series` | [Panel designs](panel.md) |
 | Forecast a series, or a whole hierarchy | `forecast`, `backtest` | [Forecasting](forecast.md) |
 | Recover a hidden regime from one series | `recover`, `certify`, `calibrate` | [Hidden regimes](latent.md) |

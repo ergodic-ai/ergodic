@@ -13,6 +13,7 @@ Turning them into a DAG is an explicit modelling step, :func:`ergodic.decode`.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
 
 ProbabilityKind = Literal["independent", "pair_state", "frequency"]
 _KINDS: tuple[str, ...] = ("independent", "pair_state", "frequency")
+# An edge glyph: two names around a three-character mark such as "-->" or "o-o". Names
+# may hold spaces, so the mark is found by its shape, not by splitting on whitespace.
+_GLYPH = re.compile(r"(.+?) ([-<o]-[->o]) (.+)")
 PAIR_SIMPLEX_TOLERANCE = 1e-12
 """Slack allowed on ``P[i, j] + P[j, i] <= 1`` for the pair-state readings."""
 
@@ -156,8 +160,8 @@ class EdgeProbabilities:
         ``i -> j`` ``p(1 - q)``, ``j -> i`` ``q(1 - p)``, renormalized. When both
         are exactly 1 the limit is undecided, so the pair becomes ``(0, 0.5,
         0.5)``. This keeps each model's direction ranking and never looks at a
-        true graph. It is the conversion the research decoders were qualified
-        with (EXP-0626).
+        true graph. It is the conversion Ergodic's research decoders were
+        evaluated with.
 
         ``"pair_state"`` values are returned unchanged (the same object).
         ``"frequency"`` values already satisfy the pair simplex (one edge per
@@ -302,13 +306,17 @@ class EdgeProbabilities:
         values = np.zeros((len(names), len(names)), dtype=np.float64)
         dropped = 0.0
         for glyph, frequency in result.marks.items():
-            parts = glyph.split()
-            if len(parts) != 3 or parts[0] not in index or parts[2] not in index:
+            match = _GLYPH.fullmatch(glyph)
+            if match is None:
+                raise ValueError(f"glyph {glyph!r} is not an edge glyph like 'X --> Y'")
+            first, marks, second = match.groups()
+            if first not in index or second not in index:
                 raise ValueError(
-                    f"glyph {glyph!r} does not name two of the data's variables; "
-                    "from_bootstrap reads iid bootstrap results, not window graphs"
+                    f"glyph {glyph!r} does not name two of the data's variables "
+                    f"({first!r}, {second!r}); from_bootstrap reads iid bootstrap results, "
+                    "not window graphs"
                 )
-            u, marks, v = index[parts[0]], parts[1], index[parts[2]]
+            u, v = index[first], index[second]
             left, right = marks[0], marks[-1]
             if left == "-" and right == ">":
                 values[u, v] += frequency
@@ -363,7 +371,7 @@ def _thaw(value: Any) -> Any:
 
 
 def _condition_independent(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-    """Independent marginals conditioned on no two-cycle (EXP-0626 ``pair_probabilities``)."""
+    """Independent marginals conditioned on no two-cycle (the research ``pair_probabilities``)."""
     result = np.zeros_like(values)
     size = values.shape[0]
     for low in range(size):

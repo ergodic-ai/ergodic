@@ -34,10 +34,11 @@ except ImportError as error:  # pragma: no cover - exercised without the extra
     ) from error
 
 from ._data import load_research_dataset, upload_dataset
-from ._discovery import WeltGraphNotDAGError, discover
+from ._discovery import WeltDecodeError, WeltGraphNotDAGError, discover
 from ._learner import WeltLearner
 
 __all__ = [
+    "WeltDecodeError",
     "WeltGraphNotDAGError",
     "WeltLearner",
     "discover",

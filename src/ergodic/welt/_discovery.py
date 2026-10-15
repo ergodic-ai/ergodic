@@ -10,7 +10,7 @@ the paid run is not lost.
 
 With an explicit ``decoder=`` the native edge scores become an
 :class:`~ergodic.discovery.EdgeProbabilities` and a named local decoder
-(:func:`ergodic.decode`) turns them into a DAG labelled ``decoded`` (DEC-079). That is
+(:func:`ergodic.decode`) turns them into a DAG labelled ``decoded``. That is
 the only path by which a non-DAG model (AVICI, CDFM) reaches an ergodic DAG.
 """
 
@@ -20,7 +20,7 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from ..discovery import Decoder, DecodeResult, DiscoveryResult, EdgeProbabilities, decode
-from ..discovery._decode import check_knowledge
+from ..discovery._decode import check_knowledge, check_size
 from ._client import frame_rows, using
 from ._data import _require_tabular
 
@@ -86,6 +86,35 @@ class WeltGraphNotDAGError(ValueError):
         super().__init__(message)
 
 
+class WeltDecodeError(ValueError):
+    """Decoding a paid Welt result's edge scores failed; the result is not lost.
+
+    ergodic checks every decoder setting before submitting, so this is rare. It
+    carries the native result and its scores, which stay in your Welt workspace, so
+    you can decode them again locally.
+
+    Attributes:
+        model: The Welt model id.
+        decoder: The versioned decoder id that failed.
+        result: The native ``welt.CausalResult``.
+        scores: Its edge-score matrix (rows the source, columns the target).
+    """
+
+    def __init__(
+        self, model: str, decoder: str, error: Exception, result: Any, scores: pd.DataFrame
+    ) -> None:
+        self.model = model
+        self.decoder = decoder
+        self.result = result
+        self.scores = scores
+        super().__init__(
+            f"decoding Welt model {model!r}'s scores with {decoder!r} failed after the paid "
+            f"run: {error}. The result stays in your Welt workspace (job "
+            f"{result.job_id!r}); decode this error's .scores locally with "
+            "ergodic.EdgeProbabilities.from_frame and ergodic.decode"
+        )
+
+
 def native_graph_type(model: str, client: Any) -> str | None:
     """The native graph type a Welt causal model returns, before running it.
 
@@ -140,7 +169,7 @@ def discover(
     (the catalogue's stated graph type wins over that built-in list). A result
     that is still not a declared DAG is refused too, with the paid result attached.
 
-    ``decoder=`` opts into local decoding (DEC-079). The run then accepts any model,
+    ``decoder=`` opts into local decoding. The run then accepts any model,
     reads the native edge scores (rows the source, columns the target) as
     :class:`~ergodic.discovery.EdgeProbabilities` of kind ``"independent"`` (each
     score a separate directed-edge marginal, uncalibrated) with the Welt provenance,
@@ -152,7 +181,10 @@ def discover(
     drops edges that close a cycle or a reciprocal pair. On a DAG model (``arrow``)
     the decoder replaces the native DAG with one decoded from the same scores, read
     the same independent way. Any other choice can be made locally, with no new run,
-    from ``result.diagnostics["edge_probabilities"]``.
+    from ``result.diagnostics["edge_probabilities"]``. Every decoder setting, the
+    ``max_nodes`` cap against the data's variable count included, and the knowledge
+    are checked before anything is uploaded; if decoding still fails after the paid
+    run, :class:`WeltDecodeError` carries the native result and its scores.
 
     Args:
         data: Observational rows; every variable must be continuous and complete.
@@ -186,9 +218,12 @@ def discover(
 
     Raises:
         TypeError: ``data`` is not tabular.
+        WeltDecodeError: Decoding failed after the paid run; the error carries the
+            result and its scores.
         ValueError: ``knowledge`` was given without a decoder (or names unknown
-            variables or a confounded pair), the decoder settings are invalid, or a
-            variable is not continuous or has missing values. Nothing is uploaded.
+            variables or a confounded pair), the decoder settings are invalid or
+            its ``max_nodes`` is below the variable count, or a variable is not
+            continuous or has missing values. Nothing is uploaded.
         WeltGraphNotDAGError: The model's native graph is not a declared DAG, either
             known before submitting (nothing is paid) or found in the result.
     """
@@ -203,6 +238,8 @@ def discover(
             "while decoding the edge scores locally)"
         )
     variables = list(data.variables)
+    if config is not None:
+        check_size(config.method, len(variables), config.max_nodes)
     if knowledge is not None:
         check_knowledge(variables, knowledge)
     not_continuous = [name for name in variables if not data.schema[name].is_continuous]
@@ -217,7 +254,7 @@ def discover(
     columns, rows = frame_rows(data.to_pandas()[variables])
     with using(client) as welt_client:
         # cdfm and avici are refused here, before anything is paid for, unless the
-        # caller opted into an explicit local decoder (DEC-079).
+        # caller opted into an explicit local decoder.
         if config is None:
             expected = native_graph_type(model, welt_client)
             if expected is not None and expected != "dag":
@@ -307,15 +344,18 @@ def _decoded(
         # strict and below 1, so the largest float under 1 reads the same.
         threshold = min(float(native_threshold), math.nextafter(1.0, 0.0))
         threshold_source = "welt_native"
-    decoded = decode(
-        probabilities,
-        config.method,
-        threshold=threshold,
-        knowledge=knowledge,
-        samples=config.samples,
-        seed=config.seed,
-        max_nodes=config.max_nodes,
-    )
+    try:
+        decoded = decode(
+            probabilities,
+            config.method,
+            threshold=threshold,
+            knowledge=knowledge,
+            samples=config.samples,
+            seed=config.seed,
+            max_nodes=config.max_nodes,
+        )
+    except (ValueError, RuntimeError) as error:
+        raise WeltDecodeError(model, config.method, error, result, scores) from error
     native_edges = tuple(
         (edge["u"], edge["v"]) if edge["v_mark"] == "arrow" else (edge["v"], edge["u"])
         for edge in result.to_dict()["edge_marks"]
