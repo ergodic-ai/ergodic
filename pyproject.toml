@@ -156,6 +156,8 @@ files = ["src", "tests", "scripts"]
 mypy_path = "src"
 explicit_package_bases = true
 namespace_packages = true
+# arviz 0.23 (locked for Python 3.11) ships no annotations; 1.x does.
+untyped_calls_exclude = ["arviz"]
 
 [[tool.mypy.overrides]]
 module = ["networkx.*"]
