@@ -23,7 +23,14 @@ bootstrap frequencies) over named variables, and :func:`decode` turns one into
 a DAG with an explicit, versioned decoder (:class:`DecodeResult`).
 :func:`test_graph` runs the other direction: it tests the independences a
 candidate graph implies against data and combines them with Fisher's C
-(:class:`GraphTest`). Background
+(:class:`GraphTest`). :func:`graph_posterior` turns edge probabilities, or
+data and a score (:class:`BGe` for linear-Gaussian data), into a posterior
+over DAGs under that method (:class:`GraphSamples`), exact by a subset
+recursion when it can be and by structure MCMC otherwise, and
+:func:`evaluate_graph` reads a candidate DAG, CPDAG, PAG or ADMG against it
+(:class:`GraphEvaluation`); :func:`adjustment_probability` and
+:func:`average_effect` carry it to the effect level (:class:`AveragedEffect`).
+Background
 knowledge (including a skeleton restriction through ``restrict_to``) enters
 through :class:`ergodic.DomainKnowledge`.
 
@@ -37,13 +44,22 @@ rather than a graph.
 
 from __future__ import annotations
 
+from ._average import (
+    AdjustmentGroup,
+    AveragedEffect,
+    adjustment_probability,
+    average_effect,
+)
 from ._bootstrap import BootstrapResult, bootstrap
 from ._ci import CIResult, CITest, DSeparationOracle
 from ._decode import DECODERS, Decoder, DecodeResult, decode
 from ._discover import discover
+from ._evaluate import GraphClaim, GraphEvaluation, evaluate_graph
 from ._granger import GrangerResult, granger
 from ._graphtest import GraphTest, ImpliedIndependence, test_graph
 from ._lagged import lagged_node, lagged_tabular, parse_lagged
+from ._mcmc import PosteriorConvergenceWarning
+from ._posterior import FeatureProbability, GraphSamples, graph_posterior
 from ._probabilities import EdgeProbabilities
 from ._result import DiscoveryResult
 from ._score import Score
@@ -63,7 +79,7 @@ from .algorithms import (
     HillClimb,
 )
 from .ci import GCM, Discrete, Linear, Mixed
-from .scores import BIC, BDeu, DiscreteBIC, MixedBIC
+from .scores import BIC, BDeu, BGe, DiscreteBIC, MixedBIC
 
 __all__ = [
     "BIC",
@@ -77,7 +93,10 @@ __all__ = [
     "PCMCI",
     "RFCI",
     "AStar",
+    "AdjustmentGroup",
+    "AveragedEffect",
     "BDeu",
+    "BGe",
     "BootstrapResult",
     "CIResult",
     "CITest",
@@ -89,21 +108,30 @@ __all__ = [
     "Discrete",
     "DiscreteBIC",
     "EdgeProbabilities",
+    "FeatureProbability",
     "GRaSP",
     "Glasso",
     "GrangerResult",
+    "GraphClaim",
+    "GraphEvaluation",
+    "GraphSamples",
     "GraphTest",
     "HillClimb",
     "ImpliedIndependence",
     "Linear",
     "Mixed",
     "MixedBIC",
+    "PosteriorConvergenceWarning",
     "Score",
     "TimeSeriesDiscoveryResult",
+    "adjustment_probability",
+    "average_effect",
     "bootstrap",
     "decode",
     "discover",
+    "evaluate_graph",
     "granger",
+    "graph_posterior",
     "lagged_node",
     "lagged_tabular",
     "parse_lagged",

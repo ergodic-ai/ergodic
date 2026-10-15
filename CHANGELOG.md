@@ -82,6 +82,51 @@ Planned as 0.3.0.
   and 4.85% [3.95%, 5.88%], inside its [3.5%, 6.5%] band. Power against one missing
   edge of weight at least 0.5 is close to 1.
 
+- A posterior over DAGs under a method (API-152, DEC-082). `graph_posterior(probabilities)`
+  weighs each DAG by its pair log score (the pair states the decoders read) plus the
+  knowledge's `log_prior`, over the DAGs the hard knowledge allows; order statements are
+  read ancestrally, as `violations` reads them. `graph_posterior(data, score=...)` uses a
+  decomposable score with a prior uniform over DAGs times the knowledge; BGe and BDeu are
+  marginal likelihoods, the BIC family is labelled approximate. The result,
+  `GraphSamples`, holds the distinct DAGs with weights, `edge_probabilities()` (pair
+  states) with `edge_errors()`, `probability(feature)` with a Monte Carlo error,
+  `log_target(graph)`, `best_graph` and `top(k)`. It is exact when it can be: every DAG
+  enumerated up to 4 variables (5 for a score), and for edge probabilities without a
+  path-level order constraint a subset recursion over sink sets (about `3^n` steps, up
+  to `max_exact=15`) that gives the exact normalizer, exact edge marginals, exact draws
+  and the exact best graph. Otherwise multi-chain structure MCMC (single-pair add,
+  delete and reverse moves; each chain a four-rung parallel-tempering ladder; chains
+  from the greedy decode and random DAGs) with split
+  R-hat and bulk effective sample sizes, Rao-Blackwellized edge marginals for edge
+  probabilities, and a `PosteriorConvergenceWarning`.
+- `evaluate_graph(candidate, probabilities_or_samples)` reads a DAG, CPDAG, PAG, MAG or
+  ADMG against that posterior (`GraphEvaluation`): the log-ratio to the best graph, the
+  credible level (the mass ranked strictly above, ties half; a Bayesian tail
+  probability, not a p-value), one `GraphClaim` per statement with its probability and
+  Monte Carlo error, the class probability of a CPDAG, the expected SHD against the
+  between-draw baseline (with the former's Monte Carlo error), and P(acyclic) under raw
+  independent marginals. When every draw agrees, a Monte Carlo error is the rule-of-three
+  bound `3 / draws` (`bound` on `FeatureProbability`, `GraphClaim` and
+  `AdjustmentGroup`) rather than 0, and under the exact
+  recursion the candidate's own share of its credible level is exact. A bidirected
+  edge or latent node is listed as not assessable.
+- Effects over a posterior over DAGs (DEC-082 decision 6). `adjustment_probability(samples,
+  treatment, outcome, adjustment)` is the posterior probability that a set satisfies the
+  adjustment criterion. `average_effect(samples, data, treatment, outcome)` groups the
+  DAGs by the adjustment set identification picks, estimates once per set (the family
+  default, seeded; `strategy=`, `learner=`, `rule="minimal"`) and returns an
+  `AveragedEffect`: the `AdjustmentGroup`s (set, mass with its Monte Carlo error, DAG
+  count, estimate, standard error), the mixture mean with its Monte Carlo error from the
+  masses, and its variance by the law of
+  total variance, and the zero-effect (no directed path), unidentified (a variable the
+  data lacks makes every set invalid) and truncated (beyond `max_sets`) masses, the last
+  two left out of the mixture and reported.
+- The `BGe` score (`score="bge"`): the linear-Gaussian marginal likelihood of Geiger and
+  Heckerman with the Kuipers, Moffa and Heckerman correction and an empirical-Bayes prior
+  mean (the sample mean; BiDAG uses zero, which agrees on centred data), decomposable and
+  score-equivalent, for `graph_posterior` and the score-based searches.
+  `Score.marginal_likelihood` says whether a score is one (BDeu, BGe).
+
 ### Changed
 - A decode with knowledge, hard-only knowledge included, now audits it: one extra
   knowledge-free decode, which can cost more than the constrained one, and a

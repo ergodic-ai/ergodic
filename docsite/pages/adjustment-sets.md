@@ -136,6 +136,7 @@ DAGs isn't supported. A class with more than `max_members=1000` members also rai
 <div class="cards" markdown="1">
 
 - [Estimate an average effect](estimate-average-effect.md): estimate with the set you found.
+- [Average an effect over the graphs](evaluate-a-graph.md#average-an-effect-over-the-graphs): how likely a set is valid when the graph is uncertain.
 - [Estimate a mediated effect](mediation.md): split the effect through `W` into direct and indirect parts.
 - [Python reference](reference-identification.md): every function on this page.
 

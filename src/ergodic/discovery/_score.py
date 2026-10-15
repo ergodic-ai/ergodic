@@ -11,7 +11,10 @@ alike.
 
 Two declared properties matter to the searches: ``decomposable`` (everything
 here) and ``score_equivalent`` (equal scores across a Markov equivalence
-class; GES and the order-based searches require it).
+class; GES and the order-based searches require it). A third,
+``marginal_likelihood``, tells :func:`~ergodic.discovery.graph_posterior`
+whether the summed locals are a log marginal likelihood (BDeu, BGe) or a
+penalized fit that only approximates one (the BIC family).
 
 Like a test, a score declares the input form it needs: ``"numeric"`` hands
 ``local_from_arrays`` 2-D float blocks (one-hot for discrete columns),
@@ -53,6 +56,7 @@ class Score:
     needs: ClassVar[str] = "numeric"
     decomposable: ClassVar[bool] = True
     score_equivalent: ClassVar[bool] = True
+    marginal_likelihood: ClassVar[bool] = False
 
     def __init__(self, data: TabularData | None = None) -> None:
         self._data: TabularData | None = None

@@ -119,7 +119,8 @@ The three kinds read the numbers differently:
     Edge probabilities are per-edge numbers. They ignore acyclicity and how edges
     depend on each other, and a model's scores are usually uncalibrated. Turning them
     into a DAG is a modelling choice you make with a decoder, not something the model
-    claims.
+    claims. `graph_posterior` builds the posterior over DAGs they imply; see
+    [Evaluate a candidate graph](evaluate-a-graph.md).
 
 `threshold` draws a pair whose two directions both pass as an undirected `X --- Y`
 edge, because a graph holds one edge per pair. Read it as "adjacent, direction
@@ -136,6 +137,7 @@ refused.
 <div class="cards" markdown="1">
 
 - [Decode a DAG from edge probabilities](decode-a-graph.md): turn the matrix into a DAG.
+- [Evaluate a candidate graph](evaluate-a-graph.md): the posterior over DAGs, and a graph read against it.
 - [Check stability with the bootstrap](bootstrap-stability.md): where frequencies come from.
 - [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm): edge probabilities from Welt.
 
