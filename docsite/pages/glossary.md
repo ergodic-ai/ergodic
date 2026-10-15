@@ -116,7 +116,9 @@ See [Difference-in-differences and event studies](difference-in-differences.md).
 - **Welt**: Ergodic's hosted service for tabular foundation models, causal
   discovery included.
 - **Native graph type**: the kind of graph a Welt model declares it returns. ergodic
-  converts only a declared DAG.
+  converts a declared DAG directly. It refuses `cdfm` and `avici`, whose graphs are
+  not declared DAGs, unless you pass an explicit `decoder=` that decodes their edge
+  scores locally.
 - **Fit budget**: `max_fits`, the most paid fits a `WeltLearner` and its copies may
   make.
 

@@ -8,7 +8,7 @@ assumption moves an estimate, then look up what each step of ergodic assumes.
 
 ## Run the program
 
-The bundled birthweight data (Almond, Chay and Lee, 2005) records 4,642 births, the
+The bundled birthweight data (Almond, Chay and Lee, 2005; Cattaneo, 2010) records 4,642 births, the
 mother's smoking and 17 background variables. The program asks the same question
 under three different graphs.
 

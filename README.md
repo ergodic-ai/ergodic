@@ -4,7 +4,8 @@ Causal AI in one Python package. ergodic learns causal graphs from data, tells y
 whether a question can be answered from them, and estimates the effect with an
 interval. It also covers quasi-experiments on panels, process mining on event logs,
 structural causal models, and Bayesian forecasting with drivers. ergodic runs
-locally; the optional `[welt]` extra calls the hosted Welt service. ergodic is pre-1.0, so the API can change between minor versions.
+locally; the optional `[welt]` extra calls the hosted Welt service. ergodic is
+pre-1.0, so the API can change between minor versions.
 
 **Documentation: [ergodic.dev](https://ergodic.dev)**
 
@@ -17,7 +18,8 @@ uv add "ergodic"
 ```
 
 Requires Python 3.11 or later. The extras `"ergodic[scm]"`, `"ergodic[forecast]"` and
-`"ergodic[latent]"` add PyMC for the Bayesian pillars. `"ergodic[welt]"` connects to
+`"ergodic[latent]"` add PyMC for structural causal models, forecasting and hidden
+regimes. `"ergodic[welt]"` connects to
 [Welt](https://welt.ergodic.dev), which runs hosted models on your data.
 
 ## Your first causal effect

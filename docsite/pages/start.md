@@ -95,5 +95,6 @@ treatment does not affect.
 - [Estimate an average effect](estimate-average-effect.md): adjust for known confounders on real data.
 - [Notebooks](notebooks.md): the learn series and case studies.
 - [Python reference](reference.md): every function and its parameters.
+- [Example scripts](https://github.com/ergodic-ai/ergodic/tree/v0.2.0/examples): runnable analyses of the bundled datasets.
 
 </div>
