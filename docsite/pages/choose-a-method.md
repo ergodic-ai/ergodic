@@ -72,8 +72,10 @@ gcm:    MixedGraph(kind=cpdag, nodes=3, edges=[dose --- level, level --- respons
 
 ## The methods and their assumptions
 
-Every method assumes the causal Markov condition and faithfulness: the independences
-in the data are exactly those the graph implies. [Assumptions behind each
+The test- and score-based searches assume the causal Markov condition and
+faithfulness: the independences in the data are exactly those the graph implies.
+Some need less: LiNGAM's directions come from its noise assumption, and BOSS, GRaSP
+and exact search are consistent under weaker conditions than faithfulness. [Assumptions behind each
 step](assumptions.md) explains both. The table lists what each method adds.
 
 | `method=` | Runs on | Hidden common causes | Data | Returns |
@@ -83,13 +85,16 @@ step](assumptions.md) explains both. The table lists what each method adds.
 | `"mmpc"` | Test | Not modelled | Any, through the test | Undirected skeleton |
 | `"ges"`, `"boss"`, `"grasp"` | Score | Not allowed | Any, through the score | CPDAG |
 | `"hc"` | Score | Not allowed | Any, through the score | One DAG, a local optimum |
-| `"astar"` | Score | Not allowed | Any, through the score | The best-scoring DAG |
+| `"astar"` | Score | Not allowed | Any, through the score | One DAG of the best-scoring class |
 | `"lingam"` | Itself | Not allowed | Continuous, linear, non-Gaussian noise | DAG |
-| `"glasso"` | Itself | Not modelled | Continuous, Gaussian | Undirected skeleton |
+| `"glasso"` | Itself | Not modelled | Continuous, Gaussian | Moral graph (skeleton plus parents of common children) |
 | `"pcmci"` | Test | Not allowed | Time series or panel | Window graph |
 
 On Gaussian data, LiNGAM still runs, but its directions mean nothing. A* refuses more
-than `node_limit=20` variables, because exact search grows exponentially.
+than `node_limit=20` variables, because exact search grows exponentially. Every DAG
+in a class gets the same score, so the DAG that A* or HillClimb returns is one member
+picked by tie-breaking. Identify effects on `cpdag_of_dag(result.graph)`, not on that
+DAG.
 
 ## Tests and scores
 
@@ -131,7 +136,8 @@ to `discover` raises an error, because the data would then come from two places.
 !!! caution "GCM sees only the conditional mean"
     GCM tests whether two residuals are correlated. Dependence that leaves the
     conditional covariance at zero, such as one variable changing only the spread of
-    another, goes unseen. Categorical endpoints raise an error; use `"mixed"`.
+    another, goes unseen. Categorical endpoints with three or more levels raise an error; use `"mixed"`. A
+    binary endpoint is tested as a 0/1 column.
 
 <details markdown="1"><summary>How do I make the search faster?</summary>
 
