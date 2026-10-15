@@ -54,7 +54,7 @@ for method, options in recipes:
     print(f"{result.reconciliation:32} coherent={result.coherent}  total in month 6: {final:.1f}")
 ```
 
-```output from="reconcile_regions.py" numbers="vary"
+```output from="reconcile_regions.py" tol="0.5" rtol="0.05" vary="3"
 Hierarchy(nodes=3, leaves=2, agg='sum')
 ForecastResult(draws: 3 series [total, north, south], horizon=6, S=400, coherent=False)
 total minus regions: [1.1 1.5 1.3 0.7 1.1 1.2]
@@ -66,7 +66,7 @@ mint(weights=mint_shrink)        coherent=True  total in month 6: 183.8
 
 - **Step 2.** `reconcile="none"` keeps each model's own answer, and the result says
   `coherent=False`.
-- **Step 3.** On average, the total's model forecasts about 1 more per month than the
+- **Step 3.** The total's model forecasts slightly more per month (around 1) than the
   two regional models add up to.
 - **Step 4.** Every strategy makes the levels agree on every draw. They differ in
   where they land the total, because each believes a different level.

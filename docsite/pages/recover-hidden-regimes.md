@@ -47,7 +47,7 @@ agreement = np.mean(ticks == switch[: ticks.size])
 print(f"agreement with the planted switch: {max(agreement, 1 - agreement):.2f}")
 ```
 
-```output from="hidden_regimes.py" numbers="vary"
+```output from="hidden_regimes.py" tol="0.1" vary="5-6"
 LatentResult('signal', steps=15, decoded=150/800, verdicts=[spread])
 MarkovChain(stay_alpha=4.0, stay_beta=2.0)
 level  +0.09  [-0.02, +0.21]
@@ -80,8 +80,8 @@ whichever state the label alignment settled on. Here it named the quiet stretch
 state 1. That's why the path reads `0` from tick 480 to tick 1055, and why the
 spread delta is negative.
 
-A delta is state 1 minus state 0. A spread delta of −0.93 says the noise in state 1
-is about e^−0.93 ≈ 0.39 times the noise in state 0. The planted ratio is 1/3, a log
+A delta is state 1 minus state 0. A spread delta of about −0.9 says the noise in
+state 1 is about e^−0.9 ≈ 0.4 times the noise in state 0. The planted ratio is 1/3, a log
 of −1.10. Frames that mix both states pull the estimate toward zero.
 
 `result.deltas()` reports a 94% interval per block, with no correction.

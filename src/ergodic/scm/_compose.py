@@ -28,7 +28,7 @@ What it owns:
 The gotchas, all handled here: ``do`` is a length-n vector; the intervened node
 leaves the predictive set; ``sample_posterior_predictive`` matches by name and is
 silent on a mismatch (one naming scheme everywhere); ``do`` returns a new model;
-arviz is v2 (``from_dict``).
+the merged posterior is a plain ``xarray.Dataset`` (see ``_merged_idata``).
 """
 
 from __future__ import annotations

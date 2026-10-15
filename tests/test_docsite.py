@@ -137,6 +137,15 @@ def test_numbers_vary_compares_text_only() -> None:
     assert not examples.same("min_ess=25.8", "min_ess=5.4")
 
 
+def test_vary_lines_scope_the_looser_rule() -> None:
+    expected = "coverage 1.00\nmin_ess 25.8\n"
+    assert examples.same(expected, "coverage 1.00\nmin_ess 5.4\n", vary_lines={2})
+    assert not examples.same(expected, "coverage 0.50\nmin_ess 5.4\n", vary_lines={2})
+    assert examples.same(expected, "coverage 1.02\nmin_ess 5.4\n", tol=0.05, vary_lines={2})
+    assert not examples.same(expected, "coverage 1.00\n", vary_lines={2})
+    assert not examples.same(expected, "coverage 1.00\nmax_ess 5.4\n", vary_lines={2})
+
+
 def test_programs_run_without_network(tmp_path: Path) -> None:
     code = (
         "import socket\ntry:\n    socket.create_connection(('example.com', 80), timeout=1)\n"

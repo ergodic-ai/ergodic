@@ -53,7 +53,7 @@ diagnostics = reports[-1].diagnostics()
 print(diagnostics[["fold", "cutoff", "divergences", "min_ess"]].round(1).to_string(index=False))
 ```
 
-```output from="backtest_sales.py" numbers="vary"
+```output from="backtest_sales.py" tol="0.5" rtol="0.1" vary="8-9"
 BacktestReport(Bayesian, expanding: 2 folds at [48, 54], horizon=6, 1 nodes)
                  mae   rmse  mase   crps  coverage
 Naive          10.53  10.87  0.57   6.79      0.92
@@ -71,9 +71,10 @@ Bayesian        5.30   6.00  0.29   3.46      1.00
   error measure. Its 90% bands held all 12 held-out months.
 - **Step 4, continued.** `SeasonalNaive` repeats last year, so it misses a year of trend: its
   bands never contain the actuals.
-- **Step 5.** One divergent transition across both folds' 1,000 draws, and at least
-  25 effective draws for the worst parameter in each fold, well below the 100 at
-  which the fit warns. Raise `draws` and `warmup`, or `chains`, for decisions.
+- **Step 5.** At most a divergent transition or two across both folds' 1,000 draws,
+  and only tens of effective draws for the worst parameter in each fold, well below
+  the 100 at which the fit warns. These diagnostics move from machine to machine at
+  this budget. Raise `draws` and `warmup`, or `chains`, for decisions.
 
 ## Read the scores
 

@@ -13,10 +13,11 @@ The rules (the Welt next-pass rules in welt-api ``docs/sdk-docs-handoff.md``):
 - An ``output`` panel names its program with ``from="name.py"`` (optionally a
   ``lines="a-b"`` slice of its standard output). ``record`` writes the program's output
   into the panel; ``check`` reruns the program and compares, exactly by default or with
-  ``tol``/``rtol`` numeric tolerances for sampling-based pages. ``numbers="vary"`` is
-  for MCMC pages whose draws differ between platforms (the recording Mac and Linux
-  CI): the text, and how many numbers it holds, must still match exactly, but the
-  numbers themselves are not compared.
+  ``tol``/``rtol`` numeric tolerances for sampling-based pages. ``vary="a-b"`` names
+  panel lines whose numbers differ between platforms (MCMC diagnostics such as
+  effective sample sizes, which move between the recording Mac and Linux CI): on
+  those lines the text and the count of numbers must match, but the values are not
+  compared. Every other line keeps the panel's exact or ``tol``/``rtol`` check.
 """
 
 from __future__ import annotations
@@ -235,11 +236,22 @@ def same(
     rtol: float = 0.0,
     *,
     numbers_vary: bool = False,
+    vary_lines: set[int] | frozenset[int] = frozenset(),
 ) -> bool:
     """Exact match, or numbers within ``tol + rtol * |expected|`` and the same text.
 
-    With ``numbers_vary`` only the text and the count of numbers must match.
+    With ``numbers_vary`` only the text and the count of numbers must match. With
+    ``vary_lines`` (1-based) that looser rule applies to those lines only, and the
+    texts must have the same number of lines.
     """
+    if vary_lines:
+        left_lines, right_lines = expected.split("\n"), actual.split("\n")
+        if len(left_lines) != len(right_lines):
+            return False
+        return all(
+            same(a, b, tol, rtol, numbers_vary=i in vary_lines)
+            for i, (a, b) in enumerate(zip(left_lines, right_lines, strict=True), 1)
+        )
     if expected == actual:
         return True
     if not tol and not rtol and not numbers_vary:
@@ -336,9 +348,10 @@ def check(
                 continue
             tol = float(fence.attributes.get("tol", 0))
             rtol = float(fence.attributes.get("rtol", 0))
-            vary = fence.attributes.get("numbers") == "vary"
-            if not same(fence.code, actual, tol, rtol, numbers_vary=vary):
-                rule = "numbers vary" if vary else f"tol={tol}, rtol={rtol}"
+            spec = fence.attributes.get("vary")
+            vary = line_numbers(spec, fence.code.count("\n") or 1) if spec else set()
+            if not same(fence.code, actual, tol, rtol, vary_lines=vary):
+                rule = f"tol={tol}, rtol={rtol}" + (f", vary={spec}" if spec else "")
                 problems.append(
                     f"{path.name}: output of {source} changed "
                     f"({rule}); run `make docs-record` after review\n"

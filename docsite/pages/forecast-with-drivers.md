@@ -52,7 +52,7 @@ print(bars.round(1).to_string(index=False))
 print(f"total {waterfall.total:.1f}; bars add up: {waterfall.relative_closure_error < 1e-9}")
 ```
 
-```output from="drivers.py" numbers="vary"
+```output from="drivers.py" tol="0.5" rtol="0.05" vary="19-20,22"
 MixedGraph(kind=dag, nodes=2, edges=[sales[t] <-- visits[t-1]])
 TrainingSchedule: 2 stages, 2 by mcmc
   Stage 0 [mcmc     ]: visits
@@ -85,9 +85,9 @@ total 1008.4; bars add up: True
 - **Step 3.** Each row is a forecast step with its median and a 90% band. The sales
   band widens partly because, from step 2 on, it carries the uncertainty of the
   visits forecast. Sales' own level and trend add the rest.
-- **Step 4.** No divergent transitions, and at least 48 effective draws for the
-  worst parameter. That is enough for a page example; use a larger budget for
-  decisions.
+- **Step 4.** No divergent transitions, and tens of effective draws for the worst
+  parameter (the exact count moves from machine to machine at this budget). That is
+  enough for a page example; use a larger budget for decisions.
 - **Step 5.** Over the six months, the model expects about 1,008 in sales. The
   visits bar is about 909, measured against a world with zero visits. The season bar
   is near zero, as it should be: the simulated data has no season.
@@ -123,7 +123,7 @@ result, unchanged. It uses the same naming.
 !!! caution "Read the diagnostics"
     With `fit=` left out, `"auto"` picks the joint fit for this two-node graph. On
     this data and budget, that gave single-digit effective draws, so the page uses
-    `fit="staged"`. Even staged, the smallest effective sample sizes (48 and 62) are
+    `fit="staged"`. Even staged, the smallest effective sample sizes are usually
     below the 100 at which `forecast` warns. The trend model mixes slowly on series
     that wander like a random walk, and its starting level and slope are often the
     worst parameters, whichever way you fit. Check `result.diagnostics` for

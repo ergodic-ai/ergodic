@@ -54,7 +54,7 @@ print(table)
 print(table.to_frame().to_string(index=False))
 ```
 
-```output from="certify_regime.py" numbers="vary"
+```output from="certify_regime.py" tol="1.0" vary="4"
 LatentModel(SpectralWhittle, chains=2, draws=400, warmup=400)
 {'level': True, 'spread': False, 'freq': False, 'amp': False}
 wave_present ('freq', 'amp') -5.9 False
@@ -76,8 +76,9 @@ It takes one to two minutes, most of it in step 3.
   model fires `level`. Its `wave_present` gate failed, because no periodic component
   stands above the noise, so it vetoes `freq` and `amp` whatever their intervals say.
 - **Step 3.** `certify` asks whether two states fit better than the model's own
-  one-state version, by more than chance. The statistic on the real series is 28.7.
-  On the simulated worlds with no switch, 95% of the values sit below 5.4.
+  one-state version, by more than chance. The statistic on the real series is 28.7,
+  far above the 95% quantile of the simulated worlds with no switch (`null_q95`, a
+  few units; with only nine worlds it moves from machine to machine).
 - **Step 4.** On three worlds with no switch, the configured detector never fired.
 - **Step 5.** Both models fire `level` and agree on everything they can both
   express.
