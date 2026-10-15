@@ -104,8 +104,10 @@ gcm = GCM(data)                                  # the native KNN regressor by d
 PC(test=gcm).fit()
 
 from sklearn.ensemble import RandomForestRegressor
-PC(test=GCM(data, learner=RandomForestRegressor())).fit(data)
+PC(test=GCM(data, learner=RandomForestRegressor())).fit()
 ```
+
+The data goes in one place: a test built with data is bound, so `fit()` takes none. To pass the data at fit (or through `discover`), build the test unbound, as in `PC(test=GCM(learner=RandomForestRegressor())).fit(data)`.
 
 This is the test that catches what the partial correlation misses. A quadratic confounder (`X = Z**2 + noise`, `Y = Z**2 + noise`) leaves structure in both linear regressions, so `Linear` declares `X` and `Y` dependent given `Z` and PC keeps a spurious edge; `GCM` with a flexible learner removes it. The honest limit: dependence that leaves the conditional covariance at zero is invisible to it.
 
@@ -378,8 +380,10 @@ The pillars compose end to end, and you do not have to pick a member of the clas
 from ergodic import estimate_effect
 
 result = discover(data, method="pc", knowledge=dk)
-est = estimate_effect(result.graph, data, "X", "Y", strategy="dml")
+est = estimate_effect(result.graph.as_kind("dag"), data, "X", "Y", strategy="dml")
 ```
+
+The `as_kind("dag")` is there because of the knowledge. The tiers `X < M < Y` orient every edge, including ones the data alone leaves open, which takes the result out of the CPDAG class: it keeps the `mixed` face, and identification refuses a `mixed` graph until you re-face it as the DAG it is. When some edges stay undirected, the error names the options.
 
 The same line works on an FCI result: the PAG may keep circles where confounding cannot be ruled out, and the effect still estimates whenever the treatment's outgoing edge is visible (certified clean of hidden confounding in every member). When the class genuinely disagrees about the effect, identification says so and names why, and the per-member route is still there: enumerate with `dags_of_cpdag` or `mags_of_pag` (or take one member with `consistent_extension` / `mag_of_pag`) and identify each, the IDA pattern. The [identification guide](identification.md) walks through both outcomes.
 

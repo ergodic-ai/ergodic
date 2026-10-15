@@ -53,6 +53,11 @@ forecast = ["pymc>=5"]
 # through PyMC's JAX backend when jax and numpyro are present, same measured
 # speedup as the forecast pillar, so installing them alongside is worth it.
 latent = ["pymc>=5"]
+# Welt's hosted foundation models (ergodic.welt): Welt causal discovery, the
+# WeltLearner and the data bridge. Only ergodic.welt imports welt-client; the bare
+# install never does. welt-client supports Python 3.11 to 3.13, so the extra is
+# empty on 3.14 until it adds support (DEC-078).
+welt = ["welt-client>=0.13; python_version < '3.14'"]
 # Neural CATE learners (TARNet / DragonNet / CFR). A reserved seam: phase 1 ships
 # no module that imports torch; the registry points here when one is selected.
 neural = ["torch>=2.2"]
@@ -170,6 +175,12 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["sklearn.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# welt-client ships no type information; it is only imported by ergodic.welt and
+# its tests, and httpx only by those tests (both absent without the welt extra).
+module = ["welt.*", "httpx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
