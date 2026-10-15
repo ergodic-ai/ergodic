@@ -97,8 +97,56 @@ Each method returns a new object, so you can chain them. Combine two objects wit
 Every method but `confound` also takes `confidence=`. Without it a statement is a hard
 constraint. With a value between 0.5 and 1 it's a belief that the edge-probability
 decoders weigh against the model, and `knowledge.log_prior(graph)` scores a graph
-under it. The searches on this page read hard constraints only. See
-[Decode with what you know](decode-a-graph.md#decode-with-what-you-know).
+under it. The confidence applies to each pair a statement covers, so soft tiers,
+roots, sinks, `restrict_to` and `forbid_between` act as one belief per pair. The
+searches on this page read hard constraints only, and they raise a `ValueError` that
+names any soft statement rather than drop it. `knowledge.hard()` gives the knowledge
+without them. See [Decode with what you know](decode-a-graph.md#decode-with-what-you-know).
+
+### Confounded, and neither causes the other
+
+`forbid_adjacency(a, b)` bans every edge between `a` and `b`, a hidden common cause
+included, so it contradicts `confound(a, b)`. To say that `a` and `b` share a hidden
+cause and neither causes the other, forbid the two directed edges instead.
+
+```python file="confounded_not_causal.py"
+from ergodic import DomainKnowledge, admg, dag
+
+# 1. A hidden common cause, and no direct effect either way.
+knowledge = (
+    DomainKnowledge()
+    .confound("rain", "traffic")
+    .forbid("rain", "traffic")
+    .forbid("traffic", "rain")
+)
+print(knowledge.conflicts())
+print(knowledge.violations(admg(["rain <-> traffic"])))
+print(knowledge.violations(dag(["rain -> traffic"])))
+
+# 2. An adjacency ban rules out the hidden cause too.
+banned = DomainKnowledge().confound("rain", "traffic").forbid_adjacency("rain", "traffic")
+print(banned.conflicts())
+
+# 3. Soft statements are for decoding; hard() drops them for a search.
+mixed_knowledge = DomainKnowledge().require("rain", "traffic").root("rain", confidence=0.9)
+print(mixed_knowledge)
+print(mixed_knowledge.hard())
+```
+
+```output from="confounded_not_causal.py"
+[]
+[]
+['present edge between rain and traffic, forbidden in both directions', 'confounded pair rain,traffic lacks a bidirected edge']
+['confounded pair rain,traffic is banned from being adjacent']
+DomainKnowledge(vars=2, required=1, forbidden=0, precedes=0, roots=0, sinks=0, confounded=0, soft=1)
+DomainKnowledge(vars=2, required=1, forbidden=0, precedes=0, roots=0, sinks=0, confounded=0)
+```
+
+- **Step 1.** The pair may carry `rain <-> traffic` and nothing else. FCI, RFCI and
+  the decoders return that edge; PC and the other searches can't hold one.
+- **Step 2.** `forbid_adjacency` is the stronger statement, so the two conflict.
+- **Step 3.** The searches on this page refuse the first object and accept the
+  second.
 
 The methods read knowledge in different ways:
 

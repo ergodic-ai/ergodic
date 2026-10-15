@@ -197,10 +197,14 @@ does the same.
 `knowledge=` applies to the decoding; Welt itself still runs without constraints.
 Without `decoder=`, knowledge means greedy at the model's own threshold, exactly as
 `decoder="greedy"`, so `discover(data, model="cdfm", knowledge=knowledge)` decodes
-too. Soft statements (`confidence=`) are weighed against the scores, a `confound` pair
-makes the result an ADMG, and `diagnostics["knowledge_audit"]` says what the model
-makes of each statement. Knowledge that names an unknown variable or contradicts
-itself raises before anything is uploaded. See
+too. When the model records no threshold of its own, greedy uses its default rule
+(an edge must beat "no edge") and `diagnostics["threshold_source"]` is `None`. For
+Arrow, knowledge replaces Arrow's native DAG with one decoded from its scores. Soft
+statements (`confidence=`) are weighed against the scores, a `confound` pair makes
+the result an ADMG, and `diagnostics["knowledge_audit"]` says what the model
+makes of each statement. The audit decodes the scores a second time without the
+knowledge; `decoder=Decoder("greedy", audit=False)` skips it. Knowledge that names an
+unknown variable or contradicts itself raises before anything is uploaded. See
 [Decode with what you know](decode-a-graph.md#decode-with-what-you-know).
 
 !!! caution "The decoded graph is your choice"

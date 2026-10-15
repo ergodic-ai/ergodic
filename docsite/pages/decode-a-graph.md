@@ -225,7 +225,7 @@ Identification(frontdoor: P(slippery | do(sprinkler)) = sum_m P(m | sprinkler) s
   moderate belief tips it.
 - **Step 2.** The model gives `rain --> wet` 0.91. A 0.8 belief that it isn't there
   doesn't outweigh that, so the edge stays.
-- **Step 3.** The audit has one entry per statement, as you wrote it. `model` is the
+- **Step 3.** The audit has one entry per statement. `model` is the
   model's probability that the statement holds; `no rain -> wet` gets 0.09. A
   statement is a strong conflict when the model gives one of its pairs less than 0.1,
   as here: it's listed in `knowledge_conflicts` and `decode` warns once.
@@ -242,15 +242,31 @@ edge, one direction, the other. A statement you hold with confidence `c` multipl
 the chance of each state by `c` where the state agrees with it and by `1 - c` where it
 doesn't. So against "no edge", `require("a", "b", confidence=c)` multiplies the odds of
 `a --> b` by `c / (1 - c)`, `forbid` divides them by it, and `root("x", confidence=c)`
-divides the odds of every edge into `x`. Statements multiply. The decoders then run
-unchanged on the reweighted states, and `"exact_map"` finds the best graph for the
-combined score exactly. `knowledge.log_odds(variables)` shows the weights and
+divides the odds of every edge into `x`. The decoders then run unchanged on the
+reweighted states, and `"exact_map"` finds the best graph for the combined score
+exactly. `knowledge.log_odds(variables)` shows the weights and
 `knowledge.log_prior(graph)` scores a graph under them.
 
+- **The confidence applies to each pair.** A statement about many pairs (tiers, a
+  root, a sink, `restrict_to`, `forbid_between`) acts as one belief of that
+  confidence per pair it covers, not as one belief that the whole statement holds.
+- **Different statements multiply; repeating one doesn't.** Knowledge holds a set of
+  statements, so the same statement made twice, or pooled with `&` from two people
+  who both made it, counts once.
 - **0.5 changes nothing.** Below 0.5 is refused: state the opposite instead.
+- **A hard constraint wins.** A soft weight on a direction a hard constraint forbids,
+  or on a pair a required edge settles, is dropped, for every decoder and for the
+  edge budget of `"expected_count"` and `"soft_f1"`.
 - **Close to 1 acts like the hard constraint** whenever the hard result is reachable.
-- **A soft order isn't transitive.** `order("a", "b", confidence=c)` weighs only the
-  direct edge `b --> a`; hard order is read through chains.
+  Two exceptions follow from what soft means. A soft order isn't transitive:
+  `order("a", "b", confidence=c)` weighs only the direct edge `b --> a`, while hard
+  order is read through chains. And `"pair_sampler"` adds a hard required edge before
+  the sampled ones, while a soft one is sampled like the rest and can lose to a
+  cycle.
+- **Greedy's `threshold=` path** multiplies each value's odds by the ratio on that
+  direction only. For a statement that weighs both directions of a pair
+  (`forbid_adjacency`, `restrict_to`) on `pair_state` input, that's not quite the
+  renormalized state the other decoders read.
 - **`confound` is hard only.** A hidden cause isn't an edge state, so the model has
   no number for it, and its audit entry has no probability.
 - **How far a belief outweighs the model depends on the model's calibration.** The
@@ -261,9 +277,10 @@ combined score exactly. `knowledge.log_odds(variables)` shows the weights and
 
 | Key | What it holds |
 | --- | --- |
-| `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `min_pair_probability`, `conflict_pairs`, `holds`, `holds_without_knowledge`. |
+| `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `min_pair_probability`, `conflict_pairs`, `holds`, `holds_without_knowledge`, `note`. Soft statements are listed as you made them; hard ones one per stored constraint, so hard tiers show as one `order` entry per cross-tier pair. |
 | `knowledge_conflicts` | The entries with at least one conflict pair. |
 | `knowledge_cost` | The knowledge-free decode's score minus this one's. Never negative for `"exact_map"`; the other decoders can come out negative. |
+| `knowledge_audited` | `False` when you passed `audit=False`. |
 
 `probability` is the chance of the whole statement, with each pair taken on its own,
 so a statement about many pairs (tiers, a root, `restrict_to`) can get a low number
@@ -271,9 +288,20 @@ even when no single pair is surprising. That's why conflicts are judged pair by 
 `min_pair_probability` is the smallest chance the model gives the statement's part on
 one pair, and `conflict_pairs` lists the pairs below 0.1, weakest first. For tiers
 that's an edge against the order the model puts above 0.9; for `root("x")`, an edge
-into `x` above 0.9. `holds_without_knowledge` comes from a second decode with the same
-settings and seed but no knowledge. Order and tier statements are read pair by pair
-here, as the decoders weigh them.
+into `x` above 0.9. A conflict raises one `KnowledgeConflictWarning` (a
+`UserWarning`), which you can filter by category.
+
+`holds` and `holds_without_knowledge` read what each statement means: "a before b"
+fails when `b` is an ancestor of `a` along any directed path, not only through a
+direct edge. The probabilities read direct edges only (for an order, the chance of no
+direct edge against it), and the entry's `note` says so.
+
+`holds_without_knowledge` comes from a second decode with the same settings and seed
+but no knowledge, so the audit costs one more decode. That can cost more than the
+decode itself: hard constraints often make `"exact_map"`'s search cheap, and the
+knowledge-free search has none, and a sampler draws its candidates again. Pass
+`audit=False` (or `Decoder(..., audit=False)`) to skip the audit; the decoded graph
+doesn't change.
 
 ### Confounders give an ADMG
 

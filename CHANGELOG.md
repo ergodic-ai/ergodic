@@ -12,47 +12,73 @@ Planned as 0.3.0.
 ### Added
 - Soft domain knowledge. `require`, `forbid`, `forbid_adjacency`, `forbid_between`,
   `order`, `with_tiers`, `root`, `sink` and `restrict_to` take `confidence=`. Left
-  out (or 1) a statement is the hard constraint it always was, stored, compared and
-  printed exactly as before. A value in `[0.5, 1)` makes it soft: it lands in the new
-  `DomainKnowledge.soft` field as a `KnowledgeStatement`, and 0.5 changes nothing.
-  Values below 0.5, above 1, NaN or a bool raise `ValueError` (state the opposite
-  instead). `confound` stays hard only. `&` pools soft statements.
+  out (or 1) a statement is the hard constraint it always was. A value in `[0.5, 1)`
+  makes it soft: it lands in the new `DomainKnowledge.soft` field as a
+  `KnowledgeStatement` (checked on construction), and 0.5 changes nothing. Values
+  below 0.5, above 1, NaN or a bool raise `ValueError` (state the opposite instead).
+  The confidence applies to each pair a statement covers. `confound` stays hard
+  only. `&` pools soft statements as a set, so a statement made twice counts once.
 - `DomainKnowledge.log_odds(variables)`: the soft statements' summed log likelihood
   ratios on each directed edge, against "no edge" on its pair. `log_prior(graph)` and
   `energy(graph)`, which used to raise, now score a graph under the soft statements
-  (minus infinity when it breaks a hard constraint). Soft orders are read pair by pair
-  and are not closed transitively. `DomainKnowledge.statements()` lists every
-  statement as it was made, which `stated` records for the hard ones (outside
-  equality and the repr).
+  (minus infinity when it breaks a hard constraint). Soft orders are weighed pair by
+  pair and are not closed transitively. `DomainKnowledge.statements()` lists every
+  statement, read from the stored fields (hard) and the soft set, so equal knowledge
+  lists equal statements. `DomainKnowledge.hard()` drops the soft statements.
 - `decode(..., knowledge=)` weighs soft statements: each pair's directed states are
   multiplied by the statement ratios and renormalized before any decoder reads them,
   so all six decoders run unchanged and `exact_map` is exact on the combined score.
-  Greedy with `threshold=` multiplies the input value's odds by the same ratio.
+  A soft weight on what a hard constraint settles is dropped. Greedy with
+  `threshold=` multiplies the input value's odds by the ratio on that direction.
   `diagnostics["knowledge_objective"]` is the score on the weighted states;
   `objective` keeps scoring the input.
 - `decode` with `confound(a, b)` returns an ADMG: the directed part is decoded as
   before and `a <-> b` is added, to the graph and every candidate. A pair that also
   got a directed edge (a bow) carries its confounder as an explicit latent node
   `L__a__b`. `identify_effect` reads both. `diagnostics` add `graph_kind`,
-  `confounded_pairs` and `latent_confounders`.
+  `confounded_pairs` and `latent_confounders`; the repr counts observed variables and
+  names the latent confounders.
 - A knowledge audit on every decode with knowledge: `diagnostics["knowledge_audit"]`
-  has one entry per statement as stated (the model's probability that it holds, the
-  weakest of its pairs and the pairs below 0.1, whether it holds in the decoded graph
-  and in a knowledge-free decode with the same settings and seed), `knowledge_cost`
-  the score the knowledge cost, and `knowledge_conflicts` the statements with a pair
-  the model gives under 0.1, which also raise one `UserWarning`.
-  `n_hard_statements` and `n_soft_statements` count them.
+  has one entry per statement (the model's probability that it holds, from direct
+  edges; the weakest of its pairs and the pairs below 0.1; whether it holds, an order
+  read through directed paths, in the decoded graph and in a knowledge-free decode
+  with the same settings and seed), `knowledge_cost` the score the knowledge cost,
+  and `knowledge_conflicts` the statements with a pair the model gives under 0.1.
+  `n_hard_statements` and `n_soft_statements` count them. `decode(..., audit=False)`
+  and `Decoder(..., audit=False)` skip it.
+- `ergodic.KnowledgeConflictWarning` (a `UserWarning`), raised once by a decode whose
+  knowledge strongly conflicts with the model, pointing at your call.
 
 ### Changed
+- A decode with knowledge, hard-only knowledge included, now audits it: one extra
+  knowledge-free decode, which can cost more than the constrained one, and a
+  `KnowledgeConflictWarning` on strong conflicts. Code that turns warnings into
+  errors will see it; pass `audit=False` or filter the category.
+- `expected_count_v1` and `soft_f1_v1` with hard knowledge take their edge budget
+  from the pair states with the constraints applied (a forbidden direction holds no
+  mass, a required one all of it). Without knowledge nothing changes.
+- The discovery searches (`PC`, `FCI`, `RFCI`, `GES`, `BOSS`, `GRaSP`, `HillClimb`,
+  `AStar`, `MMPC`, `DirectLiNGAM`, `Glasso`, `PCMCI`) and `bootstrap` raise
+  `ValueError` on soft statements instead of dropping them; pass `knowledge.hard()`.
+- `forbid_adjacency(a, b)` also records the pair in a new `nonadjacent` field: an
+  adjacency ban rules out a bidirected edge too, while `forbid(a, b)` with
+  `forbid(b, a)` no longer does. So `confound(a, b)` with the two directed bans means
+  "confounded, and neither causes the other": it is not a conflict, the decoders
+  return `a <-> b`, and FCI and RFCI keep the pair adjacent instead of pruning it.
+  `forbid_adjacency(a, b)` and the two directed bans no longer compare equal. The
+  repr is unchanged.
+- `DomainKnowledge.conflicts()` reports a confounded pair under an adjacency ban.
+  `violations()` reads a node in `graph.latent` as a hidden cause: a latent node with
+  two or more observed children joins each pair of them as a bidirected edge would
+  (for `confound`, adjacency bans and a skeleton restriction), and edges at a latent
+  node count against neither a root nor a sink.
 - `ergodic.welt.discover(data, model, knowledge=k)` without `decoder=` decodes with
-  greedy at the model's native threshold, as `decoder="greedy"` does, instead of
-  raising. Confounded knowledge is no longer refused before the paid run; knowledge
-  naming unknown variables or contradicting itself still is. Without knowledge and
-  without a decoder nothing changes.
-- `DomainKnowledge.conflicts()` reports a confounded pair whose adjacency is banned
-  (forbidden in both directions). `violations()` reads a node in `graph.latent` as a
-  hidden cause: a latent parent of both ends satisfies `confound`, and edges at a
-  latent node no longer count against a root, a sink or a skeleton restriction.
+  greedy at the model's native threshold (greedy's default rule when the model
+  records none), as `decoder="greedy"` does, instead of raising. Confounded knowledge
+  is no longer refused before the paid run; knowledge naming unknown variables or
+  contradicting itself still is. Without knowledge and without a decoder nothing
+  changes.
+- Pickles of `DomainKnowledge` from 0.2.x load, with no soft statements.
 
 ## [0.2.1] - 2026-10-15
 
