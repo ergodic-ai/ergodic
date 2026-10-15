@@ -277,18 +277,22 @@ class GaussianAdditive:
 
     @property
     def capability(self) -> Capability:
+        """Always :attr:`Capability.INVERTIBLE`: the residual is recoverable."""
         return Capability.INVERTIBLE
 
     @property
     def coef_name(self) -> str:
+        """The posterior parameter name of the slope vector, ``{name}__coef``."""
         return f"{self.name}__coef"
 
     @property
     def intercept_name(self) -> str:
+        """The posterior parameter name of the intercept, ``{name}__intercept``."""
         return f"{self.name}__intercept"
 
     @property
     def sigma_name(self) -> str:
+        """The posterior parameter name of the noise scale, ``{name}__sigma``."""
         return f"{self.name}__sigma"
 
     def loading_name(self, latent: str) -> str:
@@ -369,6 +373,22 @@ class GaussianAdditive:
         return pm.Normal(name, 0.0, self.loading_prior_sd)
 
     def fit(self, data: Dataset, *, draws: int, tune: int, chains: int, seed: int) -> FitResult:
+        """Fit this node alone by NUTS and return its parameter posterior.
+
+        Reads the node's column and its parents' columns from ``data``. A node in a
+        confounded district is fitted jointly by :meth:`SCM.fit`, not here.
+
+        Args:
+            data: The dataset holding the node and its parents.
+            draws: Posterior draws per chain.
+            tune: Tuning steps per chain.
+            chains: Number of chains.
+            seed: The sampler seed.
+
+        Returns:
+            A :class:`FitResult` with the intercept, noise scale and (with parents)
+            slope draws, plus their posterior means.
+        """
         import pymc as pm
 
         x = _parent_matrix(data, self.parents)
@@ -434,6 +454,12 @@ class GaussianAdditive:
         return np.asarray(intercept[:, None] + contrib, dtype=np.float64)
 
     def sigma(self, fit: FitResult, *, use_draws: bool) -> Array:
+        """Return the noise scale: its ``(S,)`` draws, or the posterior mean.
+
+        Args:
+            fit: The node's fitted posterior.
+            use_draws: Return the draws when ``True``, the posterior mean when ``False``.
+        """
         src = fit.params if use_draws else fit.param_means
         return np.asarray(src[self.sigma_name], dtype=np.float64)
 
@@ -469,14 +495,17 @@ class CategoricalGumbelMax:
 
     @property
     def capability(self) -> Capability:
+        """Always :attr:`Capability.INVERTIBLE`: the Gumbel noise can be abducted."""
         return Capability.INVERTIBLE
 
     @property
     def weight_name(self) -> str:
+        """The posterior parameter name of the per-class weight matrix, ``{name}__logit_w``."""
         return f"{self.name}__logit_w"
 
     @property
     def bias_name(self) -> str:
+        """The posterior parameter name of the per-class bias, ``{name}__logit_b``."""
         return f"{self.name}__logit_b"
 
     def loading_name(self, latent: str) -> str:
@@ -494,6 +523,17 @@ class CategoricalGumbelMax:
         return encoded_width(self.parent_cards)
 
     def build(self, x: Array, y_codes: IntArray, n_cat: int) -> Any:
+        """The per-node PyMC model: ``y ~ Categorical(logits = bias + x_encoded . weight)``.
+
+        Args:
+            x: The raw ``(n, p)`` parent matrix (codes for discrete parents), one-hot
+                encoded here.
+            y_codes: The observed category codes.
+            n_cat: The number of categories.
+
+        Returns:
+            A ``pymc.Model``.
+        """
         import pymc as pm
 
         x_enc = encode_parent_design(x, self.parent_cards) if self.parents else x
@@ -566,6 +606,23 @@ class CategoricalGumbelMax:
         return pm.Normal(name, 0.0, self.loading_prior_sd, shape=self.n_categories)
 
     def fit(self, data: Dataset, *, draws: int, tune: int, chains: int, seed: int) -> FitResult:
+        """Fit this node alone by NUTS and return its parameter posterior.
+
+        The class count is ``n_categories`` when set, else read from the column's
+        categories. A node in a confounded district is fitted jointly by
+        :meth:`SCM.fit`, not here.
+
+        Args:
+            data: The dataset holding the node and its parents.
+            draws: Posterior draws per chain.
+            tune: Tuning steps per chain.
+            chains: Number of chains.
+            seed: The sampler seed.
+
+        Returns:
+            A :class:`FitResult` with the bias and (with parents) weight draws, their
+            posterior means, and the resolved class count.
+        """
         import pymc as pm
 
         x = _parent_matrix(data, self.parents)
@@ -644,6 +701,15 @@ class CategoricalGumbelMax:
         return gumbel_max_abduct(self.logits(fit, parent_values), observed_codes, rng)
 
     def decide(self, logits: Array, gumbel: Array) -> IntArray:
+        """Return the category per row: ``argmax(logits + gumbel)``.
+
+        Args:
+            logits: The ``(n, K)`` class logits.
+            gumbel: The ``(n, K)`` Gumbel noise, sampled or abducted.
+
+        Returns:
+            The ``(n,)`` integer category codes.
+        """
         return gumbel_max_decide(logits, gumbel)
 
 

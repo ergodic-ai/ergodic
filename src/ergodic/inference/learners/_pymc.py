@@ -73,6 +73,13 @@ class PyMCLearner:
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
     ) -> PyMCLearner:
+        """Build the model with :meth:`build` and sample its posterior with NUTS.
+
+        ``sample_weight`` is accepted for the learner surface and ignored. Needs pymc.
+
+        Returns:
+            The fitted learner itself.
+        """
         import pymc as pm
 
         x = np.asarray(X, dtype=np.float64)
@@ -109,17 +116,28 @@ class PyMCLearner:
         return arr.reshape(-1, arr.shape[-1])
 
     def predict_draws(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return ``(S, n)`` posterior draws of the mean node at the rows of ``X``.
+
+        ``S`` is ``chains * draws``. For a :class:`PyMCClassifier` the mean node is
+        ``"p"``, so these are probability draws.
+
+        Raises:
+            RuntimeError: The learner has not been fitted.
+        """
         return self._mean_draws(X)
 
     def predict(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return the posterior mean of the mean node at the rows of ``X``."""
         return np.asarray(self._mean_draws(X).mean(axis=0), dtype=np.float64)
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return the sampler settings and the extra ``build`` keyword arguments."""
         params = {key: getattr(self, key) for key in _SAMPLER_KEYS}
         params.update(self.build_kwargs)
         return params
 
     def set_params(self, **params: Any) -> PyMCLearner:
+        """Set sampler settings or ``build`` keyword arguments by name; return the learner."""
         for key, value in params.items():
             if key in _SAMPLER_KEYS:
                 setattr(self, key, value)
@@ -139,11 +157,18 @@ class PyMCClassifier(PyMCLearner):
     _mean_node = "p"
 
     def predict_proba_draws(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return ``(S, n)`` posterior draws of P(y = 1) at the rows of ``X``.
+
+        Raises:
+            RuntimeError: The learner has not been fitted.
+        """
         return self._mean_draws(X)
 
     def predict_proba(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return class probabilities as an ``(n, 2)`` array from the posterior mean of P(y = 1)."""
         p = self._mean_draws(X).mean(axis=0)
         return np.asarray(np.column_stack([1.0 - p, p]), dtype=np.float64)
 
     def predict(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return the 0/1 label, 1 where the posterior mean of P(y = 1) is at least 0.5."""
         return np.asarray(self.predict_proba(X)[:, 1] >= 0.5, dtype=np.float64)

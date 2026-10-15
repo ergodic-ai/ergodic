@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # %% [markdown]
 # # Hidden regimes: a tour of the latent pillar
 #

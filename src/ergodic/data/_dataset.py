@@ -48,14 +48,17 @@ class Dataset:
 
     @property
     def names(self) -> tuple[str, ...]:
+        """The column names, in schema order (index and excluded columns included)."""
         return self.schema.names
 
     @property
     def n_columns(self) -> int:
+        """The number of columns, index and excluded columns included."""
         return len(self.schema)
 
     @property
     def shape(self) -> tuple[int, int]:
+        """``(n_rows, n_columns)``."""
         return (self.n_rows, self.n_columns)
 
     def __len__(self) -> int:
@@ -93,6 +96,11 @@ class Dataset:
         return _encode(self._store[name], col.categories, col.ordered, name)
 
     def categories(self, name: str) -> tuple[Any, ...] | None:
+        """Return the categories of a discrete column, or ``None`` for any other column.
+
+        Raises:
+            KeyError: The column is not in the dataset.
+        """
         return self.schema[name].categories
 
     def matrix(self, names: Sequence[str] | None = None) -> npt.NDArray[np.float64]:
@@ -120,9 +128,18 @@ class Dataset:
         return np.asarray(np.column_stack(cols), dtype=np.float64)
 
     def to_numpy(self) -> npt.NDArray[np.float64]:
+        """Return the modeled variables as a float matrix, one column per variable.
+
+        The same as :meth:`matrix` with no names: index and excluded columns are left
+        out, discrete columns become their codes, and a missing value becomes NaN.
+        """
         return self.matrix()
 
     def to_pandas(self) -> pd.DataFrame:
+        """Return every column as a ``pandas.DataFrame``, with the raw values.
+
+        Index and excluded columns are included. Needs pandas.
+        """
         import pandas as pd
 
         return pd.DataFrame({name: self._store[name] for name in self.schema.names})
@@ -135,6 +152,7 @@ class Dataset:
 
     @property
     def has_missing(self) -> bool:
+        """Whether any column has at least one missing value."""
         return any(count > 0 for count in self.missing().values())
 
     def dropna(self) -> Self:

@@ -76,6 +76,7 @@ class CITest:
 
     @property
     def is_bound(self) -> bool:
+        """Whether the test is bound to data and can answer queries."""
         return self._data is not None
 
     @property
@@ -226,10 +227,12 @@ class DSeparationOracle(CITest):
 
     @property
     def is_bound(self) -> bool:
+        """Always ``True``: the oracle answers from its graph and needs no data."""
         return True
 
     @property
     def graph(self) -> MixedGraph:
+        """The graph whose d-separations (m-separations) the oracle reports."""
         return self._graph
 
     def bind(self, data: TabularData) -> Self:

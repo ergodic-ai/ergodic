@@ -42,18 +42,22 @@ class PanelData(Dataset):
 
     @property
     def entities(self) -> tuple[Any, ...]:
+        """The distinct entity identifiers, sorted."""
         return tuple(sorted(set(self._store[self.entity].tolist())))
 
     @property
     def periods(self) -> tuple[Any, ...]:
+        """The distinct time values, sorted."""
         return tuple(sorted(set(self._store[self.time].tolist())))
 
     @property
     def n_entities(self) -> int:
+        """The number of distinct entities."""
         return len(set(self._store[self.entity].tolist()))
 
     @property
     def n_periods(self) -> int:
+        """The number of distinct time values."""
         return len(set(self._store[self.time].tolist()))
 
     @property

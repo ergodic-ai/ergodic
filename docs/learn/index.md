@@ -44,6 +44,15 @@ The guides, in order:
 10. [Decision points](10-decision-points.py): mine the process model itself, check the log
     against it, and read a routing split as a decision: what sending a case down the other
     lane would actually cost, and when the data is too one-sided to say.
+11. [Forecasting](11-forecasting.py): a forecast built from parts, so the same fitted
+    model gives the number, its uncertainty, levels that add up, and what drives it.
+12. [Structural causal models](12-structural-causal-models.py): one fitted model answers
+    what the data shows, what an intervention would do, and what would have happened to
+    one customer, and returns a sensitivity curve when the data can't answer.
+13. [Hidden regimes](13-hidden-regimes.py): a switch nobody logged. Recover when it was
+    on, certify that it exists at all, and calibrate the detector on worlds without one.
+14. [Causal forests and policy trees](14-causal-forests-and-policy-trees.py): per-customer
+    effects with error bars, then a one-line targeting rule and what it's worth.
 
 The examples are commercial because money concentrates the mind, but nothing is specific to
 commerce. Swap "discount" for "drug" and "spend" for "blood pressure" and every argument

@@ -96,6 +96,7 @@ class IDResult:
         return self.identifiable
 
     def render(self) -> str:
+        """Return a readable result: the estimand, the hedge, or ``"not identifiable"``."""
         if self.identifiable and self.functional is not None:
             return self.functional.render()
         if self.hedge is not None:

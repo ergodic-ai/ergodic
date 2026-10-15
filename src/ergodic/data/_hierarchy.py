@@ -76,12 +76,15 @@ class Hierarchy:
         return frozenset(out)
 
     def children_of(self, node: str) -> tuple[str, ...]:
+        """Return the children of ``node``, sorted; empty for a leaf or an unknown name."""
         return self._children.get(node, ())
 
     def parent_of(self, node: str) -> str | None:
+        """Return the parent of ``node``, or ``None`` for a root or an unknown name."""
         return self._parent.get(node)
 
     def is_leaf(self, node: str) -> bool:
+        """Return ``True`` when ``node`` has no children (also for a name not in the hierarchy)."""
         return node not in self._children
 
     @property

@@ -71,6 +71,7 @@ class Score:
 
     @property
     def is_bound(self) -> bool:
+        """Whether the score is bound to data and can be evaluated."""
         return self._data is not None
 
     @property
@@ -80,6 +81,7 @@ class Score:
 
     @property
     def n(self) -> int:
+        """Rows the score is computed from (after dropping incomplete rows); 0 before binding."""
         return self._n
 
     @property

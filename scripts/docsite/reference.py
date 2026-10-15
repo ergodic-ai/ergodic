@@ -3,8 +3,10 @@
 Signatures come from :mod:`inspect`; prose comes from docstrings, with Google-style
 sections (``Args:``, ``Returns:``, ``Raises:``, ``Attributes:``, ``Examples:``,
 ``Note:``, ``Warning:``) and the common reStructuredText roles converted to Markdown.
-Every public name (a module's ``__all__``, or the package's top-level exports) must
-carry a docstring; :attr:`Reference.missing` lists those that do not.
+Every public name (a module's ``__all__``, or the package's top-level exports) and
+every public method or property of a documented class must carry a docstring;
+:attr:`Reference.missing` lists those that do not (members are also listed on their
+own in :attr:`Reference.missing_members`), so a strict build fails on either.
 """
 
 from __future__ import annotations
@@ -527,4 +529,6 @@ def build_reference(site: Site) -> Reference:
     for module_name, label in site.reference_modules:
         builder.module_page(module_name, label)
     builder.index_page()
+    # Undocumented members fail the strict build too; the report keeps them separate.
+    builder.ref.missing.extend(builder.ref.missing_members)
     return builder.ref

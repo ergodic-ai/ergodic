@@ -283,7 +283,4 @@ print("both arrowheads into Alarm:", at_alarm_b is Mark.ARROW and at_alarm_e is 
 # A discovered graph is not the end of the line. It feeds straight into the rest of the library:
 # `identify_effect` reads a CPDAG and `estimate_effect` runs off it, so the arrows you just
 # learned become the effects you wanted, with the bookkeeping shown in the
-# [discovery guide](../learn/06-discovering-structure.py). For the next step toward real data,
-# the protein-signaling network of Sachs et al. (2005) is on the roadmap: a biology benchmark
-# where the true graph is known from intervention experiments, so discovery can be graded
-# against bench science instead of a simulator.
+# [discovery guide](../learn/06-discovering-structure.py).

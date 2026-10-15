@@ -184,6 +184,7 @@ class SCM:
 
     @property
     def fitted(self) -> bool:
+        """Whether every node's mechanism has been fitted."""
         return len(self._fits) == len(self.mechanisms)
 
     def fit(self, *, parallel: bool = False) -> SCM:
@@ -991,10 +992,19 @@ class InterventionView:
         self.intervention = dict(intervention)
 
     def do(self, more: Mapping[str, DoValue]) -> InterventionView:
+        """Return a new view with ``more`` added to the intervention; later values win per node."""
         merged = {**self.intervention, **more}
         return InterventionView(self._scm, merged)
 
     def interventional(self, target: str, *, n: int = 2000) -> SCMResult | CategoricalResult:
+        """Return the distribution of ``target`` under the view's intervention.
+
+        The same as :meth:`SCM.interventional` with the view's do-map.
+
+        Args:
+            target: The node to read.
+            n: Number of simulated units.
+        """
         return self._scm.interventional(target, self.intervention, n=n)
 
     def sample(self, target: str, *, n: int = 2000) -> SCMResult | CategoricalResult:
