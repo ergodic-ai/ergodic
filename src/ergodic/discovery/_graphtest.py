@@ -16,18 +16,24 @@ The basis set depends on what the graph says:
   ``v`` are independent given the parents of both. When ``u`` is not a
   descendant of ``v``, the local Markov property gives ``v`` independent of
   its non-descendants given its parents; ``u`` and every parent of ``u`` are
-  non-descendants of ``v``, so weak union gives the claim.
+  non-descendants of ``v``, so weak union gives the claim. Together the
+  claims imply every independence of the graph when the distribution has the
+  composition property (Gaussian ones do); otherwise they are a subset.
 - **CPDAG.** The basis set of its consistent extension (Dor and Tarsi 1992),
   a member DAG. Every member is Markov equivalent, so each claim holds in
   every member, and the class's own separation reading confirms it.
 - **ADMG, MAG, a DAG with latent or selection nodes, PAG** (a PAG through one
   member MAG, :func:`~ergodic.graph.mag_of_pag`; every member has the same
   m-separations). m-separation over the observed variables: the parents of
-  both when they separate the pair, otherwise the observed ancestors of the
-  pair (and of selection), which separate any separable pair (Richardson and
-  Spirtes 2002, Theorem 4.2), pruned to a minimal separating set. A pair no
-  observed set separates (an inducing path) implies nothing and is reported
-  as untestable.
+  both when they separate the pair, otherwise the observed anterior of the
+  pair and of selection, which separates any separable pair (Richardson and
+  Spirtes 2002, Theorem 4.2; for an ADMG that is not ancestral, through the
+  DAG that replaces each ``a <-> b`` with ``a <- L -> b``, which has the same
+  m-separations and observed ancestors), pruned to a minimal separating set.
+  A pair no observed set separates (an inducing path) implies nothing and is
+  reported as untestable.
+
+For a CPDAG or PAG the pair order and the parents come from the chosen member.
 
 Every conditioning set is checked against the graph's separation routine
 before any data is touched.
@@ -39,11 +45,15 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from ..data import Dataset, TabularData
 from ..graph import GraphKind, MixedGraph, consistent_extension, mag_of_pag, topological_order
-from ._ci import CITest
+from ..inference.learners import KNNRegressor
+from ._ci import CIResult, CITest
 from ._registry import _require_exchangeable, resolve_test
 from ._stats import _chi2_sf
+from .ci._gcm import GCM
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,9 +63,12 @@ if TYPE_CHECKING:
 __all__ = ["GraphTest", "ImpliedIndependence", "test_graph"]
 
 # A p-value of exactly zero (a tail below floating-point resolution) enters
-# Fisher's C as this, so C stays finite; the combined p-value is then reported as
-# zero, its limit, rather than a tail read off the floor.
-_P_FLOOR = 2.2250738585072014e-308
+# Fisher's C as the smallest positive float, so C stays finite; the combined
+# p-value is then reported as zero, its limit, rather than a tail read off it.
+_P_FLOOR = math.ulp(0.0)
+
+# Below this many rows the G squared test's size can run over alpha.
+_DISCRETE_SMALL_N = 1000
 
 
 @dataclass(frozen=True)
@@ -64,7 +77,8 @@ class ImpliedIndependence:
 
     Attributes:
         x: The earlier variable of the pair in the graph's topological order
-            (names break ties).
+            (names break ties); for a CPDAG or PAG, the order of the member
+            DAG or MAG the claims were read in.
         y: The later variable of the pair.
         given: The conditioning set, sorted.
         rule: How the set was chosen: ``"parents"`` (the parents of both) or
@@ -72,11 +86,14 @@ class ImpliedIndependence:
         statistic: The test statistic.
         p_value: The test's p-value for "``x`` and ``y`` are independent given
             ``given``".
-        p_holm: The Holm-adjusted p-value across every claim of the test.
-        rejected: Whether ``p_holm <= alpha``, the claim the data contradict
-            with the family-wise error rate held at ``alpha``.
+        p_holm: The Holm-adjusted p-value across every tested claim (1.0 for
+            a vacuous claim, which is not adjusted).
+        rejected: Whether ``p_holm <= alpha``: the claim the data contradict,
+            with the family-wise error rate held at ``alpha``. It locates which
+            claims fail; the level-``alpha`` test of the graph is
+            :attr:`GraphTest.rejected`.
         dof: The reference distribution's degrees of freedom, when the test
-            reports them.
+            reports them. A claim with zero degrees of freedom is vacuous.
     """
 
     x: str
@@ -118,9 +135,9 @@ class GraphTest:
         p_value: The chi-square tail of ``statistic`` on ``2k`` degrees of
             freedom; 1.0 when there is nothing to test, and 0.0 when a claim's
             own p-value is 0.0 (below floating-point resolution; that claim
-            enters ``statistic`` as the smallest positive float).
+            enters ``statistic`` as the smallest positive float, 5e-324).
         dof: ``2k``.
-        k: How many claims were tested.
+        k: How many claims were tested, vacuous ones excluded.
         alpha: The level for ``rejected`` and the Holm decisions.
         test: The conditional-independence test's name (``"linear"``,
             ``"discrete"``, ``"mixed"``, ...).
@@ -130,6 +147,9 @@ class GraphTest:
         implications: The tested claims, smallest p-value first.
         untestable: Non-adjacent pairs that no observed set separates, so the
             candidate implies no independence for them.
+        vacuous: Claims whose test had zero degrees of freedom (a single-level
+            column, or no rows in any stratum), so it carried no information.
+            They are left out of ``statistic``, ``k`` and the Holm adjustment.
         notes: Plain-language caveats about this run.
     """
 
@@ -143,11 +163,17 @@ class GraphTest:
     n: int
     implications: tuple[ImpliedIndependence, ...] = field(repr=False)
     untestable: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+    vacuous: tuple[ImpliedIndependence, ...] = field(default=(), repr=False)
     notes: tuple[str, ...] = field(default=(), repr=False)
 
     @property
     def rejected(self) -> bool:
-        """Whether Fisher's combined p-value is at or below ``alpha``."""
+        """Whether Fisher's combined p-value is at or below ``alpha``.
+
+        This is the level-``alpha`` test of the graph. The Holm decisions on
+        the claims say which claims fail; rejecting the graph when either one
+        rejects would spend more than ``alpha``.
+        """
         return self.k > 0 and self.p_value <= self.alpha
 
     @property
@@ -170,6 +196,7 @@ class GraphTest:
             "n": self.n,
             "implications": [item.to_dict() for item in self.implications],
             "untestable": [list(pair) for pair in self.untestable],
+            "vacuous": [item.to_dict() for item in self.vacuous],
             "notes": list(self.notes),
         }
 
@@ -337,8 +364,16 @@ def _basis(
 # -- the combination ------------------------------------------------------------------
 
 
+def _require_p_values(p_values: list[float]) -> None:
+    """Refuse a p-value that is not a number in [0, 1]: it must never read as a pass."""
+    bad = [p for p in p_values if not (math.isfinite(p) and 0.0 <= p <= 1.0)]
+    if bad:
+        raise ValueError(f"p-values must be finite numbers in [0, 1]; got {bad}")
+
+
 def _holm(p_values: list[float]) -> list[float]:
     """Holm's step-down adjusted p-values, in the input order."""
+    _require_p_values(p_values)
     k = len(p_values)
     order = sorted(range(k), key=lambda i: p_values[i])
     adjusted = [0.0] * k
@@ -354,6 +389,7 @@ def _fisher(p_values: list[float]) -> tuple[float, float]:
 
     A claim with a p-value of exactly zero makes the combined p-value zero.
     """
+    _require_p_values(p_values)
     if not p_values:
         return 0.0, 1.0
     c = max(0.0, -2.0 * sum(math.log(max(p, _P_FLOOR)) for p in p_values))
@@ -401,9 +437,18 @@ def test_graph(
     Holm's method, and combines them with Fisher's C,
     ``C = -2 * sum(log p_i)``, referred to a chi-square on ``2k`` degrees of
     freedom. The chi-square reference assumes the ``k`` tests are independent,
-    which Shipley shows for a DAG's basis set when the model holds; for ADMGs,
-    MAGs and PAGs it is an approximation. The Holm decisions hold the
-    family-wise error rate at ``alpha`` whatever the dependence.
+    which Shipley argues for a DAG's basis set when the model holds (and only
+    asymptotically for asymptotic tests such as Fisher z and G squared); for
+    ADMGs, MAGs and PAGs it is an approximation. The combined p-value is the
+    level-``alpha`` decision (``GraphTest.rejected``). The Holm decisions
+    locate which claims fail and hold the family-wise error rate at ``alpha``
+    whatever the dependence; rejecting when either one rejects spends more
+    than ``alpha``.
+
+    The size was measured for the default partial-correlation test on
+    linear-Gaussian data. Other tests carry a note on the result: a GCM with
+    its default nearest-neighbour learner over-rejects true graphs, and G
+    squared can over-reject with fewer than 1,000 rows.
 
     What the p-value means: how surprising the data would be if every implied
     independence held. It cannot separate Markov-equivalent graphs (they imply
@@ -430,8 +475,11 @@ def test_graph(
     Raises:
         TypeError: ``candidate`` is not a graph or ``data`` is not tabular.
         ValueError: ``alpha`` is outside (0, 1), the candidate has a directed
-            cycle or breaks the rules of its kind, or an observed node is not
-            a column of ``data``.
+            cycle or breaks the rules of its kind, an observed node is not a
+            column of ``data``, an observed continuous column holds an infinite
+            value, or the test returns a p-value or statistic that is not a
+            finite number. Missing values (NaN) are dropped row-wise, as every
+            test does, and a note counts the rows dropped.
     """
     if not isinstance(candidate, MixedGraph):
         raise TypeError(f"candidate must be a MixedGraph, got {type(candidate).__name__}")
@@ -463,6 +511,17 @@ def test_graph(
             f"{sorted(columns)}. Declare an unmeasured node with latent=[...]"
         )
 
+    ordered = tuple(v for v in data.variables if v in observed)
+    continuous = [v for v in ordered if data.schema[v].is_continuous]
+    if continuous:
+        values = data.matrix(continuous)
+        infinite = [v for i, v in enumerate(continuous) if np.isinf(values[:, i]).any()]
+        if infinite:
+            raise ValueError(
+                f"column(s) {infinite} hold infinite values; a test would read them as "
+                "no evidence, so replace or drop those rows first"
+            )
+
     notes: list[str] = []
     extra = sorted(columns - candidate.nodes)
     if extra:
@@ -474,35 +533,45 @@ def test_graph(
         )
 
     claims, untestable = _basis(candidate, reading, observed)
-    ordered = tuple(v for v in data.variables if v in observed)
     oracle = _bind(test, data, ordered)
 
     results = [oracle.test(c.x, c.y, c.given) for c in claims]
-    p_values = [r.p_value for r in results]
+    for c, r in zip(claims, results, strict=True):
+        if not (math.isfinite(r.p_value) and math.isfinite(r.statistic)):
+            raise ValueError(
+                f"the {oracle.name} test returned p = {r.p_value}, statistic = {r.statistic} "
+                f"for {c.x} and {c.y} given {sorted(c.given)}; a non-finite result is an "
+                "error, never a pass"
+            )
+    tested = [(c, r) for c, r in zip(claims, results, strict=True) if r.dof != 0.0]
+    empty = [(c, r) for c, r in zip(claims, results, strict=True) if r.dof == 0.0]
+    p_values = [r.p_value for _, r in tested]
     adjusted = _holm(p_values)
     statistic, p_value = _fisher(p_values)
     implications = tuple(
         sorted(
             (
-                ImpliedIndependence(
-                    x=c.x,
-                    y=c.y,
-                    given=tuple(sorted(c.given)),
-                    rule=c.rule,
-                    statistic=r.statistic,
-                    p_value=r.p_value,
-                    p_holm=adj,
-                    rejected=adj <= alpha,
-                    dof=r.dof,
-                )
-                for c, r, adj in zip(claims, results, adjusted, strict=True)
+                _record(c, r, adj, adj <= alpha)
+                for (c, r), adj in zip(tested, adjusted, strict=True)
             ),
             key=lambda item: (item.p_value, item.x, item.y),
         )
     )
+    vacuous = tuple(_record(c, r, 1.0, False) for c, r in empty)
 
     n = oracle.n
-    if not claims:
+    if oracle.data is not None and n < data.n_rows:
+        notes.append(
+            f"{data.n_rows - n} row(s) with a missing value in the candidate's columns were "
+            "dropped."
+        )
+    if vacuous:
+        shown = ", ".join(f"{i.x}-{i.y}" for i in vacuous)
+        notes.append(
+            f"The tests of {shown} had zero degrees of freedom (a single-level column or "
+            "empty strata), so they carry no information and are left out of k."
+        )
+    if not tested:
         notes.append(
             "Nothing to test: every pair of observed variables is adjacent or inseparable, "
             "so the candidate implies no independence and fits any data."
@@ -513,13 +582,13 @@ def test_graph(
             f"No observed set separates {shown} (an inducing path), so the candidate "
             "implies no independence for them."
         )
-    largest = max((len(c.given) for c in claims), default=0)
-    if claims and oracle.data is not None and n < max(50, 10 * (largest + 3)):
+    largest = max((len(c.given) for c, _ in tested), default=0)
+    if tested and oracle.data is not None and n < max(50, 10 * (largest + 3)):
         notes.append(
             f"Few rows ({n}) for conditioning sets of up to {largest} variables: the "
             "reference distributions are asymptotic and power is low."
         )
-    sparse = [r.dof for r in results if r.dof is not None and r.dof > 0 and n < 5 * r.dof]
+    sparse = [r.dof for _, r in tested if r.dof is not None and r.dof > 0 and n < 5 * r.dof]
     if sparse:
         notes.append(
             f"{len(sparse)} test(s) have fewer than 5 rows per degree of freedom, so their "
@@ -527,24 +596,72 @@ def test_graph(
         )
     if reading in ("admg", "mag", "pag") or candidate.latent or candidate.selection:
         notes.append(
-            "Fisher's C assumes the claims' tests are independent, which is shown for a "
-            "DAG's basis set; with latent structure it is approximate, and the Holm "
-            "decisions are the conservative reading."
+            "Fisher's C assumes the claims' tests are independent, which Shipley argues "
+            "for a DAG's basis set; with latent structure the combined p-value is an "
+            "approximation."
         )
+    calibration = _calibration_note(oracle, n)
+    if calibration and tested:
+        notes.append(calibration)
 
     return GraphTest(
         statistic=statistic,
         p_value=p_value,
-        dof=2 * len(claims),
-        k=len(claims),
+        dof=2 * len(tested),
+        k=len(tested),
         alpha=alpha,
         test=oracle.name,
         kind=reading,
         n=n,
         implications=implications,
         untestable=tuple(untestable),
+        vacuous=vacuous,
         notes=tuple(notes),
     )
+
+
+def _record(claim: _Claim, result: CIResult, p_holm: float, rejected: bool) -> ImpliedIndependence:
+    return ImpliedIndependence(
+        x=claim.x,
+        y=claim.y,
+        given=tuple(sorted(claim.given)),
+        rule=claim.rule,
+        statistic=result.statistic,
+        p_value=result.p_value,
+        p_holm=p_holm,
+        rejected=rejected,
+        dof=result.dof,
+    )
+
+
+def _calibration_note(oracle: CITest, n: int) -> str | None:
+    """Say when the test's size on this path was not measured, or measured off."""
+    if isinstance(oracle, GCM):
+        learner = oracle.learner
+        knn = (
+            learner is None
+            or (isinstance(learner, str) and learner.lower() in ("knn", "neighbors"))
+            or isinstance(learner, KNNRegressor)
+        )
+        if knn:
+            return (
+                "GCM with a nearest-neighbour learner is not calibrated here: in an "
+                "independent check it rejected true linear-Gaussian graphs about 30% of the "
+                "time at alpha = 0.05. For near-linear data use GCM(learner='ols') or the "
+                "default partial-correlation test."
+            )
+    if oracle.name == "discrete" and n < _DISCRETE_SMALL_N:
+        return (
+            f"With {n} rows the G squared test's size can run over alpha: in an independent "
+            "check on binary graphs with 200 rows it rejected true graphs about 10% of the "
+            "time at alpha = 0.05 (about 5% with 1,000 rows)."
+        )
+    if oracle.name not in ("linear", "d_separation", "discrete"):
+        return (
+            f"The size of test_graph was measured with the partial-correlation test on "
+            f"linear-Gaussian data; with the {oracle.name} test it has not been measured."
+        )
+    return None
 
 
 # pytest collects module-level functions named test_*; this one is a library

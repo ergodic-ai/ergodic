@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 
 import ergodic
-from ergodic import admg, cpdag, dag, mixed, pag, tabular, timeseries
+from ergodic import GraphKind, admg, cpdag, dag, mixed, pag, tabular, timeseries
 from ergodic.data import TabularData
 from ergodic.datasets import load_earthquake
-from ergodic.discovery import GraphTest, Linear, test_graph
-from ergodic.discovery._ci import DSeparationOracle
+from ergodic.discovery import GCM, GraphTest, Linear, test_graph
+from ergodic.discovery._ci import CITest, DSeparationOracle
 from ergodic.discovery._graphtest import _fisher, _holm
 from ergodic.discovery._stats import _chi2_sf
 from ergodic.graph import (
@@ -291,6 +291,13 @@ def test_holm_and_fisher_match_hand_computation() -> None:
     c0, p0 = _fisher([0.0, 0.5])
     assert math.isfinite(c0) and p0 == 0.0
     assert _fisher([]) == (0.0, 1.0)
+    # A subnormal p-value is a real tail, not a zero.
+    assert 0.0 < _fisher([1e-320])[1] < 1e-300
+    for bad in ([float("nan")], [0.2, float("inf")], [1.5], [-0.1]):
+        with pytest.raises(ValueError, match="finite numbers"):
+            _fisher(bad)
+        with pytest.raises(ValueError, match="finite numbers"):
+            _holm(bad)
 
 
 def test_the_result_serializes_and_reads_as_a_frame() -> None:
@@ -350,3 +357,178 @@ def test_bad_inputs_raise() -> None:
         test_graph(graph, data, test=Linear(data))
     with pytest.raises(ValueError, match="unknown test"):
         test_graph(graph, data, test="nope")
+
+
+# -- review fixes: non-finite input, calibration notes, vacuous claims ---------------------
+
+
+def _chain_data(n: int = 400, seed: int = 4) -> TabularData:
+    rng = np.random.default_rng(seed)
+    a = rng.normal(size=n)
+    b = a + rng.normal(size=n)
+    c = b + rng.normal(size=n)
+    return tabular({"a": a, "b": b, "c": c})
+
+
+def test_an_infinite_value_is_refused_not_read_as_a_pass() -> None:
+    rng = np.random.default_rng(1)
+    n = 400
+    a = rng.normal(size=n)
+    b = a + rng.normal(size=n)
+    c = 2.0 * b + rng.normal(size=n)
+    graph = dag(["a -> b", "a -> c"])
+    assert test_graph(graph, tabular({"a": a, "b": b, "c": c})).rejected
+    c[7] = np.inf
+    with pytest.raises(ValueError, match=r"\['c'\] hold infinite values"):
+        test_graph(graph, tabular({"a": a, "b": b, "c": c}))
+    # An infinite value outside the candidate's columns is not its business.
+    clean = tabular({"a": a, "b": b, "c": 2.0 * b + rng.normal(size=n), "z": c})
+    assert test_graph(graph, clean).rejected
+
+
+def test_missing_values_are_dropped_with_a_note() -> None:
+    rng = np.random.default_rng(2)
+    a = rng.normal(size=300)
+    b = a + rng.normal(size=300)
+    c = b + rng.normal(size=300)
+    c[:5] = np.nan
+    result = test_graph(dag(["a -> b", "b -> c"]), tabular({"a": a, "b": b, "c": c}))
+    assert result.n == 295
+    assert any("5 row(s) with a missing value" in note for note in result.notes)
+
+
+class _BrokenTest(CITest):
+    name = "broken"
+    needs = "numeric"
+
+    def statistic(self, *args: object) -> tuple[float, float, float | None]:
+        return float("nan"), float("nan"), None
+
+
+def test_a_non_finite_p_value_from_a_test_is_an_error() -> None:
+    with pytest.raises(ValueError, match="never a pass"):
+        test_graph(dag(["a -> b", "b -> c"]), _chain_data(), test=_BrokenTest())
+
+
+def test_gcm_with_nearest_neighbours_carries_a_calibration_note() -> None:
+    graph = dag(["a -> b", "b -> c"])
+    knn = test_graph(graph, _chain_data(), test="gcm")
+    assert knn.test == "gcm"
+    assert any("not calibrated" in note and "learner='ols'" in note for note in knn.notes)
+    ols = test_graph(graph, _chain_data(), test=GCM(learner="ols"))
+    assert not any("not calibrated" in note for note in ols.notes)
+    assert any("has not been measured" in note for note in ols.notes)
+    default = test_graph(graph, _chain_data())
+    assert not any("measured" in note or "calibrated" in note for note in default.notes)
+
+
+def test_g_squared_at_small_n_carries_a_size_note() -> None:
+    truth = dag(list(load_earthquake(n=300, seed=1).target["edges"]))
+    small = test_graph(truth, load_earthquake(n=300, seed=1).data)
+    assert small.test == "discrete"
+    assert any("can run over alpha" in note for note in small.notes)
+    large = test_graph(truth, load_earthquake(n=5000, seed=1).data)
+    assert not any("can run over alpha" in note for note in large.notes)
+
+
+def test_zero_dof_claims_are_vacuous_and_left_out_of_k() -> None:
+    rng = np.random.default_rng(3)
+    n = 500
+    a = rng.choice(["x", "y"], size=n)
+    b = np.where(rng.uniform(size=n) < 0.8, a, np.where(a == "x", "y", "x"))
+    data = tabular(
+        {"a": a, "b": b, "c": np.array(["only"] * n)},
+        types={"a": "categorical", "b": "categorical", "c": "categorical"},
+    )
+    result = test_graph(dag(["a -> b"], nodes=["c"]), data)
+    assert result.test == "discrete"
+    assert (result.k, result.dof, result.p_value) == (0, 0, 1.0)
+    assert {(i.x, i.y) for i in result.vacuous} == {("a", "c"), ("b", "c")}
+    assert all(i.dof == 0.0 for i in result.vacuous)
+    assert any("zero degrees of freedom" in note for note in result.notes)
+    assert len(result.to_dict()["vacuous"]) == 2
+
+
+def test_linear_p_values_keep_their_order_far_in_the_tail() -> None:
+    rng = np.random.default_rng(6)
+    n = 1500
+    a = rng.normal(size=n)
+    b = a + 2.0 * rng.normal(size=n)
+    c = b + 3.0 * rng.normal(size=n)
+    result = test_graph(dag(["a -> b"], nodes=["c"]), tabular({"a": a, "b": b, "c": c}))
+    p = [i.p_value for i in result.implications]
+    stats = [abs(i.statistic) for i in result.implications]
+    # Both |z| are above 8.3, where 1 - Phi underflowed to zero and tied them.
+    assert min(stats) > 9.0 and len(stats) == 2
+    assert all(value > 0.0 for value in p)
+    assert stats == sorted(stats, reverse=True)
+
+
+# -- review fixes: selection, MAGs, the few-rows and hidden-column notes ---------------------
+
+
+def test_selection_nodes_condition_every_claim() -> None:
+    # A -> S <- B with S selected: conditioning on S links A and B, so they are
+    # untestable; A and C stay separable given B.
+    graph = dag(["A -> S", "B -> S", "B -> C"], selection=["S"])
+    result = test_graph(graph, _noise(["A", "B", "C"]), test=DSeparationOracle(graph))
+    assert [(i.x, i.y, i.given) for i in result.implications] == [("A", "C", ("B",))]
+    assert result.untestable == (("A", "B"),)
+    assert graph.m_separated("A", "C", {"B", "S"})
+    assert not graph.m_separated("A", "C", {"S"})
+
+
+def test_a_mag_with_an_undirected_edge_is_read_by_m_separation() -> None:
+    # A --- B: both are ancestors of selection. B --> C, and C <-> D.
+    mag = mixed(["A --- B", "B --> C", "C <-> D"], kind=GraphKind.MAG)
+    result = test_graph(mag, _noise(mag.nodes), test=DSeparationOracle(mag))
+    assert result.kind == "mag"
+    claims = {(i.x, i.y, i.given) for i in result.implications}
+    assert claims == {("A", "C", ("B",)), ("A", "D", ()), ("B", "D", ())}
+    for x, y, given in claims:
+        assert mag.m_separated(x, y, given)
+
+
+def _separable(graph: MixedGraph, x: str, y: str, observed: list[str]) -> bool:
+    rest = [v for v in observed if v not in (x, y)]
+    return any(
+        graph.m_separated(x, y, set(given) | graph.selection)
+        for size in range(len(rest) + 1)
+        for given in combinations(rest, size)
+    )
+
+
+def test_untestable_pairs_match_an_exhaustive_search() -> None:
+    rng = np.random.default_rng(21)
+    checked = untestable = 0
+    for _ in range(30):
+        names = [f"V{i}" for i in range(7)]
+        edges = [(names[i], names[j]) for i, j in combinations(range(7), 2) if rng.uniform() < 0.4]
+        picks = list(rng.choice(names, size=3, replace=False))
+        world = dag(edges, nodes=names, latent=picks[:2], selection=picks[2:])
+        observed = sorted(world.nodes - world.latent - world.selection)
+        for candidate in (world, mag_of_dag(world)):
+            result = test_graph(candidate, _noise(observed), test=DSeparationOracle(candidate))
+            claimed = {frozenset((i.x, i.y)) for i in result.implications}
+            for x, y in combinations(observed, 2):
+                if candidate.has_edge(x, y):
+                    continue
+                checked += 1
+                separable = _separable(candidate, x, y, observed)
+                assert (frozenset((x, y)) in claimed) == separable
+                untestable += not separable
+            assert {frozenset(pair) for pair in result.untestable} == {
+                frozenset((x, y))
+                for x, y in combinations(observed, 2)
+                if not candidate.has_edge(x, y) and not _separable(candidate, x, y, observed)
+            }
+    assert checked > 100 and untestable > 0
+
+
+def test_few_rows_and_hidden_columns_get_notes() -> None:
+    graph = dag(["L -> a", "a -> b", "b -> c"], latent=["L"])
+    data = _chain_data(n=30)
+    noisy = tabular({**{v: data.column(v) for v in ("a", "b", "c")}, "L": data.column("a")})
+    result = test_graph(graph, noisy)
+    assert any("Few rows (30)" in note for note in result.notes)
+    assert any("not tested, though in the data: ['L']" in note for note in result.notes)
