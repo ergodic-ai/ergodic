@@ -173,7 +173,7 @@ def index_markdown(site: Site, notebooks: list[Notebook]) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def execute(site: Site, timeout: int = 1800, workers: int = 2) -> list[Run]:
+def execute(site: Site, timeout: int = 1800, workers: int = 1) -> list[Run]:
     """Run every notebook as a script (release CI). Returns one run per notebook."""
     programs = [Program(n.path, n.path.name, n.path.read_text(), timeout) for n in collect(site)]
     return run_all(programs, workers)

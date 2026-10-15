@@ -23,7 +23,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Site
@@ -46,6 +46,18 @@ socket.getaddrinfo = _blocked
 sys.argv = sys.argv[1:]
 runpy.run_path(sys.argv[0], run_name="__main__")
 """
+# Thread caps reach every program; unset ones default to 2 so a docs check cannot
+# saturate the machine. PYTENSOR_FLAGS passes through unchanged when set.
+THREAD_CAPS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+PASS_THROUGH = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT", "PYTENSOR_FLAGS")
+# A program is slow when marked slow="true" or given a timeout above this many seconds.
+SLOW_TIMEOUT = 60
 NUMBER = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
 
@@ -55,6 +67,7 @@ class Program:
     name: str
     code: str
     timeout: int
+    slow: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,7 +97,10 @@ def programs_of(path: Path, site: Site) -> list[Program]:
             if not re.fullmatch(r"[a-z0-9_]+\.py", name):
                 raise DocsError(f"{path.name}: program names are snake_case .py files: {name!r}")
             timeout = int(fence.attributes.get("timeout", site.example_timeout))
-            found.append(Program(path, name, fence.code, timeout))
+            slow = fence.attributes.get("slow") == "true" or (
+                "timeout" in fence.attributes and timeout > SLOW_TIMEOUT
+            )
+            found.append(Program(path, name, fence.code, timeout, slow))
     return found
 
 
@@ -142,12 +158,7 @@ def run(program: Program) -> Run:
     with tempfile.TemporaryDirectory(prefix="docs-example-") as folder:
         script = Path(folder) / program.name
         script.write_text(program.code)
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT")
-        }
-        env.update(PYTHONHASHSEED="0", MPLBACKEND="Agg", PYTHONWARNINGS="ignore")
+        env = program_env()
         started = time.perf_counter()
         try:
             done = subprocess.run(
@@ -166,9 +177,24 @@ def run(program: Program) -> Run:
         )
 
 
-def run_all(programs: list[Program], workers: int = 4) -> list[Run]:
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+def program_env() -> dict[str, str]:
+    """The environment of a program: a short allowlist plus capped thread pools."""
+    env = {key: value for key, value in os.environ.items() if key in PASS_THROUGH}
+    env.update({key: os.environ.get(key) or "2" for key in THREAD_CAPS})
+    env.update(PYTHONHASHSEED="0", MPLBACKEND="Agg", PYTHONWARNINGS="ignore")
+    return env
+
+
+def run_all(programs: list[Program], workers: int = 1) -> list[Run]:
+    """Run programs one at a time by default; ``workers`` > 1 runs them in parallel (CI)."""
+    if workers <= 1:
+        return [run(program) for program in programs]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(run, programs))
+
+
+def slow_enabled() -> bool:
+    return os.environ.get("DOCS_SLOW") == "1"
 
 
 def clean(text: str) -> str:
@@ -234,17 +260,32 @@ class Report:
     runs: list[Run]
     problems: list[str]
     recorded: list[str]
+    skipped: list[str] = field(default_factory=list)
 
 
-def check(site: Site, only: list[str] | None = None, *, record: bool = False) -> Report:
-    """Excerpts, program runs and output panels for the selected pages."""
+def check(
+    site: Site,
+    only: list[str] | None = None,
+    *,
+    record: bool = False,
+    jobs: int = 1,
+    slow: bool | None = None,
+) -> Report:
+    """Excerpts, program runs and output panels for the selected pages.
+
+    Slow programs (and their output panels) are skipped unless ``slow`` is true or,
+    when it is None, ``DOCS_SLOW=1`` is set; excerpts are always checked.
+    """
+    include_slow = slow_enabled() if slow is None else slow
     paths = page_paths(site, only)
     all_programs(site)  # Names must be unique across the whole site.
     problems: list[str] = []
     for path in paths:
         problems += excerpt_problems(path, site)
     programs = [program for path in paths for program in programs_of(path, site)]
-    runs = run_all(programs)
+    skipped = [f"{p.page.name}: {p.name}" for p in programs if p.slow and not include_slow]
+    programs = [p for p in programs if include_slow or not p.slow]
+    runs = run_all(programs, jobs)
     by_name = {r.program.name: r for r in runs}
     for item in runs:
         if item.returncode != 0:
@@ -277,4 +318,4 @@ def check(site: Site, only: list[str] | None = None, *, record: bool = False) ->
                 )
         if record and text != path.read_text():
             path.write_text(text)
-    return Report(runs, problems, recorded)
+    return Report(runs, problems, recorded, skipped)

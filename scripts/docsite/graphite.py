@@ -142,7 +142,7 @@ CALLOUTS = {
 }
 # Attributes each fence kind accepts. ``output`` panels name the program they record.
 FENCE_ATTRIBUTES = {
-    "code": frozenset({"file", "tab", "hl", "title", "timeout"}),
+    "code": frozenset({"file", "tab", "hl", "title", "timeout", "slow"}),
     "output": frozenset({"title", "from", "lines", "tol", "rtol"}),
 }
 

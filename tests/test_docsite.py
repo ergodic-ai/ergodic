@@ -221,3 +221,40 @@ def test_optional_modules_need_their_requirement(monkeypatch: pytest.MonkeyPatch
         reference_site(optional)
     present = dataclasses.replace(optional, reference_optional=(("datasets", "Datasets", "json"),))
     assert ("datasets", "Datasets") in reference_site(present).reference_modules
+
+
+def test_programs_get_thread_caps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in examples.THREAD_CAPS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    monkeypatch.setenv("PYTENSOR_FLAGS", "compiledir=/tmp/x")
+    code = (
+        "import os\n"
+        "for key in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',\n"
+        "            'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS', 'PYTENSOR_FLAGS'):\n"
+        "    print(key, os.environ.get(key))\n"
+    )
+    result = examples.run(examples.Program(tmp_path / "x.md", "env.py", code, 60))
+    assert result.stdout.split("\n")[:6] == [
+        "OMP_NUM_THREADS 1",
+        "OPENBLAS_NUM_THREADS 2",
+        "MKL_NUM_THREADS 2",
+        "VECLIB_MAXIMUM_THREADS 2",
+        "NUMEXPR_NUM_THREADS 2",
+        "PYTENSOR_FLAGS compiledir=/tmp/x",
+    ]
+
+
+def test_slow_programs_run_only_when_asked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    slow = PROGRAM.replace('file="demo.py"', 'file="demo.py" slow="true"')
+    long = PROGRAM.replace("demo.py", "long.py").replace(
+        'file="long.py"', 'file="long.py" timeout="300"'
+    )
+    site = site_with_pages(tmp_path, {"slow": "# Slow\n\n" + slow, "long": "# Long\n\n" + long})
+    monkeypatch.delenv("DOCS_SLOW", raising=False)
+    skipped = examples.check(site)
+    assert skipped.runs == [] and skipped.problems == []
+    assert skipped.skipped == ["long.md: long.py", "slow.md: demo.py"]
+    monkeypatch.setenv("DOCS_SLOW", "1")
+    included = examples.check(site, jobs=2)
+    assert len(included.runs) == 2 and included.problems == [] and included.skipped == []
