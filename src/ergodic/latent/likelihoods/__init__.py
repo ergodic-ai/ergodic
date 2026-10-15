@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The built-in regime likelihoods.
 
-Two ship in v1, chosen for fitting speed because calibration reruns the whole
+Two ship, chosen for fitting speed because calibration reruns the whole
 pipeline over many control worlds. :func:`spectral_whittle` is the flagship:
 frame spectra with level, spread, freq, and amp deltas, seconds per fit.
 :func:`switching_ar` is the reference second implementation proving the

@@ -268,7 +268,7 @@ class RegimeLikelihood:
     from that same fit. The two must describe the same fitted null, or the
     p-values built on them answer a question nobody asked.
 
-    ``k`` is fixed at two states in v1: one switch, on or off. More states
+    ``k`` is fixed at two states: one switch, on or off. More states
     change the delta vocabulary (which pair differs?) and are a design of
     their own, so anything else is refused here rather than half-supported.
     """

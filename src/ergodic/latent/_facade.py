@@ -161,7 +161,7 @@ def recover(
         always what you want: dwell knowledge stated per tick is wrong by a
         factor of the frame length for a framed likelihood.
     graph:
-        Reserved. v1 models one regime driving one series; pass nothing.
+        Not supported: one regime drives one series; pass nothing.
     draws, warmup, chains, seed:
         The sampler budget and seed. The defaults are the measured reference
         configuration (4 chains of 1000 after 1000 warmup).

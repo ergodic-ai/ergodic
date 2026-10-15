@@ -69,7 +69,7 @@ def _combined_loglik(logliks: Sequence[Any]) -> Any:
     """One emission tensor for the forward pass: the elementwise sum of the list.
 
     Several series observing one switch multiply their emission densities,
-    which is a sum in log space. All entries must share a shape; v1 always
+    which is a sum in log space. All entries must share a shape; the built-ins always
     passes one.
     """
     if not logliks:

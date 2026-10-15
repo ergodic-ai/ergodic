@@ -17,7 +17,7 @@ import ergodic
 
 _BANNED = re.compile(
     r"reserved seam|not built|\bMVP\b|post-MVP|\bphase[- ]1\b|later phase|engine spike"
-    r"|causal layer lands|until it lands",
+    r"|causal layer lands|until it lands|\bE1\b|\bv1\b|lands in D2",
     re.IGNORECASE,
 )
 

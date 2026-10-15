@@ -5,8 +5,8 @@ A hierarchy is hard structure. A parent equals the aggregate of its children by
 construction, so the edges are known and deterministic, not something to learn.
 It drives :class:`HierarchicalTSData` now and is reusable for grouped data later.
 
-v1 covers strict trees with sum or mean aggregation. Crossed groupings (region by
-category) come later.
+It covers strict trees with sum or mean aggregation. Crossed groupings (region by
+category) are not supported.
 """
 
 from __future__ import annotations

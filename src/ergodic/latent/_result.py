@@ -418,8 +418,8 @@ class Consensus:
 
         A spectral amplitude fire and a volatility model's spread silence
         together separate "the wave got louder" from "the noise floor rose",
-        which no single v1 likelihood can do alone. The rule needs the
-        deferred ``vol_garch`` likelihood and lands with it.
+        which no single built-in likelihood can do alone. The rule needs a
+        ``vol_garch`` likelihood, which is not available, so this raises.
         """
         raise NotImplementedError(
             "the amp/spread cross-model rule needs a vol_garch likelihood, which "

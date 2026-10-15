@@ -93,7 +93,7 @@ class BIC(Score):
         if width != 1:
             raise TypeError(
                 f"BIC scores single-column nodes; {node!r} encodes to {width} columns. "
-                "The mixed score lands in D2."
+                "Use MixedBIC (score='mixed_bic') for categorical nodes."
             )
         target = node_slice.start
         columns = [
@@ -121,7 +121,7 @@ class BIC(Score):
         if y.ndim != 2 or y.shape[1] != 1:
             raise TypeError(
                 "BIC scores single-column nodes; y must have shape (n, 1). "
-                "The mixed score lands in D2."
+                "Use MixedBIC (score='mixed_bic') for categorical nodes."
             )
         n = int(y.shape[0])
         if n == 0:

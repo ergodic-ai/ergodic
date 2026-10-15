@@ -9,9 +9,9 @@ from enum import Enum
 class EffectTarget(Enum):
     """Which effect a :class:`CausalEstimator` reports.
 
-    E1 returns ``ATE`` and ``ATT`` for the adjustment and front-door families and
-    ``LATE`` for instruments. ``ATC``, ``CATE``, and ``ITE`` are reserved for the
-    heterogeneous-effect phase.
+    The estimators return ``ATE`` and ``ATT`` for the adjustment and front-door
+    families and ``LATE`` for instruments; ``CATE`` and ``ITE`` tag the per-unit
+    results' summaries. ``ATC`` is reserved and no estimator returns it.
     """
 
     ATE = "ate"

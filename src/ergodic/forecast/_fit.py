@@ -217,7 +217,7 @@ def lag_align(history: Array, future: Any | None, lag: int, horizon: int) -> Any
     where it started before we began watching, which is the mildest thing to
     assume and is wrong in exactly one direction, understating the trend over the
     first ``k`` steps. The alternative, masking the first ``max_lag`` steps out of
-    the likelihood, is a real option and is deliberately not taken in v1: with
+    the likelihood, is a real option and is deliberately not taken: with
     ``k`` small against ``T`` the padded rows are a fraction of a percent of the
     information, and dropping rows makes two nodes at different lags fit
     different windows.
