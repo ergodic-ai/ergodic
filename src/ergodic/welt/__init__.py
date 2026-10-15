@@ -1,14 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Run Welt's hosted foundation models from ergodic.
 
-`Welt <https://welt.ergodic.dev>`_ hosts foundation models for tabular data. This
-optional module connects them to ergodic's discovery and estimation:
+`Welt <https://welt.ergodic.dev>`_ hosts foundation models for tabular data and
+time series. This optional module connects them to ergodic's discovery,
+estimation and forecasting:
 
 - :func:`discover` runs a Welt causal discovery model (``arrow``, ``cdfm``,
   ``avici``) and returns a :class:`~ergodic.discovery.DiscoveryResult`. The same
   run is ``ergodic.discover(data, method="welt:arrow")``.
 - :class:`WeltLearner` fills an estimator's nuisance slots with a Welt tabular
   model, so ``estimate_effect(..., learner=WeltLearner("tabicl-v2"))`` works.
+- :class:`WeltForecaster` (also :data:`Chronos`) forecasts a
+  :class:`~ergodic.data.TimeSeriesData` with Welt's Chronos-2, covariates
+  included, as an ergodic :class:`~ergodic.forecast.ForecastModel`, so
+  ``backtest(WeltForecaster(), data, test_size=12)`` and
+  :func:`~ergodic.forecast.reconcile` work on it.
 - :func:`upload_dataset` sends a :class:`~ergodic.data.TabularData` to your Welt
   workspace, and :func:`load_research_dataset` reads a Welt research dataset as
   one.
@@ -35,10 +41,20 @@ except ImportError as error:  # pragma: no cover - exercised without the extra
 
 from ._data import load_research_dataset, upload_dataset
 from ._discovery import WeltDecodeError, WeltGraphNotDAGError, discover
+from ._forecast import (
+    NATIVE_QUANTILE_LEVELS,
+    Chronos,
+    WeltForecastDiagnostics,
+    WeltForecaster,
+)
 from ._learner import WeltLearner
 
 __all__ = [
+    "NATIVE_QUANTILE_LEVELS",
+    "Chronos",
     "WeltDecodeError",
+    "WeltForecastDiagnostics",
+    "WeltForecaster",
     "WeltGraphNotDAGError",
     "WeltLearner",
     "discover",
