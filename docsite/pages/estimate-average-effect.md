@@ -81,8 +81,9 @@ the mean outcome if everyone were treated minus the mean if no one were.
     smoking and birthweight, but is not in the data, biases the result. No
     check on this page can detect such a variable.
 
-By default the outcome model is ordinary least squares and the propensity model is
-logistic regression. Pass `learner=` (an alias, a learner, or a mapping from slot to
+By default the propensity model is logistic regression. The outcome model is
+ordinary least squares for a continuous outcome, as here, and logistic regression
+for a binary one. Pass `learner=` (an alias, a learner, or a mapping from slot to
 learner) to use other models.
 
 ## Next steps
