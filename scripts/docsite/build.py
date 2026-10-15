@@ -7,10 +7,13 @@ reference and never executes page programs or notebooks.
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import importlib
+import importlib.util
 import json
 import os
+import pkgutil
 import re
 import shutil
 import subprocess
@@ -160,8 +163,10 @@ class SiteBuilder:
                 f"<small>{html.escape(product.description)}</small></a>"
             )
         return (
-            '<details class="product-switcher"><summary aria-label="Switch product">'
-            f"<span>{html.escape(current.name)}</span>{icon('switch')}</summary>"
+            '<details class="product-switcher"><summary>'
+            f"<span>{html.escape(self.site.switcher_label)}</span>"
+            f'<span class="sr-only">: switch from {html.escape(current.name)} to another '
+            f"product</span>{icon('switch')}</summary>"
             '<nav class="product-menu" aria-label="Ergodic products">'
             + "".join(items)
             + "</nav></details>"
@@ -486,6 +491,52 @@ def clean_output(output: Path, version: str) -> None:
             entry.unlink()
 
 
+REQUIRE_OPTIONAL = "DOCS_REQUIRE_OPTIONAL"
+
+
+def reference_site(site: Site) -> Site:
+    """Check every public module is listed, and resolve the optional ones.
+
+    A public (non-underscore) module of the package must be in ``modules``,
+    ``optional`` or ``exclude`` of ``[reference]`` in site.toml. An optional module
+    is documented when its requirement imports; otherwise it is skipped with a
+    warning, or the build fails when ``DOCS_REQUIRE_OPTIONAL=1`` (release CI sets it
+    once the requirement is published).
+    """
+    package = importlib.import_module(site.package)
+    present = {
+        info.name
+        for info in pkgutil.iter_modules(getattr(package, "__path__", []))
+        if not info.name.startswith("_")
+    }
+    listed = (
+        {m for m, _ in site.reference_modules}
+        | {m for m, _, _ in site.reference_optional}
+        | {m for m, _ in site.reference_exclude}
+    )
+    if unlisted := sorted(present - listed):
+        raise DocsError(
+            f"Public module(s) not in [reference] of site.toml: {unlisted}. Add each to "
+            "modules (documented), optional (needs an extra) or exclude (with a reason)."
+        )
+    if absent := sorted({m for m, _ in site.reference_modules} - present):
+        raise DocsError(f"[reference] modules not found in {site.package}: {absent}")
+    modules = list(site.reference_modules)
+    for module, label, requirement in site.reference_optional:
+        if module not in present:
+            continue  # Not in this version of the package.
+        if importlib.util.find_spec(requirement) is not None:
+            modules.append((module, label))
+        elif os.environ.get(REQUIRE_OPTIONAL) == "1":
+            raise DocsError(
+                f"{site.package}.{module} needs {requirement!r}, which is not installed, and "
+                f"{REQUIRE_OPTIONAL}=1 requires it"
+            )
+        else:
+            print(f"docs: skipping {site.package}.{module}: {requirement!r} is not installed")
+    return dataclasses.replace(site, reference_modules=tuple(modules))
+
+
 def build(
     site: Site,
     output: Path,
@@ -494,6 +545,7 @@ def build(
     report: Path | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    site = reference_site(site)
     package = importlib.import_module(site.package)
     version = str(getattr(package, "__version__", ""))
     if installed_version(site.distribution) != version:
@@ -609,7 +661,7 @@ def build(
         "notebooks": sorted(n.stem for n in builder.notebooks),
         "programs": sorted(programs),
         "previous_versions": sorted(site.previous_versions, key=release_tuple),
-        "reference": {k: v for k, v in coverage.items() if not k.endswith("_names")},
+        "reference": {k: v for k, v in coverage.items() if not isinstance(v, list)},
         "documentation_ref": git_revision(site.root),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

@@ -14,6 +14,7 @@ on:
       - "tests/test_docsite.py"
       - "pyproject.toml"
       - "uv.lock"
+      - "Makefile"
       - ".github/workflows/docs.yml"
   push:
     tags: ["v*"]
@@ -38,6 +39,19 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - run: uv python install 3.12
       - run: uv sync --frozen
+      # ergodic.welt imports welt-client, which reaches PyPI with its 0.13 release.
+      # Until then the reference skips that module with a warning; once welt-client
+      # 0.13 is published, the extra is installed and the build requires the page.
+      - name: Install the Welt bridge once welt-client 0.13 is on PyPI
+        run: |
+          published=$(curl -fsS https://pypi.org/pypi/welt-client/json | python3 -c 'import json, sys; r = json.load(sys.stdin)["releases"]; print(any(tuple(int(x) for x in v.split(".")[:2]) >= (0, 13) for v in r if all(p.isdigit() for p in v.split("."))))' || echo False)
+          if grep -q "^welt = " pyproject.toml && [ "$published" = "True" ]; then
+            uv sync --frozen --extra welt
+            echo "DOCS_REQUIRE_OPTIONAL=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::welt-client 0.13 is not on PyPI (or no welt extra yet): the ergodic.welt reference page is skipped"
+          fi
+          echo "UV_NO_SYNC=1" >> "$GITHUB_ENV"
       - name: Builder tests
         run: uv run pytest -q tests/test_docsite.py
       - name: Run page programs, check excerpts, recorded outputs and links

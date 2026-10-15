@@ -30,6 +30,9 @@ from .config import Site
 from .graphite import DocsError, Fence, fences, line_numbers
 
 PYTHON = ("python", "py")
+# Fence labels a page may use; anything else (py3, pycon, an empty label) could hide
+# Python from the excerpt check, so it is refused.
+LANGUAGES = frozenset({*PYTHON, "sh", "bash", "shell", "text", "output"})
 # Runs the program as __main__ after disabling sockets: documentation examples use
 # bundled data only and never reach the network.
 BOOTSTRAP = """
@@ -105,6 +108,13 @@ def excerpt_problems(path: Path, site: Site) -> list[str]:
     problems = []
     for fence in fences(text):
         line = text.count("\n", 0, fence.start) + 1
+        if not fence.info.strip() or fence.language not in LANGUAGES:
+            label = fence.info.strip() or "no label"
+            problems.append(
+                f"{path.name}:{line}: fence label {label!r} is not one of "
+                f"{', '.join(sorted(LANGUAGES))}"
+            )
+            continue
         if fence.language == "output":
             source = fence.attributes.get("from")
             if source is None:

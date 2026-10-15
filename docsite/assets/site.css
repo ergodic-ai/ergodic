@@ -27,3 +27,7 @@
 
 /* Reference pages list their names in the sidebar until the outline rail appears. */
 @media (min-width: 1181px) { .sidebar .page-index { display: none; } }
+
+/* The dark brand tile gets a hairline ring on dark backgrounds so it stays visible. */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .brand img { box-shadow: 0 0 0 1px var(--border-strong); } }
+:root[data-theme="dark"] .brand img { box-shadow: 0 0 0 1px var(--border-strong); }

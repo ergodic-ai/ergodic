@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from scripts.docsite import examples, notebooks
-from scripts.docsite.build import build
+from scripts.docsite.build import build, reference_site
 from scripts.docsite.config import ROOT, Site, load_site
 from scripts.docsite.graphite import DocsError, fence_info, render_markdown
 from scripts.docsite.links import check_links
@@ -66,11 +66,16 @@ def test_excerpts_must_come_from_a_program(tmp_path: Path) -> None:
     good = "# Page\n\n" + PROGRAM + '\n```python\ntotal = 1 + 2\nprint("total", total)\n```\n'
     drifted = "# Page\n\n" + PROGRAM + "\n```python\ntotal = 2 + 2\n```\n"
     unlinked = "# Page\n\n" + PROGRAM + "\n```output\n3\n```\n"
-    site = site_with_pages(tmp_path, {"good": good, "drifted": drifted, "unlinked": unlinked})
+    relabelled = "# Page\n\n" + PROGRAM + "\n```py3\ntotal = 2 + 2\n```\n"
+    site = site_with_pages(
+        tmp_path,
+        {"good": good, "drifted": drifted, "unlinked": unlinked, "relabelled": relabelled},
+    )
     pages = site.pages_dir
     assert examples.excerpt_problems(pages / "good.md", site) == []
     assert "not a verbatim" in examples.excerpt_problems(pages / "drifted.md", site)[0]
     assert "needs from=" in examples.excerpt_problems(pages / "unlinked.md", site)[0]
+    assert "fence label 'py3'" in examples.excerpt_problems(pages / "relabelled.md", site)[0]
 
 
 def test_record_then_check_outputs(tmp_path: Path) -> None:
@@ -166,5 +171,53 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     assert f'<link rel="canonical" href="{site.public_url}/">' in root_index
     assert 'data-theme-key="ergodic-docs-theme"' in root_index
     assert "https://ergodic-ai.github.io/welt-python/" in root_index
+    assert '<summary><span>Products</span><span class="sr-only">' in root_index
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert manifest["reference"]["public_names"] == summary["public_names"]
     assert not re.search(r"welt-docs-theme|Welt Python SDK", root_index)
     assert check_links(output) == []
+
+
+def test_build_fails_on_an_undocumented_public_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ergodic.knowledge
+
+    def probe(x: int) -> int:
+        return x
+
+    probe.__module__ = "ergodic.knowledge"
+    monkeypatch.setattr(ergodic.knowledge, "probe", probe, raising=False)
+    with pytest.raises(
+        DocsError,
+        match=r"1 public name\(s\) have no docstring:\n  - "
+        r"ergodic\.knowledge\.probe",
+    ):
+        build(load_site(), tmp_path / "site")
+    summary = build(load_site(), tmp_path / "site", strict_reference=False)
+    assert summary["undocumented"] == 1
+
+
+def test_every_public_module_is_listed() -> None:
+    site = load_site()
+    unlisted = dataclasses.replace(site, reference_modules=site.reference_modules[:-1])
+    with pytest.raises(DocsError, match=r"not in \[reference\].*'datasets'"):
+        reference_site(unlisted)
+    excluded = dataclasses.replace(unlisted, reference_exclude=(("datasets", "covered elsewhere"),))
+    assert "datasets" not in {m for m, _ in reference_site(excluded).reference_modules}
+
+
+def test_optional_modules_need_their_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
+    site = load_site()
+    optional = dataclasses.replace(
+        site,
+        reference_modules=site.reference_modules[:-1],
+        reference_optional=(("datasets", "Datasets", "no_such_requirement_api143"),),
+    )
+    monkeypatch.delenv("DOCS_REQUIRE_OPTIONAL", raising=False)
+    assert "datasets" not in {m for m, _ in reference_site(optional).reference_modules}
+    monkeypatch.setenv("DOCS_REQUIRE_OPTIONAL", "1")
+    with pytest.raises(DocsError, match="no_such_requirement_api143"):
+        reference_site(optional)
+    present = dataclasses.replace(optional, reference_optional=(("datasets", "Datasets", "json"),))
+    assert ("datasets", "Datasets") in reference_site(present).reference_modules

@@ -15,6 +15,7 @@ pages_source = "docsite/pages"              # repository path of page sources (f
 theme_key = "ergodic-docs-theme"            # localStorage key for the reader's theme choice
 footer = "ergodic by Ergodic · Apache-2.0"
 cta = { label = "Get started", page = "start" }
+switcher_label = "Products"                 # visible label of the product switcher
 search_prompt = "Search ergodic by task, function or error."
 search_hint = "No matches. Try “estimate”, “discover”, “dag” or “identify”."
 related_llms = [
@@ -132,6 +133,13 @@ modules = [
     ["latent", "Hidden regimes"],
     ["datasets", "Datasets"],
 ]
+# Public modules that import an optional dependency: [module, label, import name].
+# Documented when the import is available; release CI requires it once published.
+optional = [
+    ["welt", "Welt bridge", "welt"],
+]
+# Public modules deliberately left out of the reference: [module, reason].
+exclude = []
 
 [notebooks]
 page = "notebooks"
