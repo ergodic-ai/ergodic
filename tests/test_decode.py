@@ -428,13 +428,20 @@ def test_versioned_ids_and_aliases_resolve_alike() -> None:
         "greedy_v1",
         "exact_map_v1",
         "expected_count_v1",
+        "expected_count_v2",
         "soft_f1_v1",
+        "soft_f1_v2",
         "pair_sampler_v1",
         "perturb_and_map_v1",
     }
     with pytest.raises(TypeError):
         DECODERS["greedy_v1"] = "changed"  # type: ignore[index]
     assert all(isinstance(summary, str) for summary in DECODERS.values())
+    # A short name reads as the latest version.
+    assert Decoder("expected_count").method == "expected_count_v2"
+    assert Decoder("soft_f1").method == "soft_f1_v2"
+    assert Decoder("expected_count_v1").method == "expected_count_v1"
+    assert "superseded by expected_count_v2" in DECODERS["expected_count_v1"]
     config = Decoder("exact_map")
     assert config.method == "exact_map_v1" and not config.stochastic
     assert config.decode(probs).graph == decode(probs, "exact_map").graph
@@ -466,7 +473,9 @@ def test_every_decoder_honours_the_knowledge(method: str, kwargs: dict[str, Any]
         .root("C")
         .order("A", "D")
     )
-    result = decode(probs, method, knowledge=knowledge, **kwargs)
+    # D -> B has model probability 0.05: a strong conflict, warned about.
+    with pytest.warns(UserWarning, match="D -> B"):
+        result = decode(probs, method, knowledge=knowledge, **kwargs)
     assert knowledge.violations(result.graph) == []
     for candidate in result.candidates:
         assert knowledge.violations(candidate) == []
@@ -486,7 +495,10 @@ def test_tiers_and_a_skeleton_restriction_hold_for_every_decoder(
     result = decode(probs, method, knowledge=knowledge, **kwargs)
     assert knowledge.violations(result.graph) == []
     restricted = DomainKnowledge().restrict_to([("A", "B"), ("B", "C"), ("C", "D")])
-    graph = decode(probs, method, knowledge=restricted, **kwargs).graph
+    # The random matrix is dense: the pair A, F (outside the skeleton) is adjacent with
+    # probability above 0.9, a strong conflict.
+    with pytest.warns(UserWarning, match=r"skeleton pairs \(pair A, F"):
+        graph = decode(probs, method, knowledge=restricted, **kwargs).graph
     assert {frozenset((e.u, e.v)) for e in graph.edges} <= {
         frozenset("AB"),
         frozenset("BC"),
@@ -497,7 +509,8 @@ def test_tiers_and_a_skeleton_restriction_hold_for_every_decoder(
 def test_exact_map_under_knowledge_is_the_constrained_optimum() -> None:
     values = research_matrix()
     knowledge = DomainKnowledge().forbid("A", "B").require("D", "A")
-    result = decode(pair_state(), "exact_map", knowledge=knowledge)
+    with pytest.warns(UserWarning, match="D -> A"):  # model probability 0.05
+        result = decode(pair_state(), "exact_map", knowledge=knowledge)
     feasible = [
         g
         for g in all_dags(4)
@@ -509,8 +522,8 @@ def test_exact_map_under_knowledge_is_the_constrained_optimum() -> None:
 
 def test_knowledge_refusals() -> None:
     probs = pair_state()
-    with pytest.raises(ValueError, match="cannot hold a latent confounder"):
-        decode(probs, knowledge=DomainKnowledge().confound("A", "B"))
+    with pytest.raises(ValueError, match="banned from being adjacent"):
+        decode(probs, knowledge=DomainKnowledge().confound("A", "B").forbid_adjacency("A", "B"))
     with pytest.raises(ValueError, match="lack"):
         decode(probs, knowledge=DomainKnowledge().require("A", "Z"))
     cyclic = DomainKnowledge().require("A", "B").require("B", "C").require("C", "A")

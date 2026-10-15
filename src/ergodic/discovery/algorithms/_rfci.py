@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import GraphKind, InvalidGraphError, Mark
 from ...graph._pag import _is_directed, _mark_maps, fci_closure
+from ...knowledge import _refuse_soft
 from .._registry import resolve_test
 from .._result import DiscoveryResult
 from ._fci import _circle_marks, _seed_knowledge, _to_graph
@@ -91,7 +92,8 @@ class RFCI:
     a perfect oracle: the RFCI skeleton can keep edges only the
     possible-d-sep phase would remove, and the result then stands for more
     than one Markov equivalence class. Domain knowledge enters exactly as in
-    FCI: prune (a pair forbidden in both directions is never tested), protect
+    FCI: prune (a pair forbidden in both directions is never tested, unless it
+    is confounded), protect
     (required and confounded pairs are never tested or removed), orient
     through ancestry (the same seeding helpers), validate at the end.
     """
@@ -119,6 +121,7 @@ class RFCI:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run RFCI and return the discovered graph with its provenance."""
+        _refuse_soft(knowledge, "RFCI")
         oracle = resolve_test(self.test, data, algorithm=type(self).__name__)
         nodes = sorted(oracle.variables)
         adj, sepsets = stable_skeleton(

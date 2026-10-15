@@ -22,6 +22,7 @@ from collections import deque
 from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import dag
+from ...knowledge import _refuse_soft
 from .._registry import resolve_score
 from .._result import DiscoveryResult
 from .._score import Score
@@ -151,6 +152,7 @@ class HillClimb:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Climb to a high-scoring DAG and return it with its provenance."""
+        _refuse_soft(knowledge, "HillClimb")
         score = resolve_score(self._score, data, algorithm=type(self).__name__)
         variables = sorted(score.variables)
         parents_of: dict[str, set[str]] = {v: set() for v in variables}

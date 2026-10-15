@@ -314,10 +314,10 @@ def test_tiers_and_restriction_work_together() -> None:
     assert oriented.get_edge("B", "C").directed_pair() == ("B", "C")  # type: ignore[union-attr]
 
 
-def test_soft_hooks_not_implemented_yet() -> None:
-    knowledge = DomainKnowledge()
-    graph = dag(["X -> Y"])
-    with pytest.raises(NotImplementedError):
-        knowledge.energy(graph)
-    with pytest.raises(NotImplementedError):
-        knowledge.log_prior(graph)
+def test_log_prior_of_hard_knowledge_is_zero_or_minus_infinity() -> None:
+    knowledge = DomainKnowledge().require("X", "Y")
+    assert knowledge.log_prior(dag(["X -> Y"])) == 0.0
+    assert knowledge.energy(dag(["X -> Y"])) == 0.0
+    assert knowledge.log_prior(dag(["Y -> X"])) == float("-inf")
+    assert knowledge.energy(dag(["Y -> X"])) == float("inf")
+    assert DomainKnowledge().log_prior(dag(["X -> Y"])) == 0.0

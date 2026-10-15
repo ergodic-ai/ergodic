@@ -338,8 +338,6 @@ def test_discovery_refusals_happen_before_any_request() -> None:
     fake = FakeWelt()
     frame = continuous().to_pandas()
     with fake.client() as client:
-        with pytest.raises(ValueError, match="domain knowledge"):
-            welt_discover(continuous(), client=client, knowledge=ergodic.DomainKnowledge())
         labelled = tabular(frame.assign(G=np.where(frame["X"] > 0, "a", "b")))
         with pytest.raises(ValueError, match="continuous"):
             welt_discover(labelled, client=client)
@@ -447,9 +445,13 @@ def test_decoding_applies_knowledge_locally_and_samplers_take_their_seed() -> No
     fake = _decoding_fake()
     knowledge = ergodic.DomainKnowledge().forbid("Z", "X").require("W", "Y")
     with fake.client() as client:
-        result = welt_discover(
-            continuous(), "avici", decoder="greedy", knowledge=knowledge, client=client
-        )
+        # W -> Y is required against a 0.05 score: a strong conflict, warned about, at
+        # this call rather than inside ergodic.
+        with pytest.warns(ergodic.KnowledgeConflictWarning, match="W -> Y") as caught:
+            result = welt_discover(
+                continuous(), "avici", decoder="greedy", knowledge=knowledge, client=client
+            )
+        assert caught[0].filename == __file__
         sampled = welt_discover(
             continuous(),
             "avici",
@@ -548,17 +550,130 @@ def test_decoder_refusals_happen_before_any_request() -> None:
                 knowledge=ergodic.DomainKnowledge().require("Z", "Q"),
                 client=client,
             )
-        with pytest.raises(ValueError, match="latent confounder"):
+        # Knowledge alone implies greedy, and is still checked before paying.
+        with pytest.raises(ValueError, match="lack"):
             welt_discover(
                 continuous(),
                 "cdfm",
-                decoder="greedy",
-                knowledge=ergodic.DomainKnowledge().confound("Z", "X"),
+                knowledge=ergodic.DomainKnowledge().require("Z", "Q", confidence=0.8),
+                client=client,
+            )
+        with pytest.raises(ergodic.InconsistentKnowledgeError, match="cycle"):
+            welt_discover(
+                continuous(),
+                "cdfm",
+                knowledge=ergodic.DomainKnowledge().require("Z", "X").require("X", "Z"),
                 client=client,
             )
     # Only the catalogue lookup of the default refusal touched the API.
     assert fake.count("POST", "/v1/datasets") == 0
     assert fake.count("POST", "/v1/discoveries") == 0
+
+
+# -- decoding with knowledge by default (API-151, DEC-081) -------------------------------
+
+
+@pytest.mark.parametrize("model", ["avici", "cdfm"])
+def test_knowledge_without_a_decoder_decodes_with_greedy_at_the_native_threshold(
+    model: str,
+) -> None:
+    knowledge = ergodic.DomainKnowledge().forbid("Z", "X").order("Y", "W", confidence=0.7)
+    fake = _decoding_fake()
+    with fake.client() as client:
+        implied = welt_discover(continuous(), model, knowledge=knowledge, client=client)
+        explicit = welt_discover(
+            continuous(), model, decoder="greedy", knowledge=knowledge, client=client
+        )
+    assert isinstance(implied, DecodeResult)
+    assert implied.method == f"welt:{model}"
+    assert implied.diagnostics["decoded"] is True and implied.diagnostics["native"] is False
+    assert implied.diagnostics["decoder"] == "greedy_v1"
+    assert implied.diagnostics["threshold_source"] == "welt_native"
+    native = {"avici": 0.5, "cdfm": 0.3}[model]
+    assert implied.diagnostics["parameters"]["threshold"] == native
+    assert implied.graph == explicit.graph
+    assert implied.diagnostics["knowledge_audit"] == explicit.diagnostics["knowledge_audit"]
+    assert implied.diagnostics["n_hard_statements"] == 1
+    assert implied.diagnostics["n_soft_statements"] == 1
+    # One paid run each, nothing refused before paying.
+    assert fake.count("POST", "/v1/discoveries") == 2
+
+
+def test_confounded_knowledge_is_no_longer_refused_and_gives_an_admg() -> None:
+    fake = _decoding_fake()
+    knowledge = ergodic.DomainKnowledge().confound("W", "Y")
+    with fake.client() as client:
+        result = welt_discover(continuous(), "cdfm", knowledge=knowledge, client=client)
+    assert fake.count("POST", "/v1/discoveries") == 1
+    assert result.graph.kind.value == "admg"
+    assert result.diagnostics["graph_kind"] == "admg"
+    assert result.diagnostics["confounded_pairs"] == (("Y", "W"),)
+    assert knowledge.violations(result.graph) == []
+    # CDFM's W -> Y (0.32) passes its native 0.3, so the pair is a bow: the
+    # confounder is an explicit latent node.
+    assert result.diagnostics["latent_confounders"] == {"L__W__Y": ("Y", "W")}
+    assert "L__W__Y" in result.graph.latent
+    (entry,) = result.diagnostics["knowledge_audit"]
+    assert entry["kind"] == "confound" and entry["probability"] is None
+
+
+def test_arrow_with_knowledge_decodes_its_scores_with_the_default_rule() -> None:
+    """Arrow states no native threshold, so greedy keeps edges with w > 0."""
+    fake = FakeWelt()
+    knowledge = ergodic.DomainKnowledge().require("Z", "X")
+    with fake.client() as client:
+        result = welt_discover(continuous(), "arrow", knowledge=knowledge, client=client)
+    assert isinstance(result, DecodeResult)
+    assert result.method == "welt:arrow" and result.diagnostics["decoded"] is True
+    assert result.diagnostics["decoder"] == "greedy_v1"
+    assert result.diagnostics["threshold_source"] is None
+    assert result.diagnostics["parameters"]["threshold"] is None
+    # Every score is 0.25: no edge beats "no edge", so only the required one is left.
+    assert _glyphs(result.graph) == ["X <-- Z"]
+    assert fake.count("POST", "/v1/discoveries") == 1
+
+
+def test_a_conflict_turned_into_an_error_keeps_the_paid_result() -> None:
+    import warnings
+
+    from ergodic.welt import WeltDecodeError
+
+    fake = _decoding_fake()
+    knowledge = ergodic.DomainKnowledge().require("W", "Y")  # scored 0.05
+    with fake.client() as client, warnings.catch_warnings():
+        warnings.simplefilter("error", ergodic.KnowledgeConflictWarning)
+        with pytest.raises(WeltDecodeError) as error:
+            welt_discover(continuous(), "avici", knowledge=knowledge, client=client)
+    assert isinstance(error.value.__cause__, ergodic.KnowledgeConflictWarning)
+    assert error.value.result.job_id == "job_d1"
+    assert error.value.scores is not None
+    assert fake.count("POST", "/v1/discoveries") == 1
+
+
+def test_the_decoder_audit_setting_reaches_the_welt_decode() -> None:
+    import warnings
+
+    fake = _decoding_fake()
+    knowledge = ergodic.DomainKnowledge().require("W", "Y")
+    with fake.client() as client, warnings.catch_warnings():
+        warnings.simplefilter("error", ergodic.KnowledgeConflictWarning)
+        result = welt_discover(
+            continuous(),
+            "avici",
+            decoder=Decoder("greedy", audit=False),
+            knowledge=knowledge,
+            client=client,
+        )
+    assert result.diagnostics["knowledge_audited"] is False
+    assert result.diagnostics["knowledge_audit"] == ()
+
+
+def test_without_knowledge_or_decoder_the_native_dag_path_is_unchanged() -> None:
+    fake = FakeWelt()
+    with fake.client() as client:
+        result = welt_discover(continuous(), client=client)
+    assert not isinstance(result, DecodeResult)
+    assert "decoded" not in result.diagnostics
 
 
 # -- the learner --------------------------------------------------------------

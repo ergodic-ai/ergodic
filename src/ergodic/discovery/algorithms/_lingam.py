@@ -32,6 +32,7 @@ import numpy as np
 
 from ...data import TabularData
 from ...graph import dag
+from ...knowledge import _refuse_soft
 from .._result import DiscoveryResult
 
 if TYPE_CHECKING:
@@ -280,6 +281,7 @@ class DirectLiNGAM:
 
     def fit(self, data: TabularData, knowledge: DomainKnowledge | None = None) -> DiscoveryResult:
         """Find the causal order, prune the parents, and return the DAG."""
+        _refuse_soft(knowledge, "DirectLiNGAM")
         if not isinstance(data, TabularData):
             raise TypeError(
                 f"DirectLiNGAM reads TabularData, got {type(data).__name__}; temporal "

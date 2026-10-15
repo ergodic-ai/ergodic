@@ -100,7 +100,7 @@ from .inference import (
     select_cate,
     synthetic_control,
 )
-from .knowledge import DomainKnowledge, InconsistentKnowledgeError
+from .knowledge import DomainKnowledge, InconsistentKnowledgeError, KnowledgeConflictWarning
 from .latent import (
     CalibrationReport,
     CertifyResult,
@@ -164,6 +164,7 @@ __all__ = [
     "Identification",
     "InconsistentKnowledgeError",
     "InvalidGraphError",
+    "KnowledgeConflictWarning",
     "LatentResult",
     "Marginal",
     "Mark",

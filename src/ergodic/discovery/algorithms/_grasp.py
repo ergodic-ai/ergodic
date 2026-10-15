@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import dag
 from ...graph._meek import cpdag_of_dag
+from ...knowledge import _refuse_soft
 from .._registry import resolve_score
 from .._result import DiscoveryResult
 from .._score import Score
@@ -125,6 +126,7 @@ class GRaSP:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Walk tucks to convergence and return the class found."""
+        _refuse_soft(knowledge, "GRaSP")
         score = resolve_score(self._score, data, algorithm=type(self).__name__)
         variables = list(score.variables)
         if not type(score).score_equivalent:

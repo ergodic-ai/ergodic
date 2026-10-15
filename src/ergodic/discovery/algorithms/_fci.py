@@ -18,7 +18,9 @@ circle-tail marks. An undirected edge in the output says both endpoints
 cause the selection in every member of the class.
 
 Domain knowledge translates through ancestry, not edge direction. Prune: a
-pair forbidden in both directions (an adjacency ban) is never tested.
+pair forbidden in both directions is never tested, unless it is confounded
+(then ``confound`` with the two directed bans means a pure hidden common cause,
+and the pair is kept and seeded ``<->``).
 Protect: required and confounded pairs are never tested or removed. Orient:
 ``require(u, v)`` seeds ``u -> v``; ``confound(a, b)`` seeds ``a <-> b`` (the
 data model reads a confounded pair as a pure hidden common cause); a tier or
@@ -41,6 +43,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import Edge, GraphKind, InvalidGraphError, Mark, MixedGraph
 from ...graph._pag import fci_closure
+from ...knowledge import _refuse_soft
 from .._registry import resolve_test
 from .._result import DiscoveryResult
 from ._skeleton import _protected_pairs, stable_skeleton
@@ -99,6 +102,7 @@ class FCI:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run FCI and return the discovered graph with its provenance."""
+        _refuse_soft(knowledge, "FCI")
         oracle = resolve_test(self.test, data, algorithm=type(self).__name__)
         nodes = sorted(oracle.variables)
         adj, sepsets = stable_skeleton(

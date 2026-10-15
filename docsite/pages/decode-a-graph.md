@@ -2,7 +2,8 @@
 
 Turn a matrix of edge probabilities into a DAG with a named decoder, and see which
 edges it dropped and why. You'll compare decoders, draw candidate DAGs with a seeded
-sampler, and constrain the result with domain knowledge.
+sampler, constrain the result with domain knowledge, and weigh what you only believe
+against what the model says.
 
 !!! need "You'll need"
     - ergodic, installed with `pip install "ergodic"`.
@@ -93,8 +94,8 @@ Every decoder reads the pair-state view (see
 | --- | --- | --- |
 | `"greedy"` (`greedy_v1`, default) | Each pair's better direction when `w > 0` (or its value is above `threshold`), strongest first, skipping cycles. | `threshold` |
 | `"exact_map"` (`exact_map_v1`) | The DAG with the best total score, found exactly by A* search over orderings. | `max_nodes` |
-| `"expected_count"` (`expected_count_v1`) | The best `K` edges compatible with the exact ordering, `K` the rounded expected edge count. | `max_nodes` |
-| `"soft_f1"` (`soft_f1_v1`) | The same, with `K` from a label-free F1 estimate. | `max_nodes` |
+| `"expected_count"` (`expected_count_v2`) | The best `K` edges compatible with the exact ordering, `K` the rounded expected edge count of what the hard knowledge leaves open. | `max_nodes` |
+| `"soft_f1"` (`soft_f1_v2`) | The same, with `K` from a label-free F1 estimate. | `max_nodes` |
 | `"pair_sampler"` (`pair_sampler_v1`) | Draws each pair's state, adds edges in random order, drops those that close a cycle. | `samples`, `seed` |
 | `"perturb_and_map"` (`perturb_and_map_v1`) | Exact MAP under randomly perturbed pair scores, once per sample. | `samples`, `seed`, `max_nodes` |
 
@@ -103,9 +104,15 @@ graphs. It isn't best everywhere: on one physical benchmark the expected-count d
 scored better. The decoders that search orderings exactly refuse more than `max_nodes`
 variables (20 by default), because that search can grow exponentially.
 
+A short name reads as the latest version, and a versioned id never changes its
+results. `expected_count_v1` and `soft_f1_v1` are the 0.2 decoders: their budget `K`
+also counts the probability of edges your hard knowledge forbids. Without knowledge
+they agree with `_v2`.
+
 ## Read the result
 
-`decode` returns a `DecodeResult`. `graph` is a DAG over every variable, `method` is
+`decode` returns a `DecodeResult`. `graph` is a DAG over every variable (an ADMG when
+your knowledge names hidden confounders), `method` is
 `"decode:<id>"`, `candidates` holds every decoded DAG and `probabilities` the input.
 `diagnostics` records:
 
@@ -117,7 +124,10 @@ variables (20 by default), because that search can grow exponentially.
 | `seed`, `samples` | The sampler's seed and draw count (`None` and 1 otherwise). |
 | `rejected_cycles` | Per candidate, how many nominated edges were skipped for closing a directed cycle. |
 | `order_skipped` | Per candidate, how many were skipped only because they'd break the order knowledge. |
-| `objective` | The total log score of `graph`. |
+| `objective` | The total log score of `graph`'s directed edges on the input. |
+| `knowledge_objective` | The same score on the pair states the soft knowledge reweighted. |
+| `graph_kind`, `confounded_pairs` | `"dag"`, or `"admg"` with the `confound` pairs. |
+| `knowledge_audit`, `knowledge_cost`, `knowledge_conflicts` | What the model makes of your knowledge; see [Decode with what you know](#decode-with-what-you-know). |
 | `edge_budget` | `K`, for the cardinality decoders. |
 | `source_kind`, `source_provenance` | Where the probabilities came from. |
 | `note` | `"not a graph posterior; orientation not certified"`. |
@@ -133,7 +143,7 @@ same candidates, and neither the input nor numpy's global random state changes.
 
 ## Use domain knowledge
 
-`decode(..., knowledge=...)` applies hard constraints:
+`decode(..., knowledge=...)` applies [hard constraints](domain-knowledge.md):
 
 - **Forbidden edges, tiers, roots, sinks and `restrict_to`** remove directed edges before
   decoding.
@@ -146,10 +156,170 @@ same candidates, and neither the input nor numpy's global random state changes.
   `violations` together, but no single order fits them, so a decoder keeps only one.
 - **Required edges** go in first, whatever their probability. A required set with a
   cycle raises.
-- **`confound`** raises: a DAG can't hold a latent confounder.
+- **`confound`** adds a bidirected edge after decoding, so the result is an ADMG. See
+  [Decode with what you know](#decode-with-what-you-know).
 
 Every variable the knowledge names must be in the probabilities. The decoded graph is
 checked against the knowledge before it's returned.
+
+## Decode with what you know
+
+Hard constraints say "this is so". Often you only believe something: you're fairly
+sure, not certain. Give any constraint a `confidence=` between 0.5 and 1 and the
+decoder weighs it against the model instead of enforcing it. Every decode with
+knowledge also tells you where your knowledge and the model disagree.
+
+```python file="decode_with_knowledge.py"
+import numpy as np
+
+from ergodic import DomainKnowledge, EdgeProbabilities, decode, identify_effect
+
+names = ("rain", "sprinkler", "wet", "slippery")
+values = np.array(
+    [
+        [0.00, 0.45, 0.91, 0.06],
+        [0.40, 0.00, 0.83, 0.05],
+        [0.04, 0.07, 0.00, 0.88],
+        [0.58, 0.02, 0.10, 0.00],
+    ]
+)
+probs = EdgeProbabilities(names, values, kind="independent")
+
+# 1. A soft statement: you're fairly sure nothing causes the sprinkler.
+print(decode(probs, threshold=0.3).graph)
+soft = DomainKnowledge().root("sprinkler", confidence=0.7)
+print(decode(probs, threshold=0.3, knowledge=soft).graph)
+
+# 2. A statement the model disagrees with: rain doesn't wet the ground.
+doubtful = soft.forbid("rain", "wet", confidence=0.8)
+result = decode(probs, threshold=0.3, knowledge=doubtful)
+print(result.graph)
+
+# 3. The audit: what the model makes of each statement.
+for entry in result.diagnostics["knowledge_audit"]:
+    print(
+        f"{entry['statement']:<20} confidence {entry['confidence']}, "
+        f"model {entry['probability']:.2f}, holds {entry['holds']}, "
+        f"without knowledge {entry['holds_without_knowledge']}"
+    )
+print([entry["statement"] for entry in result.diagnostics["knowledge_conflicts"]])
+print(round(result.diagnostics["knowledge_cost"], 3))
+
+# 4. A hidden common cause of the sprinkler and slipperiness: an ADMG.
+confounded = decode(probs, knowledge=DomainKnowledge().confound("sprinkler", "slippery"))
+print(confounded)
+print(confounded.graph)
+print(identify_effect(confounded.graph, "sprinkler", "slippery"))
+```
+
+```output from="decode_with_knowledge.py"
+MixedGraph(kind=dag, nodes=4, edges=[rain --> sprinkler, rain --> wet, slippery <-- wet, sprinkler --> wet])
+MixedGraph(kind=dag, nodes=4, edges=[rain <-- sprinkler, rain --> wet, slippery <-- wet, sprinkler --> wet])
+MixedGraph(kind=dag, nodes=4, edges=[rain <-- sprinkler, rain --> wet, slippery <-- wet, sprinkler --> wet])
+no rain -> wet       confidence 0.8, model 0.09, holds False, without knowledge False
+sprinkler is a root  confidence 0.7, model 0.65, holds True, without knowledge False
+['no rain -> wet']
+0.205
+DecodeResult(decode:greedy_v1: decoded admg, 4 nodes, 4 edges)
+MixedGraph(kind=admg, nodes=4, edges=[rain --> wet, slippery <-> sprinkler, slippery <-- wet, sprinkler --> wet])
+Identification(frontdoor: P(slippery | do(sprinkler)) = sum_m P(m | sprinkler) sum_x' P(slippery | m, x') P(x'), with m = {wet})
+```
+
+- **Step 1.** At 0.7, `root("sprinkler")` is enough to flip `rain --> sprinkler`
+  (0.45) to `sprinkler --> rain` (0.40): the model barely prefers one direction, so a
+  moderate belief tips it.
+- **Step 2.** The model gives `rain --> wet` 0.91. A 0.8 belief that it isn't there
+  doesn't outweigh that, so the edge stays.
+- **Step 3.** The audit has one entry per statement. `model` is the
+  model's probability that the statement holds; `no rain -> wet` gets 0.09. A
+  statement is a strong conflict when the model gives one of its pairs less than 0.1,
+  as here: it's listed in `knowledge_conflicts` and `decode` warns once.
+  `knowledge_cost` is how much log score the knowledge cost against a decode without
+  it.
+- **Step 4.** `confound` doesn't change the directed edges. It adds
+  `sprinkler <-> slippery`, so the result is an ADMG, and identification reads it as
+  one: the effect is still identified, by the front door through `wet`.
+
+### How a soft statement weighs
+
+Every statement is about pairs of variables, and each pair has three states: no
+edge, one direction, the other. A statement you hold with confidence `c` multiplies
+the chance of each state by `c` where the state agrees with it and by `1 - c` where it
+doesn't. So against "no edge", `require("a", "b", confidence=c)` multiplies the odds of
+`a --> b` by `c / (1 - c)`, `forbid` divides them by it, and `root("x", confidence=c)`
+divides the odds of every edge into `x`. The decoders then run unchanged on the
+reweighted states, and `"exact_map"` finds the best graph for the combined score
+exactly. `knowledge.log_odds(variables)` shows the weights and
+`knowledge.log_prior(graph)` scores a graph under them.
+
+- **The confidence applies to each pair.** A statement about many pairs (tiers, a
+  root, a sink, `restrict_to`, `forbid_between`) acts as one belief of that
+  confidence per pair it covers, not as one belief that the whole statement holds.
+- **Different statements multiply; repeating one doesn't.** Knowledge holds a set of
+  statements, so the same statement made twice, or pooled with `&` from two people
+  who both made it, counts once.
+- **0.5 changes nothing.** Below 0.5 is refused: state the opposite instead.
+- **A hard constraint wins.** A soft weight on a direction a hard constraint forbids,
+  or on a pair a required edge settles, is dropped, for every decoder and for the
+  edge budget of `"expected_count"` and `"soft_f1"` (their `_v2`).
+- **Close to 1 acts like the hard constraint** whenever the hard result is reachable.
+  Two exceptions follow from what soft means. A soft order isn't transitive:
+  `order("a", "b", confidence=c)` weighs only the direct edge `b --> a`, while hard
+  order is read through chains. And `"pair_sampler"` adds a hard required edge before
+  the sampled ones, while a soft one is sampled like the rest and can lose to a
+  cycle.
+- **Greedy's `threshold=` path** multiplies each value's odds by the ratio on that
+  direction only. For a statement that weighs both directions of a pair
+  (`forbid_adjacency`, `restrict_to`) on `pair_state` input, that's not quite the
+  renormalized state the other decoders read.
+- **`confound` is hard only.** A hidden cause isn't an edge state, so the model has
+  no number for it, and its audit entry has no probability.
+- **How far a belief outweighs the model depends on the model's calibration.** The
+  scores of AVICI and CDFM aren't calibrated, so a 0.8 belief isn't worth the same
+  against every model.
+
+### Read the audit
+
+| Key | What it holds |
+| --- | --- |
+| `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `min_pair_probability`, `conflict_pairs`, `holds`, `holds_without_knowledge`, `note`. Soft statements are listed as you made them; hard ones one per stored constraint, so hard tiers show as one `order` entry per cross-tier pair. |
+| `knowledge_conflicts` | The entries with at least one conflict pair. |
+| `knowledge_cost` | The knowledge-free decode's score minus this one's. Never negative for `"exact_map"`; the other decoders can come out negative. |
+| `knowledge_violations_without_knowledge` | What `knowledge.violations()` reports on the knowledge-free graph: the hard knowledge as a whole, with order read through chains, `confound` pairs left out (that graph is a DAG). `None` with `audit=False`. |
+| `knowledge_audited` | `False` when you passed `audit=False`. |
+
+`probability` is the chance of the whole statement, with each pair taken on its own,
+so a statement about many pairs (tiers, a root, `restrict_to`) can get a low number
+even when no single pair is surprising. That's why conflicts are judged pair by pair:
+`min_pair_probability` is the smallest chance the model gives the statement's part on
+one pair, and `conflict_pairs` lists the pairs below 0.1, weakest first. For tiers
+that's an edge against the order the model puts above 0.9; for `root("x")`, an edge
+into `x` above 0.9. A conflict raises one `KnowledgeConflictWarning` (a
+`UserWarning`), which you can filter by category.
+
+`holds` and `holds_without_knowledge` read what each statement means: "a before b"
+fails when `b` is an ancestor of `a` along any directed path, not only through a
+direct edge. The probabilities read direct edges only (for an order, the chance of no
+direct edge against it), and the entry's `note` says so. An order implied only
+through a chain of statements, such as `c` before `a` from `order("a", "b")` and
+`order("b", "c")`, has no entry of its own; `knowledge_violations_without_knowledge`
+reports it.
+
+`holds_without_knowledge` comes from a second decode with the same settings and seed
+but no knowledge, so the audit costs one more decode. That can cost more than the
+decode itself: hard constraints often make `"exact_map"`'s search cheap, and the
+knowledge-free search has none, and a sampler draws its candidates again. Pass
+`audit=False` (or `Decoder(..., audit=False)`) to skip the audit; the decoded graph
+doesn't change.
+
+### Confounders give an ADMG
+
+With `confound("a", "b")` the directed part is decoded as before and `a <-> b` is
+added, to `graph` and to every candidate. If the decoder also put a directed edge on
+that pair, a graph can't hold both edges on one pair, so the confounder becomes an
+explicit latent node, `L__a__b`, with an edge into each end. It's in `graph.latent`,
+and `diagnostics["latent_confounders"]` maps it to its pair. Identification treats
+both forms the same way.
 
 ## Decode a Welt model's scores
 
@@ -163,6 +333,9 @@ new run. The exact decoders' `max_nodes` cap (20 by default) is checked against 
 data's variables before anything is uploaded. See
 [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm).
 
+Pass `knowledge=` without `decoder=` and ergodic decodes with greedy at the model's
+own threshold, as `decoder="greedy"` would.
+
 Arrow returns a DAG of its own, so ergodic uses that by default. Its scores are decoded
 only if you ask, with `decoder=`, and are then read as independent marginals, like
 AVICI's and CDFM's. That's a modelling choice: Welt doesn't state that Arrow's scores
@@ -173,6 +346,7 @@ are marginals.
 <div class="cards" markdown="1">
 
 - [Work with edge probabilities](edge-probabilities.md): build and read the input.
+- [Add domain knowledge](domain-knowledge.md): every kind of statement.
 - [Identify an effect](identify-an-effect.md): use the decoded DAG.
 - [Python reference](reference-discovery.md): `decode`, `Decoder` and `DecodeResult`.
 

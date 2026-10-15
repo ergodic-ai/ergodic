@@ -91,7 +91,8 @@ print(result.diagnostics["welt_model_version"])
 
 `welt_scores` is Arrow's native edge-score matrix as a dataframe, with rows for the
 source and columns for the target. The scores are not calibrated confidence, and
-ergodic never thresholds or reorients the graph with them unless you pass `decoder=`.
+ergodic never thresholds or reorients the graph with them unless you pass `decoder=`
+(or `knowledge=`, which implies it).
 Then they're read as independent marginals, as for AVICI and CDFM below.
 `ergodic.discover(data, method="welt:arrow")` runs the same job.
 
@@ -141,8 +142,8 @@ WeltLearner(task="classification")}` to `learner=`.
 
 AVICI and CDFM score every directed edge on its own and return a directed graph that
 may hold cycles and two-way pairs. ergodic never turns that into a DAG silently, so by
-default `discover` refuses them before anything is paid for. Pass `decoder=` to decode
-their scores into a DAG yourself.
+default `discover` refuses them before anything is paid for. Pass `decoder=` (or
+`knowledge=`) to decode their scores into a DAG yourself.
 
 ```python file="welt_decode.py" requires="a Welt API key"
 from ergodic import decode
@@ -190,10 +191,21 @@ another threshold, or another decoder such as `"exact_map"` or
 than `max_nodes` variables, 20 by default; that cap is checked before anything is
 uploaded. Above 20 variables use `"greedy"` or `"pair_sampler"`, which have no cap, or
 raise `max_nodes`. If anything fails after the run, `WeltDecodeError` carries the
-result and its scores. With `decoder=`, `knowledge=`
-constrains the decoding; Welt itself still runs without constraints, and knowledge that
-names an unknown variable or a `confound` pair raises before anything is uploaded.
-`ergodic.discover(data, method="welt:cdfm", decoder="greedy")` does the same.
+result and its scores. `ergodic.discover(data, method="welt:cdfm", decoder="greedy")`
+does the same.
+
+`knowledge=` applies to the decoding; Welt itself still runs without constraints.
+Without `decoder=`, knowledge means greedy at the model's own threshold, exactly as
+`decoder="greedy"`, so `discover(data, model="cdfm", knowledge=knowledge)` decodes
+too. When the model records no threshold of its own, greedy uses its default rule
+(an edge must beat "no edge") and `diagnostics["threshold_source"]` is `None`. For
+Arrow, knowledge replaces Arrow's native DAG with one decoded from its scores. Soft
+statements (`confidence=`) are weighed against the scores, a `confound` pair makes
+the result an ADMG, and `diagnostics["knowledge_audit"]` says what the model
+makes of each statement. The audit decodes the scores a second time without the
+knowledge; `decoder=Decoder("greedy", audit=False)` skips it. Knowledge that names an
+unknown variable or contradicts itself raises before anything is uploaded. See
+[Decode with what you know](decode-a-graph.md#decode-with-what-you-know).
 
 !!! caution "The decoded graph is your choice"
     The scores are uncalibrated and are not a posterior over graphs. A decoder picks
@@ -203,10 +215,12 @@ names an unknown variable or a `confound` pair raises before anything is uploade
 ## Limits
 
 - Welt discovery reads only continuous variables with no missing values, and takes
-  no domain knowledge (with `decoder=`, knowledge constrains the local decoding
-  only). `bootstrap` refuses `welt:` methods, since each resample would be a paid job.
+  no domain knowledge itself: `knowledge=` constrains the local decoding only, and
+  implies `decoder="greedy"`. `bootstrap` refuses `welt:` methods, since each
+  resample would be a paid job.
 - `cdfm` and `avici` return directed graphs that may hold cycles, so without
-  `decoder=` `discover` raises `WeltGraphNotDAGError` before it uploads anything. See
+  `decoder=` or `knowledge=`, `discover` raises `WeltGraphNotDAGError` before it
+  uploads anything. See
   [Decode AVICI and CDFM](#decode-avici-and-cdfm).
 - `WeltLearner.fit` refuses `sample_weight`, because Welt fits take no row weights.
 - On Python 3.14 the extra installs nothing, and `import ergodic.welt` raises an
