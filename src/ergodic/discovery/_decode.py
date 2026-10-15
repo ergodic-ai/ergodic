@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Final
 import numpy as np
 
 from ..graph import Mark, admg, dag
-from ..knowledge import _pair_rules
+from ..knowledge import _BEFORE, KnowledgeConflictWarning, _pair_rules
 from ._probabilities import EdgeProbabilities
 from ._result import DiscoveryResult
 
@@ -157,8 +157,9 @@ class DecodeResult(DiscoveryResult):
 
     With knowledge it also holds the audit:
 
-    - ``knowledge_audit``: one entry per statement as stated
-      (:meth:`~ergodic.DomainKnowledge.statements`), a dict with ``statement``
+    - ``knowledge_audit``: one entry per statement
+      (:meth:`~ergodic.DomainKnowledge.statements`: hard ones one per stored item,
+      soft ones as made), a dict with ``statement``
       (readable text), ``kind``, ``confidence`` (``None`` for hard),
       ``probability`` (the model's chance the whole statement holds, from the
       input's pair states with pairs taken as independent), ``min_pair_probability``
@@ -167,20 +168,24 @@ class DecodeResult(DiscoveryResult):
       0.1, weakest first), ``holds`` (in ``graph``) and ``holds_without_knowledge``
       (in a decode with the same settings and seed but no knowledge). A confounder,
       which no edge state expresses, has ``None`` probabilities, no conflict pairs
-      and the reason in ``note``. Statements are read pair by pair, as the
-      decoders weigh them: an order or tier holds when no direct edge runs against
-      it.
+      and the reason in ``note``. ``holds`` reads each statement's own meaning: an
+      order or tier fails when a later variable is an ancestor of an earlier one,
+      through any directed path. The probabilities read direct edges only (an
+      order's part on a pair is "no direct edge against it"), which ``note`` says
+      for order and tier entries.
     - ``knowledge_cost``: the knowledge-free decode's ``objective`` minus this
       one's. Non-negative for ``exact_map``; the other decoders are not exact on
       the score, so it can be negative.
     - ``knowledge_conflicts``: the audit entries with at least one conflict pair,
       a pair the model gives less than 0.1 for the statement's part on it (for
       tiers, an edge against the order above 0.9; for ``root(x)``, some
-      ``P(v -> x)`` above 0.9). Any such entry also raises one ``UserWarning``.
+      ``P(v -> x)`` above 0.9). Any such entry also raises one
+      :class:`~ergodic.KnowledgeConflictWarning`.
       The whole-statement ``probability`` does not decide it: a statement over
       many pairs can be unlikely as a whole with no pair surprising.
 
-    Without knowledge these are ``()``, ``None`` and ``()``.
+    Without knowledge, or with ``audit=False``, these are ``()``, ``None`` and
+    ``()``.
 
     Attributes:
         decoder: The versioned decoder id, for example ``"greedy_v1"``.
@@ -194,8 +199,13 @@ class DecodeResult(DiscoveryResult):
     probabilities: EdgeProbabilities | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
+        latent = self.graph.latent
+        observed = [e for e in self.graph.edges if e.u not in latent and e.v not in latent]
         body = f"{self.method}: decoded {self.graph.kind.value}"
-        body += f", {len(self.graph.nodes)} nodes, {len(self.graph.edges)} edges"
+        body += f", {len(self.graph.nodes - latent)} nodes, {len(observed)} edges"
+        if latent:
+            plural = "" if len(latent) == 1 else "s"
+            body += f", {len(latent)} latent confounder{plural}"
         if len(self.candidates) > 1:
             body += f", consensus of {len(self.candidates)} candidates"
         return f"DecodeResult({body})"
@@ -220,6 +230,7 @@ class Decoder:
         samples: Candidate count for a sampler; must be 1 otherwise.
         seed: Sampler seed (required for a sampler, refused otherwise).
         max_nodes: The variable cap for decoders that search orders exactly.
+        audit: Whether a decode with knowledge also audits it (see :func:`decode`).
     """
 
     method: str = "greedy"
@@ -227,10 +238,13 @@ class Decoder:
     samples: int = 1
     seed: int | None = None
     max_nodes: int = DEFAULT_MAX_NODES
+    audit: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "method", resolve_decoder(self.method))
         _check_settings(self.method, self.threshold, self.samples, self.seed, self.max_nodes)
+        if not isinstance(self.audit, bool):
+            raise TypeError("audit must be a bool")
 
     @property
     def stochastic(self) -> bool:
@@ -249,6 +263,7 @@ class Decoder:
             samples=self.samples,
             seed=self.seed,
             max_nodes=self.max_nodes,
+            audit=self.audit,
         )
 
 
@@ -302,6 +317,7 @@ def decode(
     samples: int = 1,
     seed: int | None = None,
     max_nodes: int = DEFAULT_MAX_NODES,
+    audit: bool = True,
 ) -> DecodeResult:
     """Decode edge probabilities into a DAG with a named, versioned decoder.
 
@@ -349,20 +365,30 @@ def decode(
     states are multiplied by ``exp(knowledge.log_odds(variables))`` and the pair
     is renormalized; every decoder then runs unchanged on those states, so
     ``exact_map`` is exact on the combined score (pair score plus
-    :meth:`~ergodic.DomainKnowledge.log_prior`). Greedy with ``threshold=t``
-    multiplies the input value's odds by the same ratio before comparing it with
-    ``t``. A soft statement on a pair a hard one already settles changes nothing.
+    :meth:`~ergodic.DomainKnowledge.log_prior`). The cardinality decoders take
+    their edge budget from the same weighted states with the hard constraints
+    applied (a forbidden direction holds no mass, a required one all of it). A
+    soft weight on a direction a hard constraint forbids, or on a pair a required
+    edge settles, is dropped, so it changes nothing for any decoder. Greedy with
+    ``threshold=t`` multiplies the input value's odds by the ratio on that
+    direction before comparing it with ``t``; for a statement that weighs both
+    directions of a pair (``forbid_adjacency``, ``restrict_to``) on
+    ``pair_state`` input this is not quite the renormalized pair state the other
+    decoders read, because the other direction's weight is left out.
 
     ``confound(a, b)`` adds ``a <-> b`` after the directed part is decoded, so
     the graph and every candidate is an ADMG (see :class:`DecodeResult` for a
     pair the decoder also joined with a directed edge).
 
-    With knowledge, the decode runs a second time without it (same settings and
-    seed) and ``diagnostics`` records the audit: per statement, the model's
+    With knowledge, ``diagnostics`` records an audit: per statement, the model's
     probability that it holds and whether it holds with and without the
     knowledge, the score the knowledge cost, and the strong conflicts (a pair
     the statement covers whose part the model gives less than 0.1), which also
-    raise one ``UserWarning``.
+    raise one :class:`~ergodic.KnowledgeConflictWarning`. The audit decodes a
+    second time without the knowledge (same settings and seed, so a sampler
+    draws its ``samples`` candidates again). That can cost more than the decode
+    itself: hard constraints often make an exact order search cheap, and the
+    knowledge-free search has none. Pass ``audit=False`` to skip it.
 
     Args:
         probabilities: The edge probabilities to decode.
@@ -375,6 +401,8 @@ def decode(
         max_nodes: The variable cap for the decoders that search orders exactly
             (all but greedy and pair_sampler). The search can grow exponentially
             with the variable count, so above the cap they raise.
+        audit: With knowledge, whether to audit it (one extra knowledge-free
+            decode, the audit entries, the cost and the conflict warning).
 
     Returns:
         A :class:`DecodeResult`: ``graph`` a DAG over every variable (an ADMG
@@ -395,6 +423,8 @@ def decode(
     decoder = resolve_decoder(method)
     _check_settings(decoder, threshold, samples, seed, max_nodes)
     spec = _SPECS[decoder]
+    if not isinstance(audit, bool):
+        raise TypeError("audit must be a bool")
     names = probabilities.variables
     check_size(decoder, len(names), max_nodes)
     constraints = _Constraints.build(names, knowledge)
@@ -404,7 +434,7 @@ def decode(
     candidates = tuple(_to_graph(names, g, confounded) for g in run.graphs)
     result_graph = candidates[run.chosen]
     objective = _pair_log_score(run.graphs[run.chosen], source, PROBABILITY_FLOOR)
-    audit: tuple[dict[str, Any], ...] = ()
+    entries: tuple[dict[str, Any], ...] = ()
     conflicts: tuple[dict[str, Any], ...] = ()
     cost: float | None = None
     statements = knowledge.statements() if knowledge is not None else ()
@@ -412,6 +442,7 @@ def decode(
         broken = knowledge.violations(result_graph)
         if broken:  # pragma: no cover - the decoders enforce every constraint they accept
             raise RuntimeError(f"decoded graph breaks the knowledge: {broken}")
+    if knowledge is not None and audit:
         free = _run(
             probabilities,
             source,
@@ -424,8 +455,8 @@ def decode(
         )
         free_graph = free.graphs[free.chosen]
         cost = _pair_log_score(free_graph, source, PROBABILITY_FLOOR) - objective
-        audit = _audit(statements, names, source, run.graphs[run.chosen], free_graph)
-        conflicts = tuple(entry for entry in audit if entry["conflict_pairs"])
+        entries = _audit(statements, names, source, run.graphs[run.chosen], free_graph)
+        conflicts = tuple(entry for entry in entries if entry["conflict_pairs"])
         if conflicts:
             listed = "; ".join(
                 f"{entry['statement']} (pair {entry['conflict_pairs'][0][0]}, "
@@ -436,8 +467,8 @@ def decode(
                 f"{len(conflicts)} knowledge statement(s) have a pair the model gives a "
                 f"probability below {CONFLICT_PROBABILITY:g}: {listed}. "
                 "See diagnostics['knowledge_audit']",
-                UserWarning,
-                stacklevel=2,
+                KnowledgeConflictWarning,
+                stacklevel=_caller_level(),
             )
     latent = {
         node: pair
@@ -468,9 +499,10 @@ def decode(
         "source_calibrated": probabilities.calibrated,
         "source_provenance": probabilities.provenance,
         "knowledge_applied": knowledge is not None,
+        "knowledge_audited": knowledge is not None and audit,
         "n_hard_statements": sum(not statement.is_soft for statement in statements),
         "n_soft_statements": sum(statement.is_soft for statement in statements),
-        "knowledge_audit": audit,
+        "knowledge_audit": entries,
         "knowledge_cost": cost,
         "knowledge_conflicts": conflicts,
         "note": DECODED_NOTE,
@@ -537,8 +569,11 @@ def _run(
             graph = _graph_for_order(weights, order, constraints)
         else:
             rule = "expected_count" if decoder == "expected_count_v1" else "soft_f1"
+            budget_states = _settled_pair_states(pair, constraints)
             edge_budget = (
-                _expected_edge_count(pair) if rule == "expected_count" else _soft_f1_budget(pair)
+                _expected_edge_count(budget_states)
+                if rule == "expected_count"
+                else _soft_f1_budget(budget_states)
             )
             parameters["edge_budget_rule"] = rule
             graph = _cardinality_graph(weights, order, edge_budget, constraints)
@@ -591,7 +626,8 @@ class _Constraints:
         permitted = ~np.eye(size, dtype=bool)
         if knowledge is None:
             return cls(permitted, (), (), (0,) * size)
-        unknown = sorted(knowledge.variables - set(names))
+        named = knowledge.variables.union(*(s.variables for s in knowledge.soft))
+        unknown = sorted(named - set(names))
         if unknown:
             raise ValueError(f"knowledge names variables the probabilities lack: {unknown}")
         knowledge.validate()
@@ -611,6 +647,12 @@ class _Constraints:
             )
         )
         odds = knowledge.log_odds(list(names)) if knowledge.soft else None
+        if odds is not None:
+            # A soft weight on a direction a hard constraint forbids, or on a pair a
+            # required edge settles, has nothing left to weigh.
+            odds[~mask] = 0.0
+            for source, target in required:
+                odds[source, target] = odds[target, source] = 0.0
         constraints = cls(
             np.asarray(mask, dtype=bool),
             required,
@@ -677,6 +719,50 @@ def _weighted_values(values: FloatArray, odds: FloatArray) -> FloatArray:
     return result
 
 
+def _settled_pair_states(pair: FloatArray, constraints: _Constraints) -> FloatArray:
+    """Pair states with the hard constraints applied, for the edge budget.
+
+    A forbidden direction holds no mass and a required one all of it, each pair
+    renormalized, so the budget counts only what the knowledge leaves open (and a
+    soft statement near 1 gives the same budget as its hard form).
+    """
+    size = pair.shape[0]
+    if not constraints.required and int(constraints.permitted.sum()) == size * (size - 1):
+        return pair
+    result = np.where(constraints.permitted, pair, 0.0)
+    fixed = constraints.required_pairs
+    for source, target in constraints.required:
+        result[source, target], result[target, source] = 1.0, 0.0
+    for low in range(size):
+        for high in range(low + 1, size):
+            if frozenset((low, high)) in fixed:
+                continue
+            forward, reverse = float(result[low, high]), float(result[high, low])
+            if forward == pair[low, high] and reverse == pair[high, low]:
+                continue
+            none = max(0.0, 1.0 - float(pair[low, high]) - float(pair[high, low]))
+            total = none + forward + reverse
+            if total > 0.0:
+                result[low, high], result[high, low] = forward / total, reverse / total
+    return result
+
+
+def _caller_level() -> int:
+    """The ``stacklevel`` that points a warning at the first frame outside ergodic."""
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    frame = sys._getframe(1)  # the function that will warn
+    level = 1
+    while frame.f_back is not None and Path(frame.f_code.co_filename).resolve().is_relative_to(
+        root
+    ):
+        frame = frame.f_back
+        level += 1
+    return level
+
+
 def _log(value: float) -> float:
     return math.log(value) if value > 0.0 else -math.inf
 
@@ -715,6 +801,14 @@ def _to_graph(
     return admg(edges, nodes=(*names, *latent), latent=latent)
 
 
+def _closure(graph: BoolArray) -> BoolArray:
+    """``out[i, j]`` is whether a directed path leads from ``i`` to ``j``."""
+    reach = graph.copy()
+    for middle in range(graph.shape[0]):
+        reach |= np.outer(reach[:, middle], reach[middle])
+    return reach
+
+
 def _pair_state(graph: BoolArray, i: int, j: int) -> int:
     return 1 if graph[i, j] else 2 if graph[j, i] else 0
 
@@ -726,8 +820,13 @@ def _audit(
     decoded: BoolArray,
     free: BoolArray,
 ) -> tuple[dict[str, Any], ...]:
-    """One entry per statement: the model's probability and where it holds."""
+    """One entry per statement: the model's probability and where it holds.
+
+    ``holds`` reads each statement's meaning, an order through directed paths; the
+    probabilities read each pair's direct-edge states.
+    """
     index = {name: i for i, name in enumerate(names)}
+    reach, reach_free = _closure(decoded), _closure(free)
     entries: list[dict[str, Any]] = []
     for statement in statements:
         entry: dict[str, Any] = {
@@ -751,8 +850,12 @@ def _audit(
         holds = holds_free = True
         for a, b, rule in _pair_rules(statement, names):
             i, j = index[a], index[b]
-            holds = holds and rule[_pair_state(decoded, i, j)]
-            holds_free = holds_free and rule[_pair_state(free, i, j)]
+            if rule == _BEFORE:  # a before b fails when b is an ancestor of a
+                holds = holds and not reach[j, i]
+                holds_free = holds_free and not reach_free[j, i]
+            else:
+                holds = holds and rule[_pair_state(decoded, i, j)]
+                holds_free = holds_free and rule[_pair_state(free, i, j)]
             low, high = min(i, j), max(i, j)
             # The rule's states, re-read from (low, high): state 1 is low -> high.
             states = rule if (low, high) == (i, j) else (rule[0], rule[2], rule[1])
@@ -775,7 +878,12 @@ def _audit(
             conflict_pairs=tuple((a, b) for _, a, b in sorted(offending)),
             holds=bool(holds),
             holds_without_knowledge=bool(holds_free),
-            note=None,
+            note=(
+                "holds reads directed paths; probability and min_pair_probability read "
+                "direct edges only"
+                if statement.kind in ("order", "tiers")
+                else None
+            ),
         )
         entries.append(entry)
     return tuple(entries)

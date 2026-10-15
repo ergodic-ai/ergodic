@@ -14,6 +14,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import pytest
 from tests.test_decode import (
     ALL_METHODS,
@@ -27,7 +28,14 @@ from tests.test_decode import (
     score,
 )
 
-from ergodic import DomainKnowledge, EdgeProbabilities, decode, identify_effect
+from ergodic import (
+    DomainKnowledge,
+    EdgeProbabilities,
+    KnowledgeConflictWarning,
+    decode,
+    identify_effect,
+)
+from ergodic.discovery import Decoder
 from ergodic.graph import dag
 
 Builder = Callable[[DomainKnowledge, float | None], DomainKnowledge]
@@ -49,9 +57,7 @@ NEAR_ONE = 1.0 - 1e-9
 # For tests that state knowledge the model rejects on purpose (require D -> B, which the
 # model gives 0.05) or draw random matrices: the conflict warning is expected there and
 # is itself tested in test_strong_conflicts_are_listed_and_warned_once.
-EXPECTED_CONFLICTS = pytest.mark.filterwarnings(
-    "ignore:.*have a pair the model gives a probability below:UserWarning"
-)
+EXPECTED_CONFLICTS = pytest.mark.filterwarnings("ignore::ergodic.KnowledgeConflictWarning")
 
 
 def _edges(result: Any) -> list[str]:
@@ -77,20 +83,78 @@ def test_one_half_decodes_exactly_as_no_knowledge(
     assert neutral.diagnostics["knowledge_cost"] == 0.0
 
 
-@pytest.mark.parametrize("kind", sorted(STATEMENTS))
-@pytest.mark.parametrize(
-    ("method", "kwargs"), [("greedy", {}), ("greedy", {"threshold": 0.05}), ("exact_map", {})]
-)
 @EXPECTED_CONFLICTS
+@pytest.mark.parametrize("kind", sorted(STATEMENTS))
+@pytest.mark.parametrize(("method", "kwargs"), ALL_METHODS)
 def test_confidence_near_one_matches_the_hard_statement(
     kind: str, method: str, kwargs: dict[str, Any]
 ) -> None:
     probs = pair_state()
     hard = decode(probs, method, knowledge=STATEMENTS[kind](DomainKnowledge(), None), **kwargs)
     soft = decode(probs, method, knowledge=STATEMENTS[kind](DomainKnowledge(), NEAR_ONE), **kwargs)
+    assert soft.diagnostics["edge_budget"] == hard.diagnostics["edge_budget"], kind
+    if method == "pair_sampler" and kind in ("require", "order"):
+        # The sampler draws each pair, then adds the drawn edges in random order and
+        # drops any that closes a cycle. A hard required edge goes in first and a
+        # hard order is enforced through paths; near 1 the soft forms draw the same
+        # states, but a soft required edge can lose to a cycle and a soft order only
+        # rules out the direct edge. So: the soft required edge is missing only where
+        # a path already runs the other way, and the direct edge against the order
+        # never appears.
+        for candidate in soft.candidates:
+            if kind == "require":
+                edge = candidate.get_edge("D", "B")
+                if edge is None:
+                    assert "D" in candidate.descendants("B")
+                else:
+                    assert edge.directed_pair() == ("D", "B")
+            else:
+                assert candidate.get_edge("C", "D") is None or "D" not in candidate.children("C")
+        return
+    assert soft.candidates == hard.candidates, kind
     assert soft.graph == hard.graph, kind
-    # Each statement changes the decode, so the test is not vacuous.
-    assert hard.graph != decode(probs, method, **kwargs).graph, kind
+    if method not in ("pair_sampler", "perturb_and_map"):
+        # Each statement changes a deterministic decode, so the test is not vacuous.
+        assert hard.graph != decode(probs, method, **kwargs).graph, kind
+
+
+@EXPECTED_CONFLICTS
+@pytest.mark.parametrize("kind", sorted(STATEMENTS))
+@pytest.mark.parametrize(("method", "kwargs"), ALL_METHODS)
+def test_a_hard_constraint_overrides_any_soft_statement_on_its_pair(
+    kind: str, method: str, kwargs: dict[str, Any]
+) -> None:
+    """Soft weight on what a hard constraint settles changes nothing, budget included."""
+    probs = pair_state()
+    hard = STATEMENTS[kind](DomainKnowledge(), None)
+    # Every soft statement aimed at the pairs and directions the hard one settles.
+    against = DomainKnowledge()
+    for a, b in hard.forbidden:
+        against = against.require(a, b, confidence=0.999)
+    for a, b in hard.required:
+        against = against.require(b, a, confidence=0.999).forbid(a, b, confidence=0.999)
+    for a, b in hard.precedence():
+        against = against.require(b, a, confidence=0.999)
+    for x in hard.roots:
+        for v in set(NAMES) - {x}:
+            against = against.require(v, x, confidence=0.999)
+    for x in hard.sinks:
+        for v in set(NAMES) - {x}:
+            against = against.require(x, v, confidence=0.999)
+    if hard.allowed_adjacencies is not None:
+        outside = [
+            (a, b)
+            for i, a in enumerate(NAMES)
+            for b in NAMES[i + 1 :]
+            if frozenset((a, b)) not in hard.allowed_adjacencies
+        ]
+        for a, b in outside:
+            against = against.require(a, b, confidence=0.999).require(b, a, confidence=0.999)
+    assert against.soft
+    alone = decode(probs, method, knowledge=hard, **kwargs)
+    both = decode(probs, method, knowledge=hard & against, **kwargs)
+    assert both.candidates == alone.candidates, kind
+    assert both.diagnostics["edge_budget"] == alone.diagnostics["edge_budget"], kind
 
 
 def test_near_one_matches_hard_on_independent_marginals_with_a_threshold() -> None:
@@ -291,35 +355,39 @@ def test_a_latent_name_never_collides_with_a_variable() -> None:
 # -- the audit --------------------------------------------------------------------------
 
 
-def test_the_audit_lists_each_statement_as_stated() -> None:
+def test_the_audit_lists_each_statement() -> None:
     p = research_matrix()
     knowledge = (
         DomainKnowledge()
-        .with_tiers([["A"], ["B", "C", "D"]])
+        .order("A", "B")
+        .confound("A", "D")
+        .with_tiers([["A"], ["B", "C", "D"]], confidence=0.9)
         .require("D", "B", confidence=0.9)
         .root("C", confidence=0.8)
-        .confound("A", "D")
         .restrict_to([("A", "B"), ("B", "C"), ("C", "D"), ("A", "D"), ("B", "D")], confidence=0.7)
     )
-    with pytest.warns(UserWarning, match=r"D -> B \(pair B, D: 0\.05\)"):
+    with pytest.warns(KnowledgeConflictWarning, match=r"D -> B \(pair B, D: 0\.05\)"):
         result = decode(pair_state(), "exact_map", knowledge=knowledge)
     audit = result.diagnostics["knowledge_audit"]
     assert [e["statement"] for e in audit] == [
-        "tiers [A] < [B, C, D]",
+        "A before B",
         "A <-> D",
         "D -> B",
+        "tiers [A] < [B, C, D]",
         "C is a root",
         "edges only on 5 skeleton pairs",
     ]
     by = {e["statement"]: e for e in audit}
-    # Tiers: no edge from B, C or D into A.
-    assert by["tiers [A] < [B, C, D]"]["probability"] == pytest.approx(
-        (1 - p[1, 0]) * (1 - p[2, 0]) * (1 - p[3, 0])
-    )
-    assert by["tiers [A] < [B, C, D]"]["confidence"] is None
+    tiers = by["tiers [A] < [B, C, D]"]
+    # Tiers: no edge from B, C or D into A, one pair at a time.
+    assert tiers["probability"] == pytest.approx((1 - p[1, 0]) * (1 - p[2, 0]) * (1 - p[3, 0]))
+    assert tiers["confidence"] == 0.9
     # The weakest pair part: C -> A at 0.60 leaves 0.40 for "no edge into A from C".
-    assert by["tiers [A] < [B, C, D]"]["min_pair_probability"] == pytest.approx(1 - p[2, 0])
-    assert by["tiers [A] < [B, C, D]"]["conflict_pairs"] == ()
+    assert tiers["min_pair_probability"] == pytest.approx(1 - p[2, 0])
+    assert tiers["conflict_pairs"] == ()
+    assert "directed paths" in tiers["note"] and "direct edges" in tiers["note"]
+    assert by["A before B"]["confidence"] is None
+    assert by["A before B"]["probability"] == pytest.approx(1 - p[1, 0])
     assert by["D -> B"]["min_pair_probability"] == pytest.approx(p[3, 1])
     assert by["D -> B"]["conflict_pairs"] == (("B", "D"),)
     assert [e["statement"] for e in result.diagnostics["knowledge_conflicts"]] == ["D -> B"]
@@ -335,12 +403,31 @@ def test_the_audit_lists_each_statement_as_stated() -> None:
     assert confound["probability"] is None and "cannot price" in confound["note"]
     assert confound["min_pair_probability"] is None and confound["conflict_pairs"] == ()
     assert confound["holds"] is True and confound["holds_without_knowledge"] is False
-    assert by["tiers [A] < [B, C, D]"]["holds"] is True
-    # Without knowledge the cycle edge C -> A is rejected, so the tiers hold there too.
+    assert tiers["holds"] is True
     assert by["D -> B"]["holds_without_knowledge"] is False
     assert result.diagnostics["n_hard_statements"] == 2
-    assert result.diagnostics["n_soft_statements"] == 3
+    assert result.diagnostics["n_soft_statements"] == 4
     assert result.diagnostics["knowledge_cost"] >= 0.0
+
+
+@pytest.mark.parametrize("confidence", [None, 0.9])
+def test_an_order_holds_or_fails_through_paths_not_only_direct_edges(
+    confidence: float | None,
+) -> None:
+    """The model says c -> b -> a; "a before c" fails there through the chain."""
+    probs = _matrix(("a", "b", "c"), {("c", "b"): 0.9, ("b", "a"): 0.9})
+    knowledge = DomainKnowledge().order("a", "c", confidence=confidence)
+    plain = decode(probs)
+    assert _edges(plain) == ["a <-- b", "b <-- c"]
+    result = decode(probs, knowledge=knowledge)
+    (entry,) = result.diagnostics["knowledge_audit"]
+    assert entry["holds_without_knowledge"] is False  # c is an ancestor of a
+    # The probability reads the direct edge c -> a only, which the model makes unlikely.
+    assert entry["probability"] == pytest.approx(1 - probs.to_pair_states().values[2, 0])
+    assert entry["probability"] > 0.9
+    assert entry["holds"] is ("a" not in result.graph.descendants("c"))
+    if confidence is None:
+        assert entry["holds"] is True
 
 
 def test_knowledge_cost_is_the_score_given_up() -> None:
@@ -357,9 +444,11 @@ def test_knowledge_cost_is_the_score_given_up() -> None:
 def test_strong_conflicts_are_listed_and_warned_once() -> None:
     probs = pair_state()
     knowledge = DomainKnowledge().require("D", "B").forbid("A", "B", confidence=0.6).root("A")
-    with pytest.warns(UserWarning, match="1 knowledge statement") as caught:
+    with pytest.warns(KnowledgeConflictWarning, match="1 knowledge statement") as caught:
         result = decode(probs, knowledge=knowledge)
-    assert len([w for w in caught if "knowledge statement" in str(w.message)]) == 1
+    assert len([w for w in caught if w.category is KnowledgeConflictWarning]) == 1
+    # The warning points at this call, not inside ergodic.
+    assert caught[0].filename == __file__
     (conflict,) = result.diagnostics["knowledge_conflicts"]
     assert conflict["statement"] == "D -> B"
     assert conflict["probability"] == pytest.approx(0.05)
@@ -383,7 +472,7 @@ def test_a_statement_over_many_pairs_conflicts_only_through_a_single_pair() -> N
     strong = values.copy()
     strong[5, 1], strong[1, 5] = 0.95, 0.01
     root = DomainKnowledge().root("x1")
-    with pytest.warns(UserWarning, match=r"tiers .* \(pair x1, x5: 0\.05\)"):
+    with pytest.warns(KnowledgeConflictWarning, match=r"tiers .* \(pair x1, x5: 0\.05\)"):
         loud = decode(EdgeProbabilities(names, strong, kind="pair_state"), knowledge=tiers & root)
     by = {e["kind"]: e for e in loud.diagnostics["knowledge_audit"]}
     assert by["tiers"]["conflict_pairs"] == (("x1", "x5"),)
@@ -420,3 +509,91 @@ def test_the_threshold_path_weighs_the_input_odds() -> None:
     weak = DomainKnowledge().require("A", "B", confidence=0.52)
     assert decode(probs, threshold=0.5, knowledge=weak).graph.edges == frozenset()
     assert math.isclose(0.45 * 9 / (0.45 * 9 + 0.55), 0.8804, abs_tol=1e-4)
+
+
+# -- review follow-ups (API-151 independent review) -------------------------------------
+
+
+def test_audit_false_skips_the_knowledge_free_decode_and_the_warning() -> None:
+    probs = pair_state()
+    knowledge = DomainKnowledge().require("D", "B")  # a strong conflict
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        quiet = decode(probs, "exact_map", knowledge=knowledge, audit=False)
+        configured = Decoder("exact_map", audit=False).decode(probs, knowledge=knowledge)
+    with pytest.warns(KnowledgeConflictWarning):
+        audited = decode(probs, "exact_map", knowledge=knowledge)
+    assert quiet.graph == audited.graph == configured.graph
+    assert quiet.diagnostics["knowledge_audit"] == ()
+    assert quiet.diagnostics["knowledge_cost"] is None
+    assert quiet.diagnostics["knowledge_conflicts"] == ()
+    assert quiet.diagnostics["knowledge_audited"] is False
+    assert audited.diagnostics["knowledge_audited"] is True
+    # Skipping the audit leaves the constrained decode itself unchanged.
+    assert quiet.diagnostics["search_expansions"] == audited.diagnostics["search_expansions"]
+    with pytest.raises(TypeError, match="audit"):
+        decode(probs, knowledge=knowledge, audit="no")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="audit"):
+        Decoder("greedy", audit=1)  # type: ignore[arg-type]
+
+
+def test_the_repr_counts_observed_variables_and_names_latent_confounders() -> None:
+    probs = _matrix(("X", "Y", "Z"), {("X", "Y"): 0.9})
+    result = decode(probs, knowledge=DomainKnowledge().confound("X", "Y"))
+    assert repr(result) == (
+        "DecodeResult(decode:greedy_v1: decoded admg, 3 nodes, 1 edges, 1 latent confounder)"
+    )
+
+
+def test_confounded_and_neither_causes_the_other_decodes_to_a_bidirected_edge() -> None:
+    # The model would draw X -> Y; the knowledge says only a hidden cause joins them.
+    probs = _matrix(("Z", "X", "Y"), {("X", "Y"): 0.9, ("Z", "X"): 0.9})
+    knowledge = DomainKnowledge().confound("X", "Y").forbid("X", "Y").forbid("Y", "X")
+    assert knowledge.conflicts() == []
+    for method, kwargs in ALL_METHODS:
+        result = decode(probs, method, knowledge=knowledge, audit=False, **kwargs)
+        assert result.graph.latent == frozenset()
+        assert result.graph.get_edge("X", "Y").is_bidirected  # type: ignore[union-attr]
+        assert knowledge.violations(result.graph) == []
+    graph = decode(probs, knowledge=knowledge, audit=False).graph
+    assert _edges_of(graph) == ["X <-- Z", "X <-> Y"]
+    # X has no effect on Y here: no directed path, the zero-effect "null" strategy.
+    assert identify_effect(graph, "X", "Y").strategy == "null"
+    # Z's effect on X has no back-door path: plain adjustment.
+    assert identify_effect(graph, "Z", "X").strategy == "adjustment"
+
+
+def _edges_of(graph: Any) -> list[str]:
+    return sorted(edge.glyph() for edge in graph.edges)
+
+
+def test_soft_knowledge_is_refused_by_the_searches_not_dropped() -> None:
+    from ergodic import discover, tabular
+    from ergodic.discovery import PC, DSeparationOracle, bootstrap
+
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=200)
+    data = tabular(pd.DataFrame({"x": x, "y": x + rng.normal(size=200), "z": rng.normal(size=200)}))
+    knowledge = DomainKnowledge().require("x", "y").root("z", confidence=0.99)
+    for method in ("pc", "ges", "fci", "lingam", "mmpc", "boss", "glasso"):
+        with pytest.raises(ValueError, match=r"reads hard knowledge only.*z is a root \(0\.99\)"):
+            discover(data, method=method, knowledge=knowledge)
+    with pytest.raises(ValueError, match="bootstrap reads hard knowledge only"):
+        bootstrap(data, n_bootstrap=2, knowledge=knowledge)
+    with pytest.raises(ValueError, match=r"PC reads hard knowledge only.*knowledge\.hard\(\)"):
+        PC(DSeparationOracle(dag(["x -> y"], nodes=["z"]))).fit(knowledge=knowledge)
+    # The hard part runs.
+    result = PC(DSeparationOracle(dag(["x -> y"], nodes=["z"]))).fit(knowledge=knowledge.hard())
+    assert result.graph.get_edge("x", "y") is not None
+
+
+@pytest.mark.parametrize("name", ["FCI", "RFCI"])
+def test_the_latent_searches_keep_a_confounded_pair_neither_side_causes(name: str) -> None:
+    from ergodic import discovery
+
+    truth = dag(["L -> X", "L -> Y", "Z -> X"], latent=["L"])
+    knowledge = DomainKnowledge().confound("X", "Y").forbid("X", "Y").forbid("Y", "X")
+    search = getattr(discovery, name)(test=discovery.DSeparationOracle(truth))
+    graph = search.fit(knowledge=knowledge).graph
+    assert graph.get_edge("X", "Y").is_bidirected
+    assert knowledge.violations(graph) == []
