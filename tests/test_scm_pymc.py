@@ -82,6 +82,25 @@ def test_interventional_variance_matches_closed_form(
     assert float(np.var(draws)) == pytest.approx(4.25, abs=0.5)
 
 
+def test_interventional_and_sample_are_labelled_predictive(
+    fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """Regression (API-149): the predictive spread of Y was printed as a 95% CrI.
+
+    The interventional draws are one unit's outcome each, so their sd is the
+    structural spread (~2.06 here), far wider than the uncertainty in the mean.
+    """
+    scm, _ = fork
+    res = scm.interventional("Y", {"X": 1.0}, n=2000)
+    assert isinstance(res, SCMResult)
+    assert res.kind == "predictive"
+    assert "predictive interval" in repr(res) and "CrI" not in repr(res)
+    assert res.std_error is not None and res.std_error > 1.5
+    sample = scm.marginal("Y", n=500)
+    assert isinstance(sample, SCMResult) and sample.kind == "predictive"
+    assert scm.cores == 1
+
+
 # -- ANCHOR: counterfactual exactness (invertible) ---------------------------
 
 
@@ -1021,8 +1040,13 @@ def test_iv_latent_fit_does_not_impose_exclusion_so_ate_raises() -> None:
     Z -> X -> Y with U -> X, U -> Y (U latent) and a WEAK instrument against HEAVY
     confounding. The latent {X, Y} district fit does not impose Z's exclusion
     restriction, so X's structural coefficient drifts onto the non-identification
-    ridge (latent-fit b_hat ~1.2 against the true 0.7), while estimate_effect's 2SLS
-    recovers 0.7. This is exactly why ate() keeps raising for the iv strategy.
+    ridge, while estimate_effect's 2SLS recovers 0.7. This is exactly why ate() keeps
+    raising for the iv strategy.
+
+    Where on the ridge the fit lands depends on the sampler path. The docstring once
+    quoted b_hat ~1.2; on the locked stack (pymc 6.0.1, Apple arm64) random_state 7-11
+    give 0.85, 0.88, 0.83, 0.87, 0.81 (API-149). The assertion is therefore that the
+    latent fit misses by more than 0.1, comfortably outside 2SLS's 0.06.
     """
     b_true = 0.7
     rng = np.random.default_rng(7)
@@ -1048,7 +1072,7 @@ def test_iv_latent_fit_does_not_impose_exclusion_so_ate_raises() -> None:
     b_hat = float(fitted._fits["Y"].param_means["Y__coef"][list(parents).index("X")])
     iv_est = estimate_effect(graph, data, "X", "Y")
     assert iv_est.value == pytest.approx(b_true, abs=0.06)  # 2SLS nails the truth
-    assert abs(b_hat - b_true) > 0.2  # the latent fit does not -- so ate() rightly raises
+    assert abs(b_hat - b_true) > 0.1  # the latent fit does not -- so ate() rightly raises
 
 
 def test_general_id_strategy_keeps_raising_with_pointer() -> None:

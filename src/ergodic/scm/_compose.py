@@ -44,6 +44,7 @@ from ._mechanism import (
     Mechanism,
     encode_parent_design,
 )
+from ._sampling import sampler_cores
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -191,6 +192,7 @@ def fit_district(
             draws=draws,
             tune=tune,
             chains=chains,
+            cores=sampler_cores(chains),
             target_accept=target_accept,
             random_seed=seed,
             progressbar=False,

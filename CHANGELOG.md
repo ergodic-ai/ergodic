@@ -177,6 +177,21 @@ To be released together with Welt.
   identification and separation already did. `get_edge`/`has_edge` still answer
   `None`/`False` for an absent edge. `HierarchicalTSData.aggregate` on an unknown node now
   raises this `ValueError` rather than a `KeyError`.
+- `SCM` refuses a graph that is not a DAG or an ADMG. A MAG passed the
+  acyclic-directed-plus-bidirected check and was fitted as an ADMG, reading
+  ancestral edges as direct mechanisms; it now raises with the alternatives
+  (pick a member, or re-face a graph you read as one world with `as_kind`).
+- `SCM.interventional`, `sample`, and `marginal` return posterior-predictive
+  draws of the outcome, not a posterior of `E[Y | do(X)]`: the mean estimates the
+  expectation, but `std_error` and `interval()` are the outcome's spread (sd 1.4
+  in the guide's example, where the effect's own posterior sd is 0.023). The docstrings
+  and the guide said otherwise, and the repr printed a "95% CrI". These results
+  now carry `kind="predictive"` and print "95% predictive interval"; `ate` and
+  `counterfactual` keep `kind="posterior"` and the credible interval.
+- `SCM(cores=)` (new, default 1) caps the processes PyMC may use for the chains
+  in every SCM fit, including the latent-district and sensitivity refits. PyMC
+  otherwise ran up to four chains in parallel processes. The draws do not depend
+  on it.
 
 ## [0.1.1] - 2026-08-30
 

@@ -19,8 +19,9 @@ Queries:
 - :meth:`sample` -- observational draws.
 - :meth:`do` -- a lightweight intervened view for chaining
   (``scm.do({"X": 1}).sample(...)``).
-- :meth:`interventional` -- ``E[Y | do(X = x)]`` through ``pm.do``, carrying
-  parameter uncertainty.
+- :meth:`interventional` -- the distribution of ``Y`` under ``do(X = x)``
+  through ``pm.do``: posterior-predictive draws of the outcome, so the mean
+  estimates ``E[Y | do(X = x)]`` and the spread is that of ``Y`` itself.
 - :meth:`counterfactual` -- the explicit-noise twin-network counterfactual,
   abduct-then-predict, batched over units.
 - :meth:`ate` -- routed through :func:`~ergodic.identification.identify_effect`
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ..graph import GraphKind
 from ..graph._primitives import latent_projection, topological_order
 from ..identification import identify_effect
 from . import _compose
@@ -42,6 +44,7 @@ from ._bounds import Sensitivity, latent_prior_sweep, linear_sensitivity_curve
 from ._district import latent_structure
 from ._mechanism import CategoricalGumbelMax, GaussianAdditive, resolve_mechanism
 from ._result import CategoricalResult, SCMResult
+from ._sampling import using_cores
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -79,6 +82,12 @@ class SCM:
     non-identified effect still returns a :class:`~ergodic.scm.Sensitivity` through
     :meth:`ate`, never a naked point -- identification, not the fit, decides.
     Selection bias stays out of scope (identification raises on selection marks).
+    A CPDAG, MAG, PAG, or mixed graph is refused: pick one world first.
+
+    ``draws``, ``tune``, and ``chains`` set every NUTS run. ``cores`` caps the
+    worker processes PyMC may use for the chains (default 1, so chains run one
+    after another and a fit never fans out over the machine); raise it to run
+    chains in parallel. The draws do not depend on it.
     """
 
     def __init__(
@@ -90,9 +99,23 @@ class SCM:
         draws: int = 1000,
         tune: int = 1000,
         chains: int = 2,
+        cores: int = 1,
         random_state: int | None = None,
         district_size_cap: int = DISTRICT_SIZE_CAP,
     ) -> None:
+        if graph.kind not in (GraphKind.DAG, GraphKind.ADMG):
+            raise ValueError(
+                f"SCM fits a DAG or an ADMG (one causal world); got kind="
+                f"{graph.kind.value}. A MAG's or PAG's directed edges mean ancestry, not "
+                "direct causation, and a CPDAG/MAG/PAG stands for a class of graphs, so "
+                "fitting one as an ADMG would read the edges as mechanisms they are not. "
+                "Pick one member (consistent_extension or dags_of_cpdag for a CPDAG; for "
+                "a MAG/PAG, a DAG with explicit latents you can defend), or re-face a "
+                "graph you do read as one world with graph.as_kind('dag') or "
+                "graph.as_kind('admg')"
+            )
+        if cores < 1:
+            raise ValueError(f"cores must be at least 1, got {cores}")
         if not graph.is_admg():
             raise ValueError(
                 f"SCM fits a DAG or an ADMG (latent-confounded); got kind="
@@ -116,6 +139,7 @@ class SCM:
         self.draws = draws
         self.tune = tune
         self.chains = chains
+        self.cores = cores
         self.random_state = random_state
         self.district_size_cap = district_size_cap
 
@@ -204,17 +228,18 @@ class SCM:
         seed = 0 if self.random_state is None else self.random_state
         singletons = set(self._latent.singletons)
         single_mechs = {n: m for n, m in self.mechanisms.items() if n in singletons}
-        if parallel:
-            fits = self._fit_parallel(single_mechs, seed)
-        else:
-            fits = {
-                node: mech.fit(
-                    self.data, draws=self.draws, tune=self.tune, chains=self.chains, seed=seed
-                )
-                for node, mech in single_mechs.items()
-            }
-        for offset, nodes in enumerate(self._latent.confounded_districts):
-            fits.update(self._fit_district(nodes, seed + offset))
+        with using_cores(self.cores):
+            if parallel:
+                fits = self._fit_parallel(single_mechs, seed)
+            else:
+                fits = {
+                    node: mech.fit(
+                        self.data, draws=self.draws, tune=self.tune, chains=self.chains, seed=seed
+                    )
+                    for node, mech in single_mechs.items()
+                }
+            for offset, nodes in enumerate(self._latent.confounded_districts):
+                fits.update(self._fit_district(nodes, seed + offset))
         self._fits = fits
         return self
 
@@ -290,6 +315,7 @@ class SCM:
                     self.tune,
                     self.chains,
                     seed,
+                    self.cores,
                 ): node
                 for node, mech in mechanisms.items()
             }
@@ -320,7 +346,7 @@ class SCM:
         return self._observational(target, n=n, seed=self._seed(1))
 
     def marginal(self, target: str, n: int = 1000) -> SCMResult | CategoricalResult:
-        """Observational posterior-predictive draws of one node.
+        """Observational posterior-predictive draws of one node (``kind="predictive"``).
 
         A continuous node returns an :class:`SCMResult`; a categorical/binary node a
         :class:`CategoricalResult` (the per-category marginal), exactly as
@@ -344,7 +370,7 @@ class SCM:
         if isinstance(self.mechanisms[target], CategoricalGumbelMax):
             return self._categorical_result("sample", target, draws)
         return SCMResult(
-            query="sample", target=target, kind="posterior", identified=True, _draws=draws
+            query="sample", target=target, kind="predictive", identified=True, _draws=draws
         )
 
     def do(self, intervention: Mapping[str, DoValue]) -> InterventionView:
@@ -367,15 +393,22 @@ class SCM:
     def interventional(
         self, target: str, do: Mapping[str, DoValue] | None = None, *, n: int = 2000
     ) -> SCMResult | CategoricalResult:
-        """``E[Y | do(X = x)]`` and its posterior, through ``pm.do``.
+        """The distribution of ``target`` under ``do``, through ``pm.do``.
+
+        Returns posterior-predictive draws of the outcome for ``n`` units under the
+        intervention: each draw is one unit's ``Y`` (parameter uncertainty plus the
+        mechanism's noise). So ``value`` (the mean) estimates ``E[Y | do(X = x)]``,
+        while ``std_error`` and ``interval()`` describe the spread of ``Y`` itself,
+        not the uncertainty in that mean; the result's ``kind`` is
+        ``"predictive"`` and its repr says "predictive interval". For an effect
+        with a credible interval on the expectation, use :meth:`ate`.
 
         ``do`` maps each intervened node to its value (broadcast to a length-n
         vector internally, the verified shape gotcha; an integer code for a
         categorical/binary do-target, a float for a continuous one). ``target`` must
         not be an intervened node. A categorical target returns a
         :class:`CategoricalResult` (the post-intervention per-category marginal); a
-        continuous target an :class:`SCMResult`. Carries parameter-posterior
-        uncertainty via the merged ``idata``.
+        continuous target an :class:`SCMResult`.
         """
         self._require_fit()
         self._check_observable(target, "query target")
@@ -396,7 +429,7 @@ class SCM:
         if isinstance(self.mechanisms[target], CategoricalGumbelMax):
             return self._categorical_result("interventional", target, draws)
         return SCMResult(
-            query="interventional", target=target, kind="posterior", identified=True, _draws=draws
+            query="interventional", target=target, kind="predictive", identified=True, _draws=draws
         )
 
     # -- counterfactual ------------------------------------------------------
@@ -873,21 +906,22 @@ class SCM:
         order = tuple(n for n in self._order if n in set(nodes))
         latents = self._district_latents(tuple(nodes))
         observed = self._district_observed(order)
-        return latent_prior_sweep(
-            order,
-            {n: self.mechanisms[n] for n in order},
-            latents,
-            observed,
-            treatment=treatment,
-            outcome=outcome,
-            low=low,
-            high=high,
-            draws=self.draws,
-            tune=self.tune,
-            chains=self.chains,
-            seed=self._seed(8),
-            obstruction=obstruction,
-        )
+        with using_cores(self.cores):
+            return latent_prior_sweep(
+                order,
+                {n: self.mechanisms[n] for n in order},
+                latents,
+                observed,
+                treatment=treatment,
+                outcome=outcome,
+                low=low,
+                high=high,
+                draws=self.draws,
+                tune=self.tune,
+                chains=self.chains,
+                seed=self._seed(8),
+                obstruction=obstruction,
+            )
 
     # -- helpers -------------------------------------------------------------
 
@@ -1034,5 +1068,7 @@ def _fit_one(
     tune: int,
     chains: int,
     seed: int,
+    cores: int,
 ) -> FitResult:
-    return mech.fit(data, draws=draws, tune=tune, chains=chains, seed=seed)
+    with using_cores(cores):
+        return mech.fit(data, draws=draws, tune=tune, chains=chains, seed=seed)

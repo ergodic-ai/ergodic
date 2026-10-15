@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 import numpy as np
 
 from ._noise import gaussian_residual, gumbel_max_abduct, gumbel_max_decide
+from ._sampling import sampler_cores
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -379,6 +380,7 @@ class GaussianAdditive:
                 draws=draws,
                 tune=tune,
                 chains=chains,
+                cores=sampler_cores(chains),
                 random_seed=seed,
                 progressbar=False,
                 compute_convergence_checks=False,
@@ -578,6 +580,7 @@ class CategoricalGumbelMax:
                 draws=draws,
                 tune=tune,
                 chains=chains,
+                cores=sampler_cores(chains),
                 target_accept=0.9,
                 random_seed=seed,
                 progressbar=False,
