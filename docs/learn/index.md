@@ -4,19 +4,19 @@ This series teaches causal inference from zero, the ideas before the library. Ea
 takes one question a working analyst faces, shows the obvious answer failing, and
 walks through why the causal answer is different and how to compute it. If you've never seen
 the words "confounder" or "estimand", start at guide one and read in order. If you know the
-field and want the API, the [getting started](../tutorial.md) page and the reference guides
+field and want the API, the [getting started](../../docsite/pages/start.md) page and the guides
 are the faster route.
 
 !!! tip "Unfamiliar term?"
-    Every piece of jargon in this series is defined in plain words in the [glossary](../glossary.md).
+    Every piece of jargon in this series is defined in plain words in the [glossary](../../docsite/pages/glossary.md).
 
 Every guide runs on simulated data, and that's a deliberate choice, not a shortcut. On real
 data nobody can tell you whether your estimate of an effect is right, because the true effect
 is exactly the thing nobody measured. In a simulation we write the answer into the code, in
 plain sight, and then watch the methods try to recover it. The naive method misses by a lot.
 The causal one lands on it. You can rerun every page yourself and change the world to see
-what breaks; each page is a notebook, executed live when these docs are built, so the outputs
-you read are real.
+what breaks: each guide is a notebook you can download and run, and release checks run every
+one of them, so the numbers quoted in the text are the ones the code prints.
 
 The guides, in order:
 
