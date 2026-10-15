@@ -83,8 +83,7 @@ generated artifacts (model outputs, caches, build directories).
 
 ## Commits and pull requests
 
-- Branch from `dev` and open the pull request against `dev`. `main` receives
-  release merges from `dev`.
+- Branch from `main` and open the pull request against `main`.
 - Write commit subjects in the imperative, prefixed with the area they touch, for
   example `discovery: add the RFCI orientation rules` or `docs: fix the panel guide
   example`. Use the body to say why, not what.
