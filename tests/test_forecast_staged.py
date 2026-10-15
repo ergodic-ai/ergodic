@@ -478,10 +478,10 @@ def test_scenario_refusals() -> None:
         forecast(data, 4, graph=D1_GRAPH, scenario={"x": "freeze"}, draws=10, warmup=10)
 
 
-def test_a_scenario_on_an_endogenous_node_names_the_causal_layer() -> None:
+def test_a_scenario_on_an_endogenous_node_is_refused_as_an_intervention() -> None:
     """Criterion 11: pinning a driven node is an intervention, and the message says so."""
     data = small_world()
-    with pytest.raises(ValueError, match="do=") as raised:
+    with pytest.raises(ValueError, match="is an intervention") as raised:
         forecast(data, 4, graph=D1_GRAPH, scenario={"y": "hold"}, draws=10, warmup=10)
     message = str(raised.value)
     assert "x[t-1]" in message
