@@ -425,6 +425,8 @@ class Glasso:
     def fit(self, data: TabularData, knowledge: DomainKnowledge | None = None) -> DiscoveryResult:
         """Run the screen and return the undirected skeleton with its provenance."""
         _refuse_soft(knowledge, "Glasso")
+        if knowledge is not None:
+            knowledge.validate()
         if not isinstance(data, TabularData):
             raise TypeError(
                 f"glasso reads TabularData, got {type(data).__name__}; the Gaussian model "

@@ -670,3 +670,33 @@ def test_mmpc_and_glasso_keep_a_confounded_pair_neither_side_causes() -> None:
     assert not free[0, 1]
     free, _ = Glasso._knowledge_arrays(names, DomainKnowledge().forbid_adjacency("X", "Y"))
     assert not free[0, 1]
+
+
+def test_the_whole_knowledge_check_leaves_confounders_out() -> None:
+    probs = _matrix(("a", "b", "c"), {("c", "a"): 0.95})
+    knowledge = DomainKnowledge().order("a", "b").order("b", "c").confound("a", "b")
+    result = decode(probs, knowledge=knowledge)
+    assert result.diagnostics["knowledge_violations"] == ()
+    assert result.diagnostics["knowledge_violations_without_knowledge"] == (
+        "order violated: c is an ancestor of a",
+    )
+    (confound,) = [e for e in result.diagnostics["knowledge_audit"] if e["kind"] == "confound"]
+    assert confound["holds_without_knowledge"] is False
+
+
+@pytest.mark.parametrize(
+    "knowledge",
+    [
+        DomainKnowledge().confound("X", "Y").restrict_to([("X", "Z")]),
+        DomainKnowledge().confound("X", "Y").forbid_adjacency("X", "Y"),
+    ],
+)
+def test_glasso_refuses_contradictory_knowledge(knowledge: DomainKnowledge) -> None:
+    from ergodic import InconsistentKnowledgeError, tabular
+    from ergodic.discovery import Glasso
+
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=100)
+    data = tabular(pd.DataFrame({"X": x, "Y": x + rng.normal(size=100), "Z": rng.normal(size=100)}))
+    with pytest.raises(InconsistentKnowledgeError, match="confounded pair X,Y"):
+        Glasso().fit(data, knowledge=knowledge)

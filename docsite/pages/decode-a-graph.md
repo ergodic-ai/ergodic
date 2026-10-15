@@ -285,7 +285,7 @@ exactly. `knowledge.log_odds(variables)` shows the weights and
 | `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `min_pair_probability`, `conflict_pairs`, `holds`, `holds_without_knowledge`, `note`. Soft statements are listed as you made them; hard ones one per stored constraint, so hard tiers show as one `order` entry per cross-tier pair. |
 | `knowledge_conflicts` | The entries with at least one conflict pair. |
 | `knowledge_cost` | The knowledge-free decode's score minus this one's. Never negative for `"exact_map"`; the other decoders can come out negative. |
-| `knowledge_violations_without_knowledge` | What `knowledge.violations()` reports on the knowledge-free graph: the hard knowledge as a whole, with order read through chains. `None` with `audit=False`. |
+| `knowledge_violations_without_knowledge` | What `knowledge.violations()` reports on the knowledge-free graph: the hard knowledge as a whole, with order read through chains, `confound` pairs left out (that graph is a DAG). `None` with `audit=False`. |
 | `knowledge_audited` | `False` when you passed `audit=False`. |
 
 `probability` is the chance of the whole statement, with each pair taken on its own,

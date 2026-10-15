@@ -45,7 +45,8 @@ Planned as 0.3.0.
   with the same settings and seed), `knowledge_cost` the score the knowledge cost,
   and `knowledge_conflicts` the statements with a pair the model gives under 0.1.
   `knowledge_violations_without_knowledge` lists what `violations()` finds on the
-  knowledge-free graph, so an order broken only through the closure shows too.
+  knowledge-free graph, `confound` pairs left out, so an order broken only through
+  the closure shows too.
   `n_hard_statements` and `n_soft_statements` count them. `decode(..., audit=False)`
   and `Decoder(..., audit=False)` skip it.
 - `ergodic.KnowledgeConflictWarning` (a `UserWarning`), raised once by a decode whose
@@ -62,6 +63,9 @@ Planned as 0.3.0.
   required one all of it), so a soft statement near 1 gives the hard result's budget.
   `expected_count_v1` and `soft_f1_v1` keep their 0.2 results; without knowledge the
   two versions agree.
+- `Glasso.fit` validates the knowledge first and raises on a contradiction (a
+  confounded pair under an adjacency ban or outside a `restrict_to` support, for
+  example) instead of dropping part of it.
 - The discovery searches (`PC`, `FCI`, `RFCI`, `GES`, `BOSS`, `GRaSP`, `HillClimb`,
   `AStar`, `MMPC`, `DirectLiNGAM`, `Glasso`, `PCMCI`) and `bootstrap` raise
   `ValueError` on soft statements instead of dropping them; pass `knowledge.hard()`.

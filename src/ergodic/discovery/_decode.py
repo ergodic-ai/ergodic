@@ -206,7 +206,9 @@ class DecodeResult(DiscoveryResult):
     - ``knowledge_violations`` and ``knowledge_violations_without_knowledge``:
       what :meth:`~ergodic.DomainKnowledge.violations` reports for the hard
       knowledge as a whole on ``graph`` (always empty: the decode enforces it)
-      and on the knowledge-free decode's graph (``None`` with ``audit=False``).
+      and on the knowledge-free decode's graph (``None`` with ``audit=False``),
+      leaving ``confound`` pairs out: the knowledge-free decode is a DAG and never
+      holds one, and their audit entries already say so.
       It reads order through the transitive closure, so it catches what no single
       statement's entry shows, such as ``c -> a`` under ``order(a, b)`` and
       ``order(b, c)``.
@@ -497,7 +499,9 @@ def decode(
             max_nodes,
         )
         free_graph = free.graphs[free.chosen]
-        free_broken = tuple(knowledge.violations(_to_graph(names, free_graph, ())))
+        free_broken = tuple(
+            _without_confounders(knowledge).violations(_to_graph(names, free_graph, ()))
+        )
         cost = _pair_log_score(free_graph, source, PROBABILITY_FLOOR) - objective
         entries = _audit(statements, names, source, run.graphs[run.chosen], free_graph)
         conflicts = tuple(entry for entry in entries if entry["conflict_pairs"])
@@ -549,7 +553,9 @@ def decode(
         "knowledge_audit": entries,
         "knowledge_cost": cost,
         "knowledge_violations": (
-            () if knowledge is None else tuple(knowledge.violations(result_graph))
+            ()
+            if knowledge is None
+            else tuple(_without_confounders(knowledge).violations(result_graph))
         ),
         "knowledge_violations_without_knowledge": free_broken,
         "knowledge_conflicts": conflicts,
@@ -847,6 +853,17 @@ def _to_graph(
         else:
             edges.append((a, Mark.ARROW, b, Mark.ARROW))
     return admg(edges, nodes=(*names, *latent), latent=latent)
+
+
+def _without_confounders(knowledge: DomainKnowledge) -> DomainKnowledge:
+    """The knowledge without its ``confound`` pairs, for the whole-knowledge check.
+
+    The knowledge-free decode is a DAG, so it never holds a confounder; the
+    per-statement audit reports confounders instead.
+    """
+    from dataclasses import replace
+
+    return replace(knowledge, confounded=frozenset())
 
 
 def _closure(graph: BoolArray) -> BoolArray:
