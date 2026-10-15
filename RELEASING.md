@@ -175,20 +175,17 @@ github-pages due to environment protection rules") or goes live with no separate
     "deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
    EOF
    gh api -X POST repos/ergodic-ai/ergodic/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag
-   gh api -X POST repos/ergodic-ai/ergodic/environments/github-pages/deployment-branch-policies -f name=main -f type=branch
    gh api repos/ergodic-ai/ergodic/environments/github-pages/deployment-branch-policies --jq '.branch_policies[] | .type + " " + .name'
    ```
 
-   The reviewer makes the docs go-live its own approval, whatever triggers the
-   workflow.
+   Pages may already have added a `main` policy; that's fine. The reviewer makes
+   the docs go-live its own approval.
 
-**Expected docs trigger.** `docs.yml` should publish on `release: published` (the
-GitHub release created in step 7 after the PyPI upload is verified), or in a job that
-runs only after `release.yml`'s `publish-pypi` succeeded, so the docs never describe
-a version that isn't on PyPI. Pull requests and tag pushes may still build and check
-the site; only the deploy job moves. At the time of writing `docs.yml` deploys on every
-`v*` tag push; the docs builder owner is changing that. Whichever trigger ships, the
-`github-pages` reviewer gate above holds the deployment until step 8.
+**Docs trigger.** `docs.yml` publishes on `release: published`: the GitHub release
+created at the end of step 7, after the PyPI upload is verified, so the docs never
+describe a version that isn't on PyPI. Pushing the tag doesn't deploy the docs. The
+manual fallback is `gh workflow run docs.yml -R ergodic-ai/ergodic -f release_tag=v0.2.0`.
+Either way, the `github-pages` reviewer gate above holds the deployment until step 8.
 
 ## 6. Delete the inherited empty 1.0.0 **[owner go]**
 
@@ -222,9 +219,7 @@ until RUN=$(gh run list -R ergodic-ai/ergodic --workflow release.yml --event pus
     --json databaseId --jq '.[0].databaseId // empty') && [ -n "$RUN" ]; do sleep 5; done
 gh run watch -R ergodic-ai/ergodic "$RUN"
 # Approve the pypi deployment when the check and build jobs are green.
-# If docs.yml still deploys on tag pushes, its github-pages deployment now waits for
-# approval: leave it waiting until step 8. (If it gets rejected, rerun it then with
-# `gh workflow run docs.yml -R ergodic-ai/ergodic --ref v0.2.0`.)
+# The tag push does not deploy the docs; that starts with the GitHub release below.
 ```
 
 Verify from PyPI in a clean environment:
@@ -235,7 +230,7 @@ uv venv /tmp/ergodic-pypi && uv pip install --python /tmp/ergodic-pypi "ergodic=
 ```
 
 Create the GitHub release from the changelog section when step 8 (docs live) has its
-go, because with the expected trigger it starts the docs deployment:
+go, because publishing the release starts the docs deployment:
 
 ```bash
 gh release create v0.2.0 -R ergodic-ai/ergodic --verify-tag --title "ergodic 0.2.0" \
@@ -261,10 +256,10 @@ and the TXT records verify Resend and Google.
 
 ### Steps
 
-1. **Start the deployment.** Create the GitHub release (end of step 7). With the
-   expected trigger this runs `docs.yml`; approve its `github-pages` deployment in the
-   Actions tab. If `docs.yml` still deploys on tag pushes, approve the deployment that
-   has been waiting since step 7 instead.
+1. **Start the deployment.** Create the GitHub release (end of step 7). That runs
+   `docs.yml` (`release: published`); approve its `github-pages` deployment in the
+   Actions tab. If the run doesn't start or has to be repeated, use
+   `gh workflow run docs.yml -R ergodic-ai/ergodic -f release_tag=v0.2.0`.
 2. **Set the custom domain:**
    `gh api -X PUT repos/ergodic-ai/ergodic/pages -f cname=ergodic.dev`
    (an Actions-deployed site ignores a `CNAME` file; the setting is what counts).
