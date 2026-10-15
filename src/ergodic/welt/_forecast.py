@@ -4,6 +4,7 @@
 :class:`WeltForecaster` satisfies :class:`~ergodic.forecast.ForecastModel` (and
 :class:`~ergodic.forecast.CovariateForecastModel`): ``fit`` keeps the training
 window locally, ``forecast`` sends one paid ``POST /v1/forecasts`` job (DEC-085)
+through ``welt.Client.submit_forecast``, waits on it with the SDK's ``Job.result``,
 and turns the quantiles Welt returns into draws with
 :func:`~ergodic.forecast.quantile_draws`. So the result goes through
 :func:`~ergodic.forecast.backtest`, :func:`~ergodic.forecast.reconcile` and every
@@ -21,7 +22,6 @@ from __future__ import annotations
 
 import copy
 import math
-import time
 import uuid
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -388,9 +388,12 @@ class WeltForecaster:
         Raises:
             ValueError: Not fitted, a bad ``horizon`` or ``future``, or a request
                 outside the model's measured envelopes (nothing is sent).
-            RuntimeError: ``max_forecasts`` is spent, or the Welt job failed.
-            TimeoutError: The job did not finish within ``timeout``; it keeps
-                running in Welt.
+            RuntimeError: ``max_forecasts`` is spent, or welt-client is older
+                than 0.14.
+            welt.WeltError: Welt refused the job, or it failed
+                (``welt.ExecutionError``) or was cancelled.
+            TimeoutError: The job did not finish within ``timeout``
+                (``welt.JobTimeoutError``); it keeps running in Welt.
         """
         data = self._data
         if data is None:
@@ -564,40 +567,27 @@ class WeltForecaster:
         return payload, encoding
 
     def _run(self, client: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        """Submit one forecast job and wait for its result."""
-        headers = {"Idempotency-Key": uuid.uuid4().hex}
+        """Submit one forecast job with ``client.submit_forecast`` and wait for its result.
+
+        The first job's versions become the expectations of every later one, so a
+        version change in Welt fails the next job instead of mixing versions.
+        """
+        if not hasattr(client, "submit_forecast"):
+            raise RuntimeError(
+                "WeltForecaster needs welt-client 0.14 or later (Client.submit_forecast): "
+                'pip install -U "ergodic[welt]"'
+            )
         pinned = self._session.versions
-        if pinned is not None:
-            headers["X-Welt-Model-Version"] = pinned[0]
-            headers["X-Welt-Configuration-Version"] = pinned[1]
-        accepted = client.request("POST", "/v1/forecasts", json=payload, headers=headers)
-        job_id = str(accepted["id"])
-        deadline = time.monotonic() + self.timeout
-        interval = 0.25
-        while True:
-            job = client.job(job_id).inspect()
-            status = job.get("status")
-            if status == "succeeded":
-                break
-            if status in ("failed", "cancelled"):
-                error = job.get("error") or {}
-                raise RuntimeError(
-                    f"Welt forecast job {job_id!r} {status}: "
-                    f"{error.get('message', 'no message')} ({error.get('code', 'no code')})"
-                )
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"Welt forecast job {job_id!r} did not finish within {self.timeout:g} s; it "
-                    f"keeps running in Welt. Read it later with welt.Client().job({job_id!r}) "
-                    "rather than forecasting again"
-                )
-            time.sleep(min(interval, remaining))
-            interval = min(interval * 1.4, 5.0)
-        result: dict[str, Any] = client.job_result(job_id)
+        job = client.submit_forecast(
+            payload,
+            idempotency_key=uuid.uuid4().hex,
+            expected_model_version=None if pinned is None else pinned[0],
+            expected_configuration_version=None if pinned is None else pinned[1],
+        )
+        result: dict[str, Any] = job.result(timeout=self.timeout)
         if pinned is None:
             self._session.versions = (str(result["model_version"]), str(result["configuration"]))
-        return job_id, result
+        return str(job.id), result
 
     # -- result --------------------------------------------------------------
 

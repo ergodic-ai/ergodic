@@ -84,7 +84,8 @@ Planned as 0.3.0.
 - `ergodic.welt.WeltForecaster` (also importable as `ergodic.welt.Chronos`) runs
   Welt's hosted Chronos-2 as an ergodic `ForecastModel` (API-163, DEC-087). `fit`
   checks the columns and keeps the window locally; each `forecast(horizon, *, seed,
-  future=None)` is one paid `POST /v1/forecasts` job (DEC-085). Every target column
+  future=None)` is one paid `POST /v1/forecasts` job (DEC-085), sent with
+  `welt.Client.submit_forecast` and read with the SDK's `Job.result`. Every target column
   is one series of a panel by default (`cross_learning=False`), or the targets of one
   series with `multivariate=True`. `past_covariates=` and `future_covariates=` map to
   Welt's covariate roles, categorical by the dataset's schema; future covariates need
@@ -160,8 +161,8 @@ Planned as 0.3.0.
   pickle forbids in both directions becomes an adjacency ban (`nonadjacent`), its
   0.2 meaning, so it still rules out a bidirected edge.
 - The `welt` extra requires `welt-client>=0.14`, the release that serves Chronos-2
-  forecasting (DEC-085). `WeltForecaster` talks to `POST /v1/forecasts` through
-  `welt.Client.request`, so the Welt API must serve that route.
+  forecasting (DEC-085): `WeltForecaster` submits through
+  `welt.Client.submit_forecast` and waits with the SDK's `Job.result`.
 
 ## [0.2.1] - 2026-10-15
 

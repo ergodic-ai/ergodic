@@ -538,12 +538,23 @@ def test_rearranged_steps_are_reported_and_failures_carry_the_job() -> None:
     assert result.diagnostics["sales"].rearranged_steps == 2  # type: ignore[index]
 
     failing = FakeChronos(fail=True)
-    with failing.client() as client, pytest.raises(RuntimeError, match=r"job_c1.*failed"):
+    with failing.client() as client, pytest.raises(welt.ExecutionError) as error:
         WeltForecaster(client=client).fit(sales().select(["sales"])).forecast(3)
+    assert error.value.job_id == "job_c1" and "Chronos child exited" in str(error.value)
 
     odd = FakeChronos(wrong_horizon=True)
     with odd.client() as client, pytest.raises(ValueError, match=r"cannot read.*horizon"):
         WeltForecaster(client=client).fit(sales().select(["sales"])).forecast(3)
+
+
+def test_an_sdk_without_submit_forecast_is_refused_before_paying() -> None:
+    class OldClient:
+        def model(self, model_id: str) -> dict[str, Any]:
+            return FakeChronos()._metadata()
+
+    model = WeltForecaster(client=OldClient(), draws=10).fit(sales().select(["sales"]))
+    with pytest.raises(RuntimeError, match=r"welt-client 0\.14"):
+        model.forecast(3)
 
 
 def test_bad_configurations_are_refused_locally() -> None:

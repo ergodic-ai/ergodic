@@ -57,8 +57,9 @@ latent = ["pymc>=5"]
 # WeltLearner, Chronos-2 forecasting (WeltForecaster) and the data bridge. Only
 # ergodic.welt imports welt-client; the bare install never does. welt-client
 # supports Python 3.11 to 3.13, so the extra is empty on 3.14 until it adds support
-# (DEC-078). 0.14 is the release that serves forecasting (DEC-085/DEC-087); relock
-# once it is on PyPI, as for 0.13 in the 0.2.0 joint release (RELEASING.md).
+# (DEC-078). 0.14 adds Client.submit_forecast and forecast jobs, which
+# WeltForecaster uses (DEC-085/DEC-087); relock once it is on PyPI, as for 0.13 in
+# the 0.2.0 joint release (RELEASING.md).
 welt = ["welt-client>=0.14; python_version < '3.14'"]
 # Neural CATE learners (TARNet / DragonNet / CFR). A reserved seam: phase 1 ships
 # no module that imports torch; the registry points here when one is selected.
