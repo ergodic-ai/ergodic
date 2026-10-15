@@ -86,17 +86,22 @@ when the effect is identifiable.
 The strategies are tried in order. First, if no directed path runs from treatment to
 outcome, the effect is zero: `"null"`. Then adjustment, the front-door and
 instruments. On a single graph, the general do-calculus algorithm (Shpitser and
-Pearl, 2006) runs last. It decides every case: it returns `strategy="id"` with a
-formula, or a hedge.
+Pearl, 2006) runs last. It returns a formula or a hedge. When it recognizes the
+formula as adjustment or the front door, the strategy says so; otherwise it is
+`"id"`.
 
 ## What each graph kind allows
 
 | Kind | Where it comes from | What can identify |
 | --- | --- | --- |
-| `dag`, `admg` | Your drawing; LiNGAM, A*, HillClimb | Every strategy |
+| `dag`, `admg` | Your drawing; LiNGAM | Every strategy |
 | `cpdag` | PC, GES, BOSS, GRaSP | Null and adjustment, valid in every member |
 | `pag`, `mag` | FCI, RFCI | Null and adjustment, valid in every member |
 | `mixed` | Discovery with orienting knowledge, screens | Nothing until you re-face it |
+
+A* and HillClimb also return a `dag`, but it is one member of an equivalence class,
+picked by tie-breaking among DAGs with the same score. Identify on
+`cpdag_of_dag(graph)` instead, so the answer doesn't rest on an arbitrary direction.
 
 On a class, the front-door and instruments need a single graph. To see each member's
 answer, use `ida`, described in

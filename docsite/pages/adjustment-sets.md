@@ -72,8 +72,9 @@ IDA(['X'] -> ['Y'], cpdag: 6/6 identify, strategies=['adjustment', 'null'], agre
 ```
 
 - **Step 2.** The canonical set holds every ancestor of `X` or `Y` that `X` doesn't
-  affect. If any valid set exists, this one is valid. It includes `I`, which is
-  harmless for bias but usually widens the interval. `{Z2, Z3}` is a smaller valid
+  affect. If any valid set exists, this one is valid. It includes `I`. That adds no
+  bias when the graph is right, but it usually widens the interval, and if a
+  confounder is missing from the graph it makes that bias larger. `{Z2, Z3}` is a smaller valid
   set.
 - **Step 3.** The empty set leaves `X <- Z3 -> Y` open. `{Z3}` closes it but opens
   `X <- Z1 -> Z3 <- Z2 -> Y`, because conditioning on a collider connects its causes.
@@ -110,8 +111,8 @@ criterion of Perković et al., 2018). The front-door and instrument functions ne
 single graph.
 
 !!! caution "These searches are not exhaustive"
-    `frontdoor_set` tries every observed variable between treatment and outcome
-    together, then single mediators. `instruments` tries the empty set and single
+    `frontdoor_set` tries every observed variable on a directed path from treatment
+    to outcome together, then single mediators. `instruments` tries the empty set and single
     variables as conditioning sets. When they return nothing, a larger set may still
     work: check it with `is_frontdoor_set` or `is_instrument`.
 
