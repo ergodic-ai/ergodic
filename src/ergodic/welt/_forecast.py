@@ -15,9 +15,10 @@ column per series; Welt reads long tables. By default every target column become
 one series of a panel (an id column holding the column name and one value
 column), forecast independently (``cross_learning=False``). ``multivariate=True``
 sends them as the targets of one series instead, forecast jointly. Covariates ride
-along on every row. A table whose JSON is larger than the SDK's inline threshold
-(``welt.forecast.INLINE_TABLE_BYTES``, 1 MiB) is uploaded first as a workspace
-dataset and referenced by id, as ``welt.Forecast`` does.
+along on every row. Both tables always travel inline in the request, as
+``welt.Forecast`` sends them; a request over the SDK's
+``welt.forecast.MAX_REQUEST_BYTES`` (the API's 10 MiB body limit) is refused
+before anything is sent.
 """
 
 from __future__ import annotations
@@ -56,16 +57,15 @@ NATIVE_QUANTILE_LEVELS: tuple[float, ...] = (
 #: How the draws are made from Welt's quantiles, recorded on every result.
 CONVERSION = "inverse-cdf: linear between levels, exponential tails, steps independent"
 
-# The API refuses request bodies over 10 MiB (413 payload_limit), and a dataset upload
-# is a JSON body too, so a table larger than this cannot be sent either way.
-_MAX_TABLE_BYTES = 10 * 1024 * 1024
+# The API's request body limit, used when welt-client does not state its own.
+_DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024
 _DAY = {"unit": "day", "every": 1}
 
 _ID = "__ergodic_series__"
 _VALUE = "__ergodic_value__"
-# A numeric index, or a datetime index Welt cannot read as regular (business days,
-# trading days), is sent as consecutive days from this origin: Welt reads ISO
-# timestamps, and Chronos-2 reads the order of the rows, not the calendar.
+# A numeric index, or a datetime index on a business or custom calendar, is sent as
+# consecutive days from this origin: Welt reads ISO timestamps, and Chronos-2 reads
+# the order of the rows, not the calendar.
 _STEP_ORIGIN = np.datetime64("2000-01-01T00:00:00", "s")
 _SECONDS_PER_DAY = 86_400
 _RECONCILE_HERE = tuple(m for m in RECONCILE_METHODS if m not in ("middle_out", "none"))
@@ -98,14 +98,11 @@ class WeltForecastDiagnostics:
             levels, exponential tails, each step sampled on its own.
         time_encoding: ``"timestamps"``, or ``"steps-as-days"`` when the rows were
             sent as consecutive days from 2000-01-01 (a numeric index, or a
-            datetime index without a regular frequency Welt can read).
+            datetime index on a business or custom calendar).
         point_semantics: Always ``"median"``: Welt's point forecast is the 0.5
             quantile.
         calibrated_intervals: Always ``False``: Chronos-2's quantiles are not
             calibrated. Check coverage with a backtest.
-        datasets: The workspace datasets this job's tables were uploaded as, by
-            role (``"history"``, ``"future"``); empty when both went inline. They
-            stay in the workspace until you delete them.
     """
 
     node: str
@@ -123,7 +120,6 @@ class WeltForecastDiagnostics:
     time_encoding: str = "timestamps"
     point_semantics: str = "median"
     calibrated_intervals: bool = False
-    datasets: Mapping[str, str] = field(default_factory=dict)
 
 
 class _Session:
@@ -450,18 +446,13 @@ class WeltForecaster:
         targets = self._targets(data, {*self.past_covariates, *self._future_covariates})
         history = {name: _history(data, name) for name in targets}
         payload = self._payload(data, horizon, targets, history, future_rows, encoding, frequency)
-        sizes = {
-            role: _encoded_bytes(payload[role]["table"])
-            for role in ("history", "future")
-            if role in payload
-        }
-        too_big = {role: size for role, size in sizes.items() if size > _MAX_TABLE_BYTES}
-        if too_big:
+        size, limit = _encoded_bytes(payload), _max_request_bytes()
+        if size > limit:
             raise ValueError(
-                f"the {', '.join(too_big)} table would be {max(too_big.values()):,} bytes of "
-                f"JSON, over the API's {_MAX_TABLE_BYTES:,}-byte request limit; nothing was "
-                "sent. Send fewer rows (max_context=), fewer series per job, or "
-                "multivariate=True, which sends the covariates once"
+                f"the forecast request would be {size:,} bytes of JSON, over the Welt API's "
+                f"{limit:,}-byte request limit; nothing was sent. Send fewer rows "
+                "(max_context=), fewer series per job, or multivariate=True, which sends "
+                "the covariates once"
             )
 
         session = self._session
@@ -487,21 +478,9 @@ class WeltForecaster:
                 horizon=horizon,
             )
             session.check(self.model)
-            inline = _inline_limit()
-            datasets: dict[str, str] = {}
-            for role, size in sizes.items():
-                if size > inline:
-                    table = payload[role]["table"]
-                    record = client.upload(
-                        columns=table["columns"],
-                        rows=table["rows"],
-                        name=f"ergodic forecast {role}",
-                    )
-                    datasets[role] = str(record["id"])
-                    payload[role] = {"dataset_id": datasets[role]}
             job_id, result = self._run(client, payload)
 
-        series = self._read(result, targets, horizon, job_id, data.n_rows, encoding, datasets)
+        series = self._read(result, targets, horizon, job_id, data.n_rows, encoding)
         draws: dict[str, npt.NDArray[np.float64]] = {}
         rng = np.random.default_rng(seed)
         for node in targets:
@@ -695,7 +674,6 @@ class WeltForecaster:
         job_id: str,
         context: int,
         time_encoding: str,
-        datasets: Mapping[str, str],
     ) -> dict[str, WeltForecastDiagnostics]:
         """Check Welt's result against the request and pick out each node's quantiles."""
 
@@ -739,7 +717,6 @@ class WeltForecaster:
                 cross_learning=bool(result.get("cross_learning", self.cross_learning)),
                 multivariate=self.multivariate,
                 time_encoding=time_encoding,
-                datasets=dict(datasets),
             )
         return out
 
@@ -874,19 +851,34 @@ def _category(value: Any, name: str) -> str | int | None:
 _FP32_MAX = float(np.finfo(np.float32).max)
 
 
-def _encoded_bytes(table: Any) -> int:
-    """Bytes of the compact JSON the SDK sends for ``table``."""
-    text = json.dumps(table, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+def _encoded_bytes(body: Any) -> int:
+    """Bytes of the compact JSON the SDK sends for ``body``."""
+    text = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     return len(text.encode())
 
 
-def _inline_limit() -> int:
-    """The SDK's inline-table threshold; tables above it are uploaded as datasets."""
+def _max_request_bytes() -> int:
+    """The largest request body welt-client sends (``welt.forecast.MAX_REQUEST_BYTES``)."""
+    import welt.forecast
+
+    return int(getattr(welt.forecast, "MAX_REQUEST_BYTES", _DEFAULT_MAX_REQUEST_BYTES))
+
+
+# pandas offsets of business and custom calendars: their rows are consecutive
+# observations, but Welt reads the timestamps as irregular, so they go as days.
+_CALENDARS = ("BusinessDay", "CustomBusinessDay", "BusinessHour", "CustomBusinessHour")
+
+
+def _offset_name(freq: str | None) -> str | None:
+    if not freq:
+        return None
+    import pandas as pd
+
     try:
-        from welt.forecast import INLINE_TABLE_BYTES
-    except ImportError:  # pragma: no cover - welt-client before 0.14
-        return 1024 * 1024
-    return int(INLINE_TABLE_BYTES)
+        offset = pd.tseries.frequencies.to_offset(freq)
+    except (TypeError, ValueError):
+        return None
+    return None if offset is None else type(offset).__name__
 
 
 def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
@@ -894,10 +886,13 @@ def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
 
     A datetime index is sent as timestamps when its frequency is known (the
     dataset's ``freq``, else pandas' inferred one, mapped to Welt's units) or its
-    spacing is constant, so Welt can infer it. Anything else, a business-day or
-    trading-day index say, which Welt would refuse as irregular, is sent as
-    consecutive days, which Chronos-2 reads the same way. A numeric index must be
-    evenly spaced (relative tolerance 1e-9) and is always sent as days.
+    spacing is constant, so Welt can infer it. An index on a business or custom
+    calendar (a declared or inferred ``B``, ``C``, ``BH`` or ``CBH``, or a declared
+    ``freq`` Welt has no unit for) is sent as consecutive days, which Chronos-2
+    reads the same way. Any other irregular datetime index, a daily series with
+    missing days say, is refused: sending it as steps would close up the gaps. A
+    numeric index must be evenly spaced (relative tolerance 1e-9) and is always
+    sent as days.
     """
     times = np.asarray(data.times)
     if times.dtype.kind == "M":
@@ -906,6 +901,9 @@ def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
         declared = _frequency(data.freq)
         if declared is not None:
             return "timestamps", declared
+        if data.freq and _offset_name(data.freq) is not None:
+            return "steps-as-days", dict(_DAY)  # a calendar Welt has no unit for
+        inferred: str | None = None
         if times.size >= 3:
             import pandas as pd
 
@@ -916,10 +914,18 @@ def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
             mapped = _frequency(inferred)
             if mapped is not None:
                 return "timestamps", mapped
+        if _offset_name(inferred) in _CALENDARS:
+            return "steps-as-days", dict(_DAY)
         seconds = np.diff(times.astype("datetime64[s]").astype(np.int64))
         if seconds.size and bool(np.all(seconds == seconds[0])) and seconds[0] > 0:
             return "timestamps", None
-        return "steps-as-days", dict(_DAY)
+        raise ValueError(
+            f"the time index {data.time!r} is irregular (missing or uneven steps), and Welt "
+            "forecasts regular series only. Reindex it to its regular frequency and leave "
+            "the missing targets as NaN, which Chronos-2 reads natively, for example "
+            "frame.set_index(time).asfreq('D').reset_index(); or declare a business "
+            "calendar with freq='B'"
+        )
     if times.dtype.kind not in "iuf":
         raise ValueError(
             f"Welt reads a datetime or numeric time index; {data.time!r} is {times.dtype}"
@@ -999,6 +1005,8 @@ def _frequency(freq: str | None) -> dict[str, Any] | None:
     try:
         offset = pd.tseries.frequencies.to_offset(freq)
     except (TypeError, ValueError):
+        return None
+    if offset is None:
         return None
     unit = _UNITS.get(type(offset).__name__)
     if unit is None or int(offset.n) < 1:

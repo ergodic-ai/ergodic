@@ -97,16 +97,18 @@ Planned as 0.3.0.
   draws), and `reconcile=` reconciles inside `forecast`. The first forecast reads the
   catalogue entry (free) and refuses, before paying, a model without the `forecast`
   operation or a request outside every measured `forecast_envelopes` corner;
-  `max_context=` sends only the most recent rows. A table over the SDK's 1 MiB
-  inline threshold is uploaded as a workspace dataset first; one over the API's
-  10 MiB request limit is refused before sending. The first job's model and
+  `max_context=` sends only the most recent rows. Tables always go inline, as
+  welt-client sends them, and a request over `welt.forecast.MAX_REQUEST_BYTES`
+  (the API's 10 MiB limit) is refused before sending. The first job's model and
   configuration versions are required of every later job of the forecaster and its
   copies (and checked against each result), which also share one client and one
   `max_forecasts` budget (10) of jobs Welt accepted. Each node's
   `WeltForecastDiagnostics` records the job id, versions, quantile levels, Welt's own
-  quantiles, `context_length`, `rearranged_steps` and any uploaded `datasets`. A
-  numeric time index, or a datetime index without a regular frequency Welt reads
-  (business days), is sent as consecutive days from 2000-01-01. `NATIVE_QUANTILE_LEVELS` lists the 21 levels requested by default.
+  quantiles, `context_length` and `rearranged_steps`. A numeric time index, or a
+  datetime index on a business or custom calendar (`B`, `C`, declared or inferred),
+  is sent as consecutive days from 2000-01-01; any other irregular datetime index
+  (daily data with missing days, say) is refused with a hint to reindex and leave
+  the gaps as NaN. `NATIVE_QUANTILE_LEVELS` lists the 21 levels requested by default.
 - `ergodic.forecast.quantile_draws(levels, quantiles, *, draws, seed)` turns
   per-step quantiles into `(S, H)` draws by inverse-CDF sampling: rows sorted
   (monotone rearrangement), linear between levels, exponential tails matched to the

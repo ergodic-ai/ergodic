@@ -81,9 +81,8 @@ print(record.model_version, record.configuration, len(record.quantile_levels))
 
 Each series has a `WeltForecastDiagnostics` in `diagnostics`: the Welt `job_id`,
 `model_version` and `configuration`, the `quantile_levels`, Welt's own `quantiles`
-(one row per step), `context_length`, `rearranged_steps` (the steps whose native
-quantiles crossed and that Welt sorted), and `datasets` (any table uploaded rather
-than sent inline).
+(one row per step), `context_length`, and `rearranged_steps` (the steps whose
+native quantiles crossed and that Welt sorted).
 
 !!! caution "The draws are per-step marginals"
     Each step is sampled on its own, so a draw is not a path: it has no dependence
@@ -204,20 +203,23 @@ The first job's model and configuration versions are then required of every late
 job, so the folds of one backtest all run the same Chronos-2. Build a new
 `WeltForecaster` to pick up a newer version.
 
-A history or future table larger than 1 MiB of JSON is uploaded first as a
-workspace dataset, as the Welt SDK does, and the job reads it from there. Uploads
-are free and stay in your workspace until you delete them. A table over 10 MiB,
-the API's request limit, raises before anything is sent: use `max_context=`, fewer
-series per job, or `multivariate=True`.
+The history and future tables always go inline in the request, as the Welt SDK
+sends them; nothing is uploaded to your workspace. A request over 10 MiB of JSON,
+the API's limit, raises before anything is sent: use `max_context=`, fewer series
+per job, or `multivariate=True`, which sends the covariates once.
 
 ## Limits
 
-- `fit` reads a `TimeSeriesData` or `HierarchicalTSData` with a datetime index, or
-  an evenly spaced numeric one. A numeric index, or a datetime index without a
-  regular frequency Welt can read (business or trading days), is sent as
-  consecutive days from 1 January 2000. Chronos-2 reads the order of the rows, not
-  the calendar, so the forecast is the same, but the job's records in Welt show
+- `fit` reads a `TimeSeriesData` or `HierarchicalTSData` with a regular datetime
+  index, or an evenly spaced numeric one. A numeric index, or a datetime index on a
+  business or custom calendar (`freq="B"` or `"C"`, declared or inferred), is sent
+  as consecutive days from 1 January 2000. Chronos-2 reads the order of the rows,
+  not the calendar, so the forecast is the same, but the job's records in Welt show
   those dates. `time_encoding` in the diagnostics says which was sent.
+- Any other irregular datetime index, such as daily data with missing days, raises:
+  sending it as steps would close up the gaps. Reindex to the regular frequency and
+  leave the missing targets as NaN, which Chronos-2 handles, for example
+  `frame.set_index("day").asfreq("D").reset_index()`.
 - Targets must be continuous. Missing target values are sent as missing, and
   Chronos-2 handles them.
 - Covariates are continuous or categorical. A categorical cell goes as a string or

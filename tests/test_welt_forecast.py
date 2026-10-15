@@ -783,43 +783,56 @@ def test_month_ends_without_a_declared_freq_keep_their_timestamps() -> None:
     assert body["history"]["table"]["rows"][0][0] == "2024-01-31T00:00:00Z"
 
 
-def test_a_table_over_the_inline_threshold_is_uploaded_as_a_dataset(
+def test_tables_always_go_inline_and_an_oversized_request_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """F8: like welt.Forecast, a large table goes up as a workspace dataset first."""
-    from ergodic.welt import _forecast
+    """F8/R3: no dataset uploads; past welt.forecast.MAX_REQUEST_BYTES nothing is sent."""
+    import welt.forecast
 
-    monkeypatch.setattr(_forecast, "_inline_limit", lambda: 2_000)
+    fake = FakeChronos()
+    data = sales(400).select(["sales"])
+    with fake.client() as client:
+        WeltForecaster(client=client, draws=20).fit(data).forecast(3)
+        assert "table" in fake.forecasts[0]["history"]
+        assert fake.count("POST", "/v1/datasets") == 0
+        sent = len(fake.calls)
+        monkeypatch.setattr(welt.forecast, "MAX_REQUEST_BYTES", 2_000)
+        with pytest.raises(ValueError, match="2,000-byte request limit"):
+            WeltForecaster(client=client).fit(data).forecast(3)
+    assert len(fake.calls) == sent  # refused before any request
+    assert not hasattr(WeltForecastDiagnostics, "datasets")
+
+
+def test_a_daily_index_with_missing_days_is_refused_not_closed_up() -> None:
+    """R1: only business or custom calendars fall back to steps; gaps are refused."""
+    days = pd.date_range("2026-01-01", periods=40, freq="D").delete([10, 25])
+    frame = pd.DataFrame({"day": days, "y": np.linspace(1, 2, 38)})
+    fake = FakeChronos()
+    with fake.client() as client, pytest.raises(ValueError, match=r"irregular.*NaN"):
+        WeltForecaster(client=client).fit(timeseries(frame, time="day"))
+    assert fake.calls == []
+    # Declared daily: the timestamps go as they are, and Welt (not ergodic) refuses the gaps.
+    declared = timeseries(frame, time="day", freq="D")
+    from ergodic.welt._forecast import _time_plan
+
+    assert _time_plan(declared) == ("timestamps", {"unit": "day", "every": 1})
+
+
+def test_an_undeclared_business_day_index_is_inferred_and_sent_as_days() -> None:
+    """R1: pandas infers B, a business calendar, so the steps-as-days fallback applies."""
+    days = pd.bdate_range("2026-01-05", periods=30)
+    data = timeseries(pd.DataFrame({"day": days, "y": np.linspace(1, 2, 30)}), time="day")
     fake = FakeChronos()
     with fake.client() as client:
-        model = WeltForecaster(client=client, future_covariates=["promo"], draws=20)
-        later = pd.DataFrame(
-            {"day": pd.date_range("2026-03-02", periods=3), "promo": [0.0, 1.0, 0.0]}
-        )
-        result = model.fit(sales().select(["sales", "promo"])).forecast(3, future=later)
-    (body,) = fake.forecasts
-    assert body["history"] == {"dataset_id": "ds_1"}
-    assert "table" in body["future"]  # small enough to stay inline
-    assert fake.datasets["ds_1"]["columns"] == [
-        "day",
-        "__ergodic_series__",
-        "__ergodic_value__",
-        "promo",
-    ]
-    assert result.diagnostics["sales"].datasets == {"history": "ds_1"}  # type: ignore[index]
-
-
-def test_a_table_over_the_request_limit_is_refused_before_anything_is_sent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """F8: past the API's body limit neither inline nor an upload can carry it."""
-    from ergodic.welt import _forecast
-
-    monkeypatch.setattr(_forecast, "_MAX_TABLE_BYTES", 1_000)
-    fake = FakeChronos()
-    with fake.client() as client, pytest.raises(ValueError, match="request limit"):
-        WeltForecaster(client=client).fit(sales().select(["sales"])).forecast(3)
-    assert fake.calls == []
+        result = WeltForecaster(client=client, draws=20).fit(data).forecast(2)
+    assert result.diagnostics["y"].time_encoding == "steps-as-days"  # type: ignore[index]
+    assert fake.forecasts[0]["frequency"] == {"unit": "day", "every": 1}
+    # A business-day index with a holiday gap is not inferable as B: refused, unless declared.
+    holiday = days.delete(7)
+    gapped = pd.DataFrame({"day": holiday, "y": np.linspace(1, 2, 29)})
+    with pytest.raises(ValueError, match="irregular"):
+        WeltForecaster().fit(timeseries(gapped, time="day"))
+    WeltForecaster().fit(timeseries(gapped, time="day", freq="B"))
 
 
 def test_a_result_without_versions_is_refused_and_pins_nothing() -> None:
