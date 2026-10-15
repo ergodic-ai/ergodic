@@ -205,6 +205,9 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     output = tmp_path / "site"
     (output / "v0.0.1").mkdir(parents=True)  # An older version that CI placed first.
     (output / "v0.0.1" / "index.html").write_text("<!doctype html>")
+    for retained in site.previous_versions:  # CI rebuilds these from their tags first.
+        (output / f"v{retained}").mkdir()
+        (output / f"v{retained}" / "index.html").write_text("<!doctype html>")
     (output / "stale.html").write_text("left over from another builder")
     summary = build(site, output)
     version = summary["version"]

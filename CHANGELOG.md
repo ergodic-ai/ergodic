@@ -725,7 +725,8 @@ inference, discovery, process, SCM, and forecast pillars.
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
 
-[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ergodic-ai/ergodic/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ergodic-ai/ergodic/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ergodic-ai/ergodic/releases/tag/v0.1.0
