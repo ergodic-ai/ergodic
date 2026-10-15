@@ -223,7 +223,15 @@ class MixedGraph:
 
     # -- neighbourhoods ------------------------------------------------------
 
+    def _require_node(self, x: str) -> None:
+        """Refuse a name that is not a node, as identification and separation do."""
+        if x not in self.nodes:
+            shown = sorted(self.nodes)
+            listed = ", ".join(shown[:10]) + (", ..." if len(shown) > 10 else "")
+            raise ValueError(f"unknown node {x!r}; the graph's nodes are {listed}")
+
     def _incident(self, node: str) -> Iterator[Edge]:
+        self._require_node(node)
         return (e for e in self.edges if node in (e.u, e.v))
 
     def neighbors(self, x: str) -> frozenset[str]:
@@ -249,6 +257,7 @@ class MixedGraph:
         return frozenset(e.other(x) for e in self._incident(x) if e.is_bidirected)
 
     def ancestors(self, x: str) -> frozenset[str]:
+        self._require_node(x)
         reverse: dict[str, set[str]] = {n: set() for n in self.nodes}
         for e in self.edges:
             pair = e.directed_pair()
@@ -257,6 +266,7 @@ class MixedGraph:
         return self._reach(x, reverse)
 
     def descendants(self, x: str) -> frozenset[str]:
+        self._require_node(x)
         forward: dict[str, set[str]] = {n: set() for n in self.nodes}
         for e in self.edges:
             pair = e.directed_pair()
@@ -281,6 +291,7 @@ class MixedGraph:
         """Parents, children, and the other parents of children (DAG only)."""
         if not self.is_dag():
             raise NotImplementedError("markov_blanket is implemented for DAGs only")
+        self._require_node(x)
         blanket: set[str] = set(self.parents(x)) | set(self.children(x))
         for child in self.children(x):
             blanket |= self.parents(child)
@@ -537,10 +548,11 @@ class MixedGraph:
         return from_dict(data)
 
     @classmethod
-    def from_networkx(cls, graph: Any) -> MixedGraph:
+    def from_networkx(cls, graph: Any, *, kind: GraphKind | str | None = None) -> MixedGraph:
+        """Build from a networkx graph; ``kind`` re-tags it (checked), as in the function."""
         from ._io import from_networkx
 
-        return from_networkx(graph)
+        return from_networkx(graph, kind=kind)
 
     def __repr__(self) -> str:
         glyphs = ", ".join(e.glyph() for e in self.edge_list())

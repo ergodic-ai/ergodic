@@ -75,13 +75,20 @@ class Hierarchy:
             out.add(child)
         return frozenset(out)
 
+    def _require_node(self, node: str) -> None:
+        if node not in self.nodes:
+            raise ValueError(f"unknown node {node!r}; the hierarchy has {sorted(self.nodes)}")
+
     def children_of(self, node: str) -> tuple[str, ...]:
+        self._require_node(node)
         return self._children.get(node, ())
 
     def parent_of(self, node: str) -> str | None:
+        self._require_node(node)
         return self._parent.get(node)
 
     def is_leaf(self, node: str) -> bool:
+        self._require_node(node)
         return node not in self._children
 
     @property

@@ -168,6 +168,15 @@ To be released together with Welt.
   refuses unknown names, as sklearn does. `LogisticRegression` warns with the
   new `ergodic.inference.learners.ConvergenceWarning` when it stops at
   `max_iter` before converging.
+- `MixedGraph.from_networkx` takes `kind=` like the module-level function (the
+  classmethod had no such parameter). `MixedGraph` neighbourhood lookups
+  (`parents`, `children`, `neighbors`, `spouses`, `ancestors`, `descendants`,
+  `markov_blanket`) and `Hierarchy` lookups (`children_of`, `parent_of`,
+  `is_leaf`, `leaf_descendants`) raise `ValueError` on a name that is not a node
+  instead of answering with an empty set (or, for `is_leaf`, `True`), as
+  identification and separation already did. `get_edge`/`has_edge` still answer
+  `None`/`False` for an absent edge. `HierarchicalTSData.aggregate` on an unknown node now
+  raises this `ValueError` rather than a `KeyError`.
 
 ## [0.1.1] - 2026-08-30
 

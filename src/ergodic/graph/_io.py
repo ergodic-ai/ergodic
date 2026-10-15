@@ -65,7 +65,7 @@ def to_networkx(graph: MixedGraph) -> Any:
     return out
 
 
-def from_networkx(graph: Any, *, kind: GraphKind | None = None) -> MixedGraph:
+def from_networkx(graph: Any, *, kind: GraphKind | str | None = None) -> MixedGraph:
     """Build a :class:`MixedGraph` from a networkx graph.
 
     Edges with ``u_mark``/``v_mark`` data keep those marks. A plain edge is read

@@ -320,6 +320,34 @@ def test_networkx_round_trip_preserves_edges() -> None:
     assert back.nodes == graph.nodes
 
 
+def test_from_networkx_classmethod_passes_kind() -> None:
+    """Regression (API-149): MixedGraph.from_networkx dropped kind= (no such parameter)."""
+    graph = admg(["X -> Y", "Y <-> Z"])
+    back = MixedGraph.from_networkx(graph.to_networkx(), kind="admg")
+    assert back == graph
+    assert back.kind.value == "admg"
+    with pytest.raises(ValueError):
+        MixedGraph.from_networkx(graph.to_networkx(), kind="dag")
+
+
+def test_neighbourhood_lookups_refuse_unknown_nodes() -> None:
+    """Regression (API-149): parents('typo') returned an empty set instead of raising."""
+    graph = dag(["a -> b", "b -> c"])
+    for lookup in (
+        graph.parents,
+        graph.children,
+        graph.neighbors,
+        graph.spouses,
+        graph.ancestors,
+        graph.descendants,
+        graph.markov_blanket,
+    ):
+        with pytest.raises(ValueError, match="unknown node 'zz'"):
+            lookup("zz")
+    assert graph.parents("a") == frozenset()
+    assert graph.get_edge("a", "zz") is None  # an absent edge stays a plain None
+
+
 def test_from_networkx_rejects_conflicting_arcs() -> None:
     import networkx as nx
 
