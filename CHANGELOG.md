@@ -71,9 +71,9 @@ To be released together with welt-client 0.13.
   model's native threshold (0.5 for AVICI, the recorded adaptive threshold for CDFM).
   With a decoder, `knowledge=` constrains the local decoding; it and every decoder
   setting, `max_nodes` against the variable count included, are checked before
-  anything is uploaded. A decode that still fails after the paid run raises
-  `WeltDecodeError` with the result and its scores attached. Without `decoder=` nothing changes: non-DAG models are still
-  refused before paying.
+  anything is uploaded. Any failure after the paid run raises `WeltDecodeError`
+  with the result and its scores attached. Without `decoder=` nothing changes:
+  non-DAG models are still refused before paying.
 
 ### Changed
 - `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can

@@ -182,11 +182,12 @@ This program needs your Welt key too, so it shows no recorded output:
 
 Pass `decoder=Decoder("greedy", threshold=0.4)` (from `ergodic.discovery`) to choose
 another threshold, or another decoder such as `"exact_map"` or
-`Decoder("pair_sampler", samples=100, seed=0)`. The exact decoders search orderings and
-refuse more than `max_nodes` variables (20 by default); that cap is checked before
-anything is uploaded. AVICI accepts up to 40 variables today, so use `"greedy"` there. If
-decoding still fails after the run, `WeltDecodeError` carries the result and its
-scores. With `decoder=`, `knowledge=`
+`Decoder("pair_sampler", samples=100, seed=0)`. The exact decoders (`"exact_map"`,
+`"expected_count"`, `"soft_f1"`, `"perturb_and_map"`) search orderings and refuse more
+than `max_nodes` variables, 20 by default; that cap is checked before anything is
+uploaded. Above 20 variables use `"greedy"` or `"pair_sampler"`, which have no cap, or
+raise `max_nodes`. If anything fails after the run, `WeltDecodeError` carries the
+result and its scores. With `decoder=`, `knowledge=`
 constrains the decoding; Welt itself still runs without constraints, and knowledge that
 names an unknown variable or a `confound` pair raises before anything is uploaded.
 `ergodic.discover(data, method="welt:cdfm", decoder="greedy")` does the same.

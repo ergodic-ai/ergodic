@@ -495,9 +495,37 @@ def test_a_decode_failure_after_the_paid_run_keeps_the_result(
     with fake.client() as client, pytest.raises(WeltDecodeError) as error:
         welt_discover(continuous(), "avici", decoder="greedy", client=client)
     assert error.value.result.job_id == "job_d1"
+    assert error.value.scores is not None
     assert list(error.value.scores.columns) == ORDER
     assert error.value.decoder == "greedy_v1"
     assert "simulated decoder failure" in str(error.value)
+    assert fake.count("POST", "/v1/discoveries") == 1
+
+
+@pytest.mark.parametrize("stage", ["scores", "probabilities"])
+def test_any_failure_after_the_paid_run_keeps_the_result(
+    monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    from ergodic.welt import WeltDecodeError
+    from ergodic.welt import _discovery as bridge
+
+    def failing(*args: Any, **kwargs: Any) -> Any:
+        raise TypeError(f"simulated {stage} failure")
+
+    if stage == "scores":
+        monkeypatch.setattr(bridge, "_score_frame", failing)
+    else:
+        monkeypatch.setattr(EdgeProbabilities, "from_frame", failing)
+    fake = _decoding_fake()
+    with fake.client() as client, pytest.raises(WeltDecodeError) as error:
+        welt_discover(continuous(), "cdfm", decoder="greedy", client=client)
+    assert error.value.result.job_id == "job_d1"
+    if stage == "scores":
+        assert error.value.scores is None
+    else:
+        assert error.value.scores is not None
+        assert list(error.value.scores.columns) == ORDER
+    assert f"simulated {stage} failure" in str(error.value)
     assert fake.count("POST", "/v1/discoveries") == 1
 
 

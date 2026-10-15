@@ -97,11 +97,17 @@ class WeltDecodeError(ValueError):
         model: The Welt model id.
         decoder: The versioned decoder id that failed.
         result: The native ``welt.CausalResult``.
-        scores: Its edge-score matrix (rows the source, columns the target).
+        scores: Its edge-score matrix (rows the source, columns the target), or
+            ``None`` if the scores themselves could not be read.
     """
 
     def __init__(
-        self, model: str, decoder: str, error: Exception, result: Any, scores: pd.DataFrame
+        self,
+        model: str,
+        decoder: str,
+        error: Exception,
+        result: Any,
+        scores: pd.DataFrame | None,
     ) -> None:
         self.model = model
         self.decoder = decoder
@@ -111,7 +117,8 @@ class WeltDecodeError(ValueError):
             f"decoding Welt model {model!r}'s scores with {decoder!r} failed after the paid "
             f"run: {error}. The result stays in your Welt workspace (job "
             f"{result.job_id!r}); decode this error's .scores locally with "
-            "ergodic.EdgeProbabilities.from_frame and ergodic.decode"
+            "ergodic.EdgeProbabilities.from_frame and ergodic.decode, or read them again "
+            f"with welt.Client().causal_scores({result.job_id!r})"
         )
 
 
@@ -263,9 +270,10 @@ def discover(
             columns=columns, rows=rows, name="ergodic discovery", target=None
         )
         result = welt_client.discover(dataset["id"], model=model, seed=seed, timeout=timeout)
-        scores = _score_frame(welt_client.causal_scores(result.job_id))
+        raw_scores = welt_client.causal_scores(result.job_id)
     if config is not None:
-        return _decoded(data.n_rows, model, seed, result, scores, config, knowledge)
+        return _decoded(data.n_rows, model, seed, result, raw_scores, config, knowledge)
+    scores = _score_frame(raw_scores)
     if result.native_graph_type != "dag":
         raise WeltGraphNotDAGError(model, result.native_graph_type, result, scores)
     graph = result.to_ergodic()
@@ -328,11 +336,32 @@ def _decoded(
     model: str,
     seed: int,
     result: Any,
+    raw_scores: dict[str, Any],
+    config: Decoder,
+    knowledge: DomainKnowledge | None,
+) -> DecodeResult:
+    """Decode a Welt result's edge scores locally, keeping the Welt provenance.
+
+    Everything here runs after the paid run, so any failure, reading the scores
+    included, becomes a :class:`WeltDecodeError` that carries the result.
+    """
+    scores: pd.DataFrame | None = None
+    try:
+        scores = _score_frame(raw_scores)
+        return _decode_scores(n, model, seed, result, scores, config, knowledge)
+    except Exception as error:
+        raise WeltDecodeError(model, config.method, error, result, scores) from error
+
+
+def _decode_scores(
+    n: int,
+    model: str,
+    seed: int,
+    result: Any,
     scores: pd.DataFrame,
     config: Decoder,
     knowledge: DomainKnowledge | None,
 ) -> DecodeResult:
-    """Decode a Welt result's edge scores locally, keeping the Welt provenance."""
     probabilities = EdgeProbabilities.from_frame(
         scores, kind="independent", provenance=_welt_provenance(model, seed, result)
     )
@@ -344,18 +373,15 @@ def _decoded(
         # strict and below 1, so the largest float under 1 reads the same.
         threshold = min(float(native_threshold), math.nextafter(1.0, 0.0))
         threshold_source = "welt_native"
-    try:
-        decoded = decode(
-            probabilities,
-            config.method,
-            threshold=threshold,
-            knowledge=knowledge,
-            samples=config.samples,
-            seed=config.seed,
-            max_nodes=config.max_nodes,
-        )
-    except (ValueError, RuntimeError) as error:
-        raise WeltDecodeError(model, config.method, error, result, scores) from error
+    decoded = decode(
+        probabilities,
+        config.method,
+        threshold=threshold,
+        knowledge=knowledge,
+        samples=config.samples,
+        seed=config.seed,
+        max_nodes=config.max_nodes,
+    )
     native_edges = tuple(
         (edge["u"], edge["v"]) if edge["v_mark"] == "arrow" else (edge["v"], edge["u"])
         for edge in result.to_dict()["edge_marks"]
