@@ -34,6 +34,7 @@ anything in the world.
 
 from __future__ import annotations
 
+import itertools
 import math
 import warnings
 from dataclasses import dataclass, field
@@ -83,6 +84,9 @@ APPROXIMATE_NOTE: Final = (
     "is an approximation"
 )
 DEFAULT_MAX_EXACT: Final = 15
+LADDER_RUNGS: Final = 4
+LADDER_RATIO: Final = 0.6
+"""The default ladder's ratio between rungs at 45 movable pairs (10 variables)."""
 MAX_EXACT_LIMIT: Final = 18
 ENUMERATION_LIMIT: Final = 4
 SCORE_ENUMERATION_LIMIT: Final = 5
@@ -310,6 +314,7 @@ def graph_posterior(
     chains: int = 4,
     warmup: int = 500,
     thin: int = 4,
+    temperatures: tuple[float, ...] | None = None,
     seed: int = 0,
 ) -> GraphSamples:
     """A posterior over DAGs under a method, exact when feasible, else by MCMC.
@@ -337,7 +342,10 @@ def graph_posterior(
     0 starts from the greedy decode (edge probabilities) or a hill climb (a score),
     the others from random DAGs; each runs ``warmup`` sweeps and keeps one draw
     every ``thin`` sweeps, ``samples // chains`` per chain (a sweep proposes one
-    move per movable pair). ``"exact"`` and ``"mcmc"`` force one; ``"exact"``
+    move per movable pair). Each chain is a parallel-tempering ladder, one replica
+    per inverse temperature in ``temperatures``, with draws kept from the
+    untempered one; the tempered replicas carry the chain across valleys between
+    modes that single-pair moves rarely cross. ``"exact"`` and ``"mcmc"`` force one; ``"exact"``
     raises when it does not apply.
 
     MCMC reports the rank-normalized split R-hat and bulk effective sample size of
@@ -361,6 +369,11 @@ def graph_posterior(
         chains: MCMC chains (at least 2 for R-hat).
         warmup: MCMC warmup sweeps per chain.
         thin: MCMC sweeps between kept draws.
+        temperatures: The parallel-tempering ladder of inverse temperatures, starting
+            at 1 and decreasing; ``(1.0,)`` turns tempering off. ``None`` takes four
+            rungs in geometric steps of ``0.6 ** sqrt(45 / m)`` for ``m`` movable pairs
+            (``1, 0.6, 0.36, 0.22`` at 10 variables), closer together on more pairs so
+            neighbours still swap.
         seed: Seeds a ``numpy.random.Generator``; the global random state is untouched.
 
     Returns:
@@ -371,8 +384,8 @@ def graph_posterior(
         ``log_normalizer`` (exact only), ``n_distinct``, ``edge_estimator``
         (``"exact"``, ``"rao_blackwell"`` or ``"frequency"``), ``best_source``,
         ``ignored_confounders``, ``approximate`` and ``note``; for MCMC also
-        ``chains``, ``draws_per_chain``, ``warmup``, ``thin``,
-        ``proposals_per_sweep``, ``acceptance``, ``rhat_log_target``,
+        ``chains``, ``draws_per_chain``, ``warmup``, ``thin``, ``temperatures``,
+        ``proposals_per_sweep``, ``acceptance``, ``swap_acceptance``, ``rhat_log_target``,
         ``ess_log_target``, ``max_edge_rhat``, ``min_edge_ess``, ``converged`` and
         ``convergence_problems``.
 
@@ -385,6 +398,8 @@ def graph_posterior(
     _check_int("chains", chains, 1)
     _check_int("warmup", warmup, 0)
     _check_int("thin", thin, 1)
+    if temperatures is not None:
+        _check_temperatures(temperatures)
     _check_int("seed", seed, 0)
     _check_int("max_exact", max_exact, 1)
     if max_exact > MAX_EXACT_LIMIT:
@@ -458,7 +473,20 @@ def graph_posterior(
         start, start_source = _start(target, probabilities, knowledge)
         starts = [start] + [random_start(target, rng) for _ in range(chains - 1)]
         per_chain = max(1, samples // chains)
-        run = run_chains(target, starts, draws=per_chain, warmup=warmup, thin=thin, rng=rng)
+        ladder = (
+            tuple(float(t) for t in temperatures)
+            if temperatures is not None
+            else default_ladder(target)
+        )
+        run = run_chains(
+            target,
+            starts,
+            draws=per_chain,
+            warmup=warmup,
+            thin=thin,
+            rng=rng,
+            temperatures=ladder,
+        )
         stack = graphs_of(run.states.reshape(-1, run.states.shape[-1]), size)
         graphs, index, counts = _distinct(stack)
         draws = index.reshape(chains, per_chain)
@@ -481,6 +509,8 @@ def graph_posterior(
             draws_per_chain=per_chain,
             warmup=warmup,
             thin=thin,
+            temperatures=ladder,
+            swap_acceptance=run.swap_acceptance,
             proposals_per_sweep=run.proposals_per_sweep,
         )
     diagnostics["log_normalizer"] = log_z
@@ -518,6 +548,33 @@ def graph_posterior(
 
 
 # -- pieces ----------------------------------------------------------------------------------
+
+
+def default_ladder(target: GraphTarget) -> tuple[float, ...]:
+    """Four geometric rungs, ``0.6 ** sqrt(45 / m)`` apart for ``m`` movable pairs."""
+    size = target.size
+    movable = 0
+    for i in range(size):
+        for j in range(i + 1, size):
+            states = (target.log_none[i, j], target.log_edge[i, j], target.log_edge[j, i])
+            movable += sum(state > -np.inf for state in states) >= 2
+    ratio = LADDER_RATIO ** math.sqrt(45.0 / max(1, movable))
+    return tuple(ratio**k for k in range(LADDER_RUNGS))
+
+
+def _check_temperatures(temperatures: Any) -> None:
+    values = tuple(temperatures) if isinstance(temperatures, tuple | list) else ()
+    ok = (
+        bool(values)
+        and all(isinstance(t, int | float) and not isinstance(t, bool) for t in values)
+        and values[0] == 1.0
+        and all(0.0 < b < a for a, b in itertools.pairwise(values))
+    )
+    if not ok:
+        raise ValueError(
+            "temperatures must start at 1 and decrease strictly, staying positive, "
+            f"for example (1.0, 0.6, 0.35, 0.2); got {temperatures!r}"
+        )
 
 
 def _check_int(name: str, value: Any, minimum: int) -> None:

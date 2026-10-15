@@ -17,6 +17,17 @@ through the state without it. The target ratio is local: one pair's state
 weights, plus, for a score, the local scores of the one or two nodes whose
 parents change.
 
+**Tempering.** Posteriors with strong edges that would close cycles have modes
+that differ in several pairs at once, and a single-pair move crosses the valley
+between them rarely. Each chain is therefore a parallel-tempering ladder: one
+replica per inverse temperature ``beta`` (1 first), replica ``k`` targeting
+``pi(G)^beta_k`` with the same move (acceptance ``min(1, (pi(G')/pi(G))^beta)``).
+After each sweep neighbouring replicas, alternating even and odd pairs, propose
+to exchange their graphs, accepted with probability
+``min(1, exp((beta_k - beta_k+1) (log pi(G_k+1) - log pi(G_k))))``; this is a
+Metropolis step on the product of the tempered targets, so the ``beta = 1``
+replica, the only one whose draws are kept, still targets ``pi``.
+
 **The chains.** Chain 0 starts from the best graph found before sampling (the
 greedy decode or the exact MAP); the others start from random DAGs drawn
 uniformly over each pair's possible states with cycle rejection. Every chain
@@ -26,7 +37,7 @@ one proposal per movable pair. Randomness comes only from the generator passed i
 **Diagnostics.** The rank-normalized split R-hat and the bulk effective sample
 size (Vehtari, Gelman, Simpson, Carpenter and Buerkner 2021) on the log target and
 on every directed-edge indicator, the acceptance rate per chain, and the starting
-graphs.
+graphs, plus the swap acceptance rate of each ladder.
 """
 
 from __future__ import annotations
@@ -66,6 +77,7 @@ class ChainRun:
     log_targets: FloatArray  # (chains, draws)
     acceptance: tuple[float, ...]
     proposals_per_sweep: int
+    swap_acceptance: tuple[float, ...] = ()
 
 
 def pair_index(size: int) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
@@ -151,8 +163,17 @@ def run_chains(
     warmup: int,
     thin: int,
     rng: np.random.Generator,
+    temperatures: tuple[float, ...] = (1.0,),
 ) -> ChainRun:
-    """Run one chain per start; ``draws`` kept per chain, ``warmup``/``thin`` in sweeps."""
+    """Run one chain per start; ``draws`` kept per chain, ``warmup``/``thin`` in sweeps.
+
+    With several ``temperatures`` (the first 1) each chain is a parallel-tempering
+    ladder: one replica per inverse temperature ``beta``, each targeting
+    ``pi(G)^beta`` with the single-pair move, and after every sweep neighbouring
+    replicas propose to swap graphs, accepted with probability
+    ``min(1, exp((beta_k - beta_k+1) (log pi(G_k+1) - log pi(G_k))))``. Draws are
+    kept from the ``beta = 1`` replica only, so they target ``pi``.
+    """
     size = target.size
     low, high = pair_index(size)
     pairs = low.size
@@ -175,65 +196,105 @@ def run_chains(
     states = np.zeros((len(starts), draws, pairs), dtype=np.uint8)
     log_targets = np.zeros((len(starts), draws))
     acceptance: list[float] = []
-    lows = low.tolist()
-    highs = high.tolist()
-    scored = target.score is not None
+    swaps: list[float] = []
+    mover = _Mover(target, weights, movable, others, low.tolist(), high.tolist())
     for index, start in enumerate(starts):
-        chain = _Chain(target, start)
-        total = (warmup + draws * thin) * sweep
-        accepted = 0
-        kept = 0
+        ladder = [_Chain(target, start) for _ in temperatures]
         if not movable:
-            states[index] = np.frombuffer(bytes(chain.state), dtype=np.uint8)
-            log_targets[index] = chain.current
+            states[index] = np.frombuffer(bytes(ladder[0].state), dtype=np.uint8)
+            log_targets[index] = ladder[0].current
             acceptance.append(0.0)
+            swaps.append(0.0)
             continue
-        block = 1 << 16
-        for offset in range(0, total, block):
-            count = min(block, total - offset)
-            picks = rng.integers(0, len(movable), size=count).tolist()
-            choices = rng.random(count).tolist()
-            logs = np.log(rng.random(count)).tolist()
-            for step in range(count):
-                p = movable[picks[step]]
-                old = chain.state[p]
-                options = others[p][old]
-                new = options[int(choices[step] * len(options))]
-                row = weights[p]
-                delta = row[new] - row[old]
-                i, j = lows[p], highs[p]
-                if scored:
-                    delta += _local_delta(chain, target, i, j, old, new)
-                if logs[step] < delta:
-                    # Remove the old edge, then check the new one.
-                    if old == 1:
-                        chain.set_edge(i, j, False)
-                    elif old == 2:
-                        chain.set_edge(j, i, False)
-                    valid = True
+        accepted = 0
+        swapped = 0
+        tried = 0
+        kept = 0
+        for count in range(warmup + draws * thin):
+            for level, beta in enumerate(temperatures):
+                moved = mover.sweep(ladder[level], beta, sweep, rng)
+                if level == 0:
+                    accepted += moved
+            for level in range(count % 2, len(temperatures) - 1, 2):
+                cold, hot = ladder[level], ladder[level + 1]
+                ratio = (temperatures[level] - temperatures[level + 1]) * (
+                    hot.current - cold.current
+                )
+                tried += 1
+                if math.log(rng.random()) < ratio:
+                    ladder[level], ladder[level + 1] = hot, cold
+                    swapped += 1
+            if count >= warmup and (count - warmup + 1) % thin == 0:
+                states[index, kept] = np.frombuffer(bytes(ladder[0].state), dtype=np.uint8)
+                log_targets[index, kept] = ladder[0].current
+                kept += 1
+        acceptance.append(accepted / ((warmup + draws * thin) * sweep))
+        swaps.append(swapped / tried if tried else 0.0)
+    return ChainRun(states, log_targets, tuple(acceptance), sweep, tuple(swaps))
+
+
+class _Mover:
+    """The single-pair Metropolis move, shared by every replica."""
+
+    def __init__(
+        self,
+        target: GraphTarget,
+        weights: list[tuple[float, float, float]],
+        movable: list[int],
+        others: list[list[list[int]]],
+        lows: list[int],
+        highs: list[int],
+    ) -> None:
+        self.target = target
+        self.weights = weights
+        self.movable = movable
+        self.others = others
+        self.lows = lows
+        self.highs = highs
+        self.scored = target.score is not None
+
+    def sweep(self, chain: _Chain, beta: float, count: int, rng: np.random.Generator) -> int:
+        """``count`` proposals on ``chain`` at inverse temperature ``beta``; the accepted count."""
+        movable, others, weights = self.movable, self.others, self.weights
+        lows, highs, target = self.lows, self.highs, self.target
+        picks = rng.integers(0, len(movable), size=count).tolist()
+        choices = rng.random(count).tolist()
+        logs = np.log(rng.random(count)).tolist()
+        accepted = 0
+        for step in range(count):
+            p = movable[picks[step]]
+            old = chain.state[p]
+            options = others[p][old]
+            new = options[int(choices[step] * len(options))]
+            row = weights[p]
+            delta = row[new] - row[old]
+            i, j = lows[p], highs[p]
+            if self.scored:
+                delta += _local_delta(chain, target, i, j, old, new)
+            if logs[step] < beta * delta:
+                # Remove the old edge, then check the new one.
+                if old == 1:
+                    chain.set_edge(i, j, False)
+                elif old == 2:
+                    chain.set_edge(j, i, False)
+                valid = True
+                if new == 1:
+                    valid = chain.can_add(i, j)
+                elif new == 2:
+                    valid = chain.can_add(j, i)
+                if valid:
                     if new == 1:
-                        valid = chain.can_add(i, j)
-                    elif new == 2:
-                        valid = chain.can_add(j, i)
-                    if valid:
-                        if new == 1:
-                            chain.set_edge(i, j, True)
-                        elif new == 2:
-                            chain.set_edge(j, i, True)
-                        chain.state[p] = new
-                        chain.current += delta
-                        accepted += 1
-                    elif old == 1:
                         chain.set_edge(i, j, True)
-                    elif old == 2:
+                    elif new == 2:
                         chain.set_edge(j, i, True)
-                done = offset + step + 1
-                if done > warmup * sweep and (done - warmup * sweep) % (thin * sweep) == 0:
-                    states[index, kept] = np.frombuffer(bytes(chain.state), dtype=np.uint8)
-                    log_targets[index, kept] = chain.current
-                    kept += 1
-        acceptance.append(accepted / total)
-    return ChainRun(states, log_targets, tuple(acceptance), sweep)
+                    chain.state[p] = new
+                    chain.current += delta
+                    accepted += 1
+                elif old == 1:
+                    chain.set_edge(i, j, True)
+                elif old == 2:
+                    chain.set_edge(j, i, True)
+        return accepted
 
 
 def _local_delta(chain: _Chain, target: GraphTarget, i: int, j: int, old: int, new: int) -> float:

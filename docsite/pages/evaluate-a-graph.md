@@ -220,7 +220,11 @@ nodes). A `mixed`-kind graph is read only when it's a DAG; tag anything else wit
 - **Structure MCMC** otherwise: four chains, each proposing to change one pair's state
   at a time (add, delete or reverse an edge) and rejecting any change that closes a
   cycle or breaks the knowledge. One chain starts from the greedy decode, the others
-  from random DAGs. On 20 variables the defaults took about 4 s.
+  from random DAGs. Each chain also runs three flattened copies of the posterior (its
+  powers in `temperatures`, 0.6, 0.36 and 0.22 at 10 variables and closer to 1 on more)
+  that trade graphs with it, so it can cross between modes that differ in several edges
+  at once; only the unflattened copy's draws are kept. On 20 variables the defaults took
+  about 14 s, and about 3 s on 10.
 
 Pass `method="exact"` or `method="mcmc"` to choose. Exact pair-state claims carry no
 Monte Carlo error. Claims that aren't about one pair, the credible level and
@@ -250,13 +254,13 @@ probs = EdgeProbabilities(names, values, kind="pair_state")
 
 # 2. Without knowledge the target factorizes by pair: exact draws.
 exact = graph_posterior(probs, seed=0)
-print(exact, exact.diagnostics["engine"])
+print(exact.method, exact.diagnostics["engine"], exact.n_draws)
 
 # 3. "a before f" with e and b free to sit anywhere is an ancestral constraint: MCMC.
 knowledge = DomainKnowledge().order("a", "f").forbid("b", "c", confidence=0.9)
 chained = graph_posterior(probs, knowledge=knowledge, seed=0)
 diagnostics = chained.diagnostics
-print(chained, diagnostics["engine"], diagnostics["converged"])
+print(chained.method, diagnostics["engine"], diagnostics["converged"])
 print(round(diagnostics["rhat_log_target"], 2), diagnostics["ess_log_target"] > 2000)
 print(diagnostics["target"]["ancestral_constraints"])
 
@@ -270,11 +274,11 @@ print(result.best_source, round(result.log_ratio_to_best, 3), round(result.credi
 ```
 
 ```output from="posterior_mcmc.py" tol="0.02"
-GraphSamples(exact, pair_state, 6 variables, 10000 draws, 6631 distinct DAGs) subset_recursion
-GraphSamples(mcmc, pair_state, 6 variables, 10000 draws, 5995 distinct DAGs) structure_mcmc True
+exact subset_recursion 10000
+mcmc structure_mcmc True
 1.0 True
 [('a', 'f')]
-0.31 True
+0.32 True
 greedy_decode 0.0 0.002
 ```
 
@@ -375,7 +379,7 @@ MCMC above that.
 | `edge_probabilities()`, `edge_errors()` | Posterior edge marginals, as pair states, and their Monte Carlo errors. |
 | `probability(feature)` | The posterior probability that `feature(graph)` holds, with its Monte Carlo error. |
 | `best_graph`, `top(k)` | The best DAG found, and the heaviest DAGs. |
-| `diagnostics` | `engine`, `edge_estimator`, `best_source`, and for MCMC `rhat_log_target`, `ess_log_target`, `max_edge_rhat`, `min_edge_ess`, `acceptance`, `converged`. |
+| `diagnostics` | `engine`, `edge_estimator`, `best_source`, and for MCMC `rhat_log_target`, `ess_log_target`, `max_edge_rhat`, `min_edge_ess`, `acceptance`, `swap_acceptance`, `converged`. |
 
 Under MCMC on edge probabilities, the edge marginals average each draw's chance of
 each pair state given the rest of the graph (Rao-Blackwellized), which is less noisy

@@ -277,6 +277,22 @@ def test_confounders_are_ignored_and_listed() -> None:
     assert samples.diagnostics["ignored_confounders"] == (("A", "B"),)
 
 
+def test_tempering_swaps_and_can_be_turned_off() -> None:
+    probs = _probs(6, seed=3)
+    tempered = graph_posterior(probs, method="mcmc", samples=2000, seed=0)
+    ladder = tempered.diagnostics["temperatures"]
+    assert ladder[0] == 1.0 and len(ladder) == 4
+    assert all(0.05 < rate < 0.95 for rate in tempered.diagnostics["swap_acceptance"])
+    plain = graph_posterior(probs, method="mcmc", samples=2000, temperatures=(1.0,), seed=0)
+    assert plain.diagnostics["swap_acceptance"] == (0.0,) * 4
+    exact = graph_posterior(probs, samples=100, seed=0).edge_probabilities().values
+    for samples in (tempered, plain):
+        assert np.abs(samples.edge_probabilities().values - exact).max() < 0.03
+    for bad in ((0.5, 0.2), (1.0, 1.0), (1.0, 0.0), (1.0, 2.0), ()):
+        with pytest.raises(ValueError, match="temperatures"):
+            graph_posterior(probs, method="mcmc", temperatures=bad)
+
+
 def test_a_short_run_warns_that_it_may_not_have_converged() -> None:
     with pytest.warns(PosteriorConvergenceWarning, match="may not have converged"):
         samples = graph_posterior(

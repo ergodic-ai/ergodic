@@ -144,8 +144,7 @@ def test_a_bge_posterior_is_exact_by_enumeration() -> None:
 def test_mcmc_on_a_score_agrees_with_enumeration() -> None:
     data, _ = _gaussian(n=60, seed=5)
     exact = graph_posterior(data, score="bge")
-    # Four variables give six proposals a sweep, so thin more than the default.
-    mcmc = graph_posterior(data, score="bge", method="mcmc", samples=8000, thin=25, seed=1)
+    mcmc = graph_posterior(data, score="bge", method="mcmc", samples=8000, seed=1)
     assert mcmc.diagnostics["edge_estimator"] == "frequency"
     assert mcmc.diagnostics["converged"]
     difference = np.abs(mcmc.edge_probabilities().values - exact.edge_probabilities().values)

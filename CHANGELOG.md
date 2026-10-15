@@ -95,7 +95,8 @@ Planned as 0.3.0.
   path-level order constraint a subset recursion over sink sets (about `3^n` steps, up
   to `max_exact=15`) that gives the exact normalizer, exact edge marginals, exact draws
   and the exact best graph. Otherwise multi-chain structure MCMC (single-pair add,
-  delete and reverse moves; chains from the greedy decode and random DAGs) with split
+  delete and reverse moves; each chain a four-rung parallel-tempering ladder; chains
+  from the greedy decode and random DAGs) with split
   R-hat and bulk effective sample sizes, Rao-Blackwellized edge marginals for edge
   probabilities, and a `PosteriorConvergenceWarning`.
 - `evaluate_graph(candidate, probabilities_or_samples)` reads a DAG, CPDAG, PAG, MAG or
