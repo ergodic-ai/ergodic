@@ -588,9 +588,45 @@ def test_sample_weight_is_refused_not_ignored() -> None:
     assert learner.fits_used == 0
 
 
-def test_an_empty_feature_matrix_is_refused_before_a_fit() -> None:
-    with pytest.raises(ValueError, match="at least one feature"):
-        WeltLearner(client=object()).fit(np.empty((5, 0)), np.arange(5.0))
+def test_a_slot_with_no_features_is_fitted_locally_for_free() -> None:
+    """An empty adjustment set leaves the mean (or class frequencies): no request, no fit."""
+    fake = FakeWelt()
+    with fake.client() as client:
+        regression = WeltLearner(client=client, max_fits=1).fit(
+            np.empty((4, 0)), np.array([1.0, 2, 3, 6])
+        )
+        np.testing.assert_allclose(regression.predict(np.empty((3, 0))), [3.0, 3.0, 3.0])
+        classifier = WeltLearner(task="classification", client=client, max_fits=1)
+        classifier.fit(np.empty((4, 0)), np.array([1.0, 0.0, 1.0, 1.0]))
+        np.testing.assert_allclose(classifier.predict_proba(np.empty((2, 0))), [[0.25, 0.75]] * 2)
+        assert classifier.predict(np.empty((2, 0))).tolist() == [1.0, 1.0]
+        with pytest.raises(ValueError, match="columns"):
+            regression.predict(np.ones((3, 1)))
+    assert fake.calls == []
+    assert regression.fits_used == 0 and classifier.fits_used == 0
+    assert regression.predictor_id_ is None and regression.model_version_ is None
+    assert classifier.classes_.tolist() == [0, 1]
+    with pytest.raises(ValueError, match="no rows"):
+        WeltLearner(client=object()).fit(np.empty((0, 0)), np.array([]))
+
+
+def test_dml_with_an_empty_adjustment_set_pays_for_nothing() -> None:
+    """No confounders: both DML nuisances are training means, exactly as ergodic's OLS."""
+    fake = FakeWelt()
+    data = continuous(n=200).select(["X", "Y"])
+    graph = dag(["X -> Y"])
+    native = estimate_effect(
+        graph, data, "X", "Y", strategy="dml", learner="ols", random_state=3, n_folds=2
+    )
+    with fake.client() as client:
+        learner = WeltLearner("tabicl-v2", client=client)
+        hosted = estimate_effect(
+            graph, data, "X", "Y", strategy="dml", learner=learner, random_state=3, n_folds=2
+        )
+    assert hosted.value == pytest.approx(native.value, rel=1e-9)
+    assert hosted.std_error == pytest.approx(native.std_error, rel=1e-9)
+    assert learner.fits_used == 0
+    assert fake.calls == []
 
 
 def test_regression_fit_and_batched_predict() -> None:

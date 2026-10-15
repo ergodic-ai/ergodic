@@ -214,6 +214,17 @@ def test_performance_unknown_lifecycle_column_raises() -> None:
 # -- determinism ---------------------------------------------------------------
 
 
+def test_arc_stats_with_nan_gaps_compare_and_hash_equal() -> None:
+    from ergodic.process._map import ArcStats
+
+    # Distinct NaN objects, so equality cannot lean on identity.
+    left = ArcStats(count=2, mean_gap=float("nan"), median_gap=float("nan"))
+    right = ArcStats(count=2, mean_gap=float("nan"), median_gap=float("nan"))
+    assert left == right and hash(left) == hash(right)
+    assert left != ArcStats(count=3, mean_gap=float("nan"), median_gap=float("nan"))
+    assert ArcStats(1, 2.0, 2.0) != ArcStats(1, 2.0, float("nan"))
+
+
 def test_repeated_calls_give_equal_objects() -> None:
     plain = _two_case_log()
     skewed = _skewed_log()

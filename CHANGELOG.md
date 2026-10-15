@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - Unreleased
+## [0.2.1] - 2026-10-15
 
-To be released together with welt-client 0.13.
+### Fixed
+- `WeltLearner` fits a slot with no feature columns locally. An empty adjustment set
+  leaves nothing for a model to learn, so the nuisance is the training mean (or the
+  class frequencies for classification): no upload, no paid fit, no charge to
+  `max_fits`, and `predictor_id_` is `None`. In 0.2.0 it raised, so the "Discover in
+  Welt, estimate in ergodic" guide stopped whenever Welt's Arrow found no confounders
+  for the treatment, as it does on the guide's own data today. With no adjustment
+  variables, DML is then the regression slope of the outcome on the treatment, the
+  same as with ergodic's `ols` learner.
+- `ArcStats` treats two NaN gaps (START and END arcs) as equal and hashes them alike,
+  so `process_map(log) == process_map(log)` holds on Python 3.13 and 3.14, where
+  dataclass equality compares fields one by one.
+
+## [0.2.0] - 2026-10-15
+
+Released together with welt-client 0.13.
 
 ### Added
 - A versioned graph format. `MixedGraph.to_dict()` writes

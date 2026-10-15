@@ -74,7 +74,7 @@ Only a graph that Welt declares a native DAG converts. `CausalResult.to_ergodic(
 in welt-client keeps every variable, unconnected ones included, and the native
 edge directions. It never projects, thresholds or relabels a graph into a DAG.
 
-| Welt model | Native graph | In ergodic 0.2.0 |
+| Welt model | Native graph | In ergodic 0.2 |
 | --- | --- | --- |
 | `arrow` | DAG | Converts. `ergodic.welt.discover` returns it as a `DiscoveryResult`. |
 | `cdfm` | Directed, may hold cycles | Refused before paying by default. With an explicit `decoder=`, its scores are decoded locally into a DAG labelled decoded. |
