@@ -36,13 +36,10 @@ from ergodic.welt import (  # noqa: E402
     WeltForecaster,
 )
 
-_ONE_CORNER = [
-    {"min_context": 16, "max_context": 512, "max_variates": 1, "max_series": 1, "max_horizon": 64}
-]
+_ONE_CORNER = [{"max_context": 512, "max_variates": 1, "max_series": 1, "max_horizon": 64}]
 _WIDE = [
-    {"min_context": 16, "max_context": 512, "max_variates": 1, "max_series": 1, "max_horizon": 64},
+    {"max_context": 512, "max_variates": 1, "max_series": 1, "max_horizon": 64},
     {
-        "min_context": 16,
         "max_context": 2000,
         "max_variates": 10,
         "max_series": 20,
@@ -97,6 +94,7 @@ class FakeChronos(FakeWelt):
             "version": self.version,
             "quantile_levels": list(NATIVE_QUANTILE_LEVELS),
             "forecast_envelopes": self.envelopes,
+            "limits": {"min_context": 16},
         }
 
     def _forecast(self, request: Any) -> Any:
@@ -499,6 +497,8 @@ def test_a_request_outside_every_measured_envelope_is_refused_before_paying() ->
             WeltForecaster(client=client).fit(plain).forecast(4)
         with pytest.raises(ValueError, match="no measured envelope"):
             WeltForecaster(client=client).fit(sales(600).select(["sales"])).forecast(4)
+        with pytest.raises(ValueError, match="no measured envelope"):
+            WeltForecaster(client=client).fit(sales(10).select(["sales"])).forecast(4)
         assert fake.count("POST", "/v1/forecasts") == 0
         trimmed = WeltForecaster(client=client, max_context=512, draws=50)
         trimmed.fit(sales(600).select(["sales"])).forecast(4)

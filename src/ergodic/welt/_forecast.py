@@ -833,12 +833,14 @@ def _admit(
             "nothing was sent. List the forecasting models with welt.Client().models()"
         )
     envelopes = meta.get("forecast_envelopes")
+    stated = meta.get("limits")
+    limits: Mapping[str, Any] = stated if isinstance(stated, dict) else {}
+    floor = int(limits.get("min_context", meta.get("min_context", 16)))
     if isinstance(envelopes, dict):
         corners = list(envelopes.get("corners") or ())
-        floor = envelopes.get("min_context", meta.get("min_context", 16))
+        floor = int(envelopes.get("min_context", floor))
     else:
         corners = list(envelopes or ())
-        floor = meta.get("min_context", 16)
     if not corners:
         return
     asked = {"context": context, "variates": variates, "series": series, "horizon": horizon}
