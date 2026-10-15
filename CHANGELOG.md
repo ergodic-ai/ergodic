@@ -21,7 +21,31 @@ To be released together with Welt.
   supported format on any other value. The rest of the `to_dict()` output is
   unchanged. Round trips are tested for every graph kind, latent and selection
   nodes included.
-- ergodic.welt optional Welt integration (API-141)
+- `ergodic.welt`, an optional Welt integration installed with
+  `pip install "ergodic[welt]"` (welt-client>=0.13, Python 3.11 to 3.13; the
+  rest of ergodic never imports it, enforced by a test). `ergodic.welt.discover`
+  and `discover(data, method="welt:<model>")` run a Welt causal discovery model
+  and return a `DiscoveryResult` with the native DAG and Welt provenance in
+  `diagnostics` (ids, model and configuration versions, the edge-score
+  dataframe). A model known to return non-DAG graphs (`cdfm`, `avici`, or any the
+  catalogue marks so) raises `WeltGraphNotDAGError` before anything is uploaded or
+  paid for, and a result Welt does not declare a DAG raises it with the result
+  attached; nothing is projected. `WeltLearner` puts any Welt classification or
+  regression model in a nuisance slot, refuses `sample_weight`, and shares one
+  client and a `max_fits` budget (default 10) with its clones.
+  `upload_dataset` and `load_research_dataset` move tabular data between ergodic
+  and Welt. `bootstrap` refuses `welt:` methods (each resample would be a paid
+  job). (API-141)
+
+### Changed (API-141)
+- `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can
+  carry its provenance. Learner cloning honors a learner's own
+  `__sklearn_clone__` override; scikit-learn estimators keep the `get_params`
+  path.
+- A weighted nuisance slot (the R-learner's `final`) refuses, before any fit, a
+  learner that declares `supports_sample_weight = False`, as `WeltLearner` does.
+  `discover(..., method="welt:<model>")` refuses `alpha` and local-only keyword
+  arguments before any request.
 
 ### Changed
 - Identification's refusal of a `mixed` graph now says how to fix it, reading
