@@ -16,7 +16,10 @@ puts ``-inf`` on the states it rules out: a banned edge, the reverse of a requir
 edge and "no edge" on a required pair. Soft knowledge adds
 :meth:`~ergodic.DomainKnowledge.log_odds` to the directed states, and the
 constant ``soft_constant`` (each soft rule's term at "no edge") makes the total
-equal ``pair score + log_prior`` exactly, not just up to a constant.
+equal ``pair score + log_prior`` exactly, not just up to a constant. ``confound``
+statements speak about no directed edge and are left out: the identity holds for
+``log_prior`` of the knowledge without them (with them, ``log_prior`` is minus
+infinity on every DAG, which lacks the bidirected edge).
 
 Order statements (``order``, tiers) are ancestral: ``a`` before ``b`` means ``b`` is
 not an ancestor of ``a``, as :meth:`~ergodic.DomainKnowledge.violations` reads them.

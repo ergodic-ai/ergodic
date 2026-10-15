@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The BGe score: the exact marginal likelihood of a linear-Gaussian DAG.
+"""The BGe score: the marginal likelihood of a linear-Gaussian DAG.
 
 BGe (Bayesian Gaussian equivalent, Geiger and Heckerman 2002) integrates a
 linear-Gaussian network's parameters out under a normal-Wishart prior on the
@@ -22,11 +22,13 @@ freedom. The multivariate gammas reduce to one gamma ratio per local, so
 + ((a_w - n + l + 1)/2)(l + 1) log t - ((a_w - n + l)/2) l log t
 + ((N + a_w - n + l)/2) log|R_PP| - ((N + a_w - n + l + 1)/2) log|R_YY|``
 
-for ``l`` parents and ``T = t I``. The defaults are the standard ones (the
-``BiDAG`` defaults): ``a_mu = 1``, ``a_w = n + a_mu + 1`` and
-``t = a_mu (a_w - n - 1) / (a_mu + 1)``. The prior mean is the sample mean, so the
-score does not move when a column is shifted (``BiDAG`` uses zero, which agrees on
-centered data). ``T`` is in the data's units: standardize columns whose scales
+for ``l`` parents and ``T = t I``. ``a_mu = 1``, ``a_w = n + a_mu + 1`` and
+``t = a_mu (a_w - n - 1) / (a_mu + 1)`` are the ``BiDAG`` defaults. The prior mean
+is the sample mean, an empirical-Bayes choice: the value is the exact marginal
+likelihood under a normal-Wishart prior centred on the data's own mean, so the
+prior depends on the data. Score equivalence still holds, and the score does not
+move when a column is shifted. ``BiDAG`` centres the prior at zero; the two agree
+on centred data and differ otherwise. ``T`` is in the data's units: standardize columns whose scales
 differ by orders of magnitude.
 
 BGe is decomposable and score-equivalent: Markov-equivalent DAGs get the same

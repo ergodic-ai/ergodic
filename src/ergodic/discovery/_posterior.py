@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     IntArray = npt.NDArray[np.int64]
 
 PROBABILITY_TERM: Final = "posterior probability under the method"
-"""How the docs and the outputs name these numbers; the calibration gate may change it."""
+"""How the diagnostic notes name these numbers (the docstrings and docs use the same words)."""
 POSTERIOR_NOTE: Final = (
     f"{PROBABILITY_TERM}: relative to the method's edge probabilities or score and to "
     "the knowledge, and only as calibrated as the method; see the docs for its calibration"
@@ -98,15 +98,24 @@ TIE_TOLERANCE: Final = 1e-9
 class FeatureProbability:
     """A posterior probability with its Monte Carlo standard error.
 
+    When every draw agrees (a feature that holds in all draws or in none), the
+    binomial error would be 0 although the value is only estimated. ``mc_error``
+    is then the rule-of-three bound ``3 / N`` for ``N`` draws, a one-sided 95%
+    bound on the mass the draws never saw, and ``bound`` is ``True``. For MCMC the
+    draws are correlated, so that bound is optimistic.
+
     Attributes:
         probability: The posterior probability under the method.
-        mc_error: The Monte Carlo standard error; 0 when computed exactly.
+        mc_error: The Monte Carlo standard error; 0 when computed exactly; the
+            rule-of-three bound when ``bound``.
         exact: Whether it was computed exactly (by enumeration or the exact recursion).
+        bound: Whether ``mc_error`` is the rule-of-three bound (every draw agreed).
     """
 
     probability: float
     mc_error: float
     exact: bool
+    bound: bool = False
 
     def __float__(self) -> float:
         return self.probability
@@ -280,11 +289,18 @@ class GraphSamples:
         )
         return self._estimate(values)
 
-    def _estimate(self, values: FloatArray) -> FeatureProbability:
-        """The posterior mean of a per-graph value, with its Monte Carlo error."""
+    def _estimate(self, values: FloatArray, *, indicator: bool = True) -> FeatureProbability:
+        """The posterior mean of a per-graph value, with its Monte Carlo error.
+
+        With ``indicator`` (values in [0, 1] that mark a feature), draws that all
+        read 0 or all read 1 get the rule-of-three bound instead of an error of 0.
+        """
         if self.exhaustive:
             return FeatureProbability(float(np.dot(self.weights, values)), 0.0, True)
         traces = values[self.draws]
+        first = float(traces.flat[0])
+        if indicator and first in (0.0, 1.0) and np.all(traces == first):
+            return FeatureProbability(first, min(1.0, 3.0 / traces.size), False, True)
         if self.method == "exact":
             mean = float(traces.mean())
             spread = float(traces.var())
@@ -332,7 +348,9 @@ def graph_posterior(
     of ``a``, as :meth:`~ergodic.DomainKnowledge.violations` reads them). Soft
     statements weigh the pair states. ``confound`` statements speak about no
     directed edge, so a DAG posterior ignores them and lists them in
-    ``diagnostics["ignored_confounders"]``.
+    ``diagnostics["ignored_confounders"]``; ``log_prior`` above is then that of
+    the knowledge without them. A single variable has one DAG, so any ``method``
+    returns it enumerated.
 
     ``method="auto"`` picks, in order: every DAG enumerated (up to 4 variables, 5
     for a score); the exact subset recursion (a pair-factorized target, edge
@@ -604,6 +622,8 @@ def _bind_score(data: TabularData, score: Score | str | None) -> Score:
 
 def _engine(target: GraphTarget, method: str, max_exact: int) -> str:
     size = target.size
+    if size == 1:
+        return "enumeration"  # one DAG; there is nothing to sample
     limit = SCORE_ENUMERATION_LIMIT if not target.pair_factorized else ENUMERATION_LIMIT
     if method == "mcmc":
         return "structure_mcmc"

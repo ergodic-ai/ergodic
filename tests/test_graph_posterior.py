@@ -293,6 +293,24 @@ def test_tempering_swaps_and_can_be_turned_off() -> None:
             graph_posterior(probs, method="mcmc", temperatures=bad)
 
 
+def test_one_variable_has_one_dag_whatever_the_method() -> None:
+    probs = EdgeProbabilities(("A",), np.zeros((1, 1)), kind="pair_state")
+    for method in ("auto", "exact", "mcmc"):
+        samples = graph_posterior(probs, method=method)
+        assert samples.exhaustive and samples.adjacency.shape == (1, 1, 1)
+        assert samples.weights.tolist() == [1.0]
+
+
+def test_draws_that_all_agree_report_a_rule_of_three_bound() -> None:
+    samples = graph_posterior(_probs(6, seed=8), samples=1500, seed=0)
+    always = samples.probability(lambda g: True)
+    assert always.probability == 1.0 and always.bound and always.mc_error == pytest.approx(2e-3)
+    never = samples.probability(lambda g: False)
+    assert never.probability == 0.0 and never.bound
+    enumerated = graph_posterior(_probs(4, seed=1)).probability(lambda g: True)
+    assert enumerated.exact and not enumerated.bound and enumerated.mc_error == 0.0
+
+
 def test_a_short_run_warns_that_it_may_not_have_converged() -> None:
     with pytest.warns(PosteriorConvergenceWarning, match="may not have converged"):
         samples = graph_posterior(

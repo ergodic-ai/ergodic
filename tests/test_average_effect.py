@@ -98,6 +98,7 @@ def test_the_average_mixes_the_group_estimates_by_mass() -> None:
     assert result.identified_mass == pytest.approx(1.0)
     assert result.zero_effect_mass == 0.0 and result.unidentified_mass == 0.0
     assert result.truncated_mass == 0.0
+    assert result.mean_mc_error == 0.0  # every DAG enumerated
     frame = result.to_frame()
     assert list(frame["adjustment_set"]) == ["c", "(empty)"]
     assert "left out" in repr(result)
@@ -132,6 +133,28 @@ def test_a_variable_the_data_lacks_is_latent_and_its_confounding_is_unidentified
     assert [g.adjustment_set for g in result.groups] == [frozenset()]
     assert result.mean == pytest.approx(result.groups[0].value)
     assert result.diagnostics["latent"] == ("c",)
+
+
+def test_the_mean_from_draws_carries_a_monte_carlo_error() -> None:
+    rng = np.random.default_rng(3)
+    names = ("c", "t", "y", "m", "w")
+    values = np.zeros((5, 5))
+    for i in range(5):
+        for j in range(i + 1, 5):
+            _, forward, backward = rng.dirichlet([1.0, 1.0, 1.0])
+            values[i, j], values[j, i] = forward, backward
+    pins = DomainKnowledge().require("t", "y")
+    samples = graph_posterior(
+        EdgeProbabilities(names, values, kind="pair_state"), knowledge=pins, samples=2000
+    )
+    x = rng.normal(size=(800, 5))
+    x[:, 1] = (x[:, 1] > 0).astype(float)
+    x[:, 2] += x[:, 1]
+    data = tabular({name: x[:, k] for k, name in enumerate(names)})
+    result = average_effect(samples, data, "t", "y")
+    assert not result.exact and result.mean_mc_error > 0.0
+    total = sum(g.mass for g in result.groups) + result.unidentified_mass + result.truncated_mass
+    assert total == pytest.approx(1.0)
 
 
 def test_sets_beyond_the_cap_are_truncated_and_reported() -> None:

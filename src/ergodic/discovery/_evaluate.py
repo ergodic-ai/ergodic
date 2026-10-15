@@ -8,10 +8,13 @@ The measures, all relative to the method's posterior (:func:`graph_posterior`):
   computation is exact, else the better of the greedy decode (or a hill climb)
   and the best draw, polished by a hill climb.
 - **Credible level**: the posterior mass of DAGs whose target is strictly above
-  the candidate's, with ties counted half. It is the smallest highest-posterior
-  credible set the candidate belongs to, a Bayesian tail probability: 0.03 means
-  the candidate is among the method's most probable graphs, 0.99 that almost all
-  the mass sits on graphs it prefers. It is not a p-value and tests nothing.
+  the candidate's, plus half the mass of DAGs that tie with it (the candidate
+  included). It sits between the mass above the candidate and the mass of the
+  smallest highest-posterior set that contains it, the mid-point of the two. A
+  Bayesian tail probability: 0.03 means the candidate is among the method's most
+  probable graphs, 0.99 that almost all the mass sits on graphs it prefers. It is
+  not a p-value and tests nothing. Under the exact recursion the candidate's own
+  half is exact and only the other DAGs' mass comes from the draws.
 - **Claims**: each structural statement the candidate makes, with its posterior
   probability under the method and a Monte Carlo error.
 - **Expected SHD** from the candidate to a posterior draw, against the expected
@@ -127,7 +130,9 @@ class GraphEvaluation:
         class_probability: The equivalence class's probability (CPDAGs only).
         expected_shd: Expected structural Hamming distance from the candidate to a
             posterior draw, counting pairs whose state differs (DAGs only).
-        expected_shd_between_draws: The same between two independent draws.
+        expected_shd_error: Its Monte Carlo standard error (0 when exact).
+        expected_shd_between_draws: The same between two independent draws: a
+            plug-in from the pair-state marginals, with no Monte Carlo error reported.
         p_acyclic: The probability that the raw independent marginals form a DAG
             (independent kinds only).
         p_acyclic_error: Its Monte Carlo standard error (0 when exact).
@@ -150,6 +155,7 @@ class GraphEvaluation:
     claims: tuple[GraphClaim, ...] = field(repr=False)
     class_probability: FeatureProbability | None
     expected_shd: float | None
+    expected_shd_error: float | None
     expected_shd_between_draws: float
     p_acyclic: float | None
     p_acyclic_error: float | None
@@ -291,6 +297,7 @@ def evaluate_graph(
     above: FeatureProbability | None = None
     class_probability: FeatureProbability | None = None
     expected: float | None = None
+    expected_error: float | None = None
     diagnostics: dict[str, Any] = {
         "candidate_kind": kind,
         "posterior_method": posterior.method,
@@ -304,8 +311,14 @@ def evaluate_graph(
         log_target = posterior._target.log_target(matrix)
         log_ratio = log_target - posterior.best_log_target
         claims = reader.dag_claims(matrix)
-        level, above = reader.credible_level(log_target)
-        expected = reader.expected_shd(matrix)
+        level, above = reader.credible_level(log_target, matrix)
+        expected, expected_error = reader.expected_shd(matrix)
+        diagnostics["expected_shd_error"] = expected_error
+        diagnostics["expected_shd_between_draws_note"] = (
+            "a plug-in from the pair-state marginals (quadratic in them), without a Monte "
+            "Carlo error"
+        )
+        diagnostics["credible_level_error_is_bound"] = bool(level is not None and level.bound)
         diagnostics["credible_level_method"] = reader.how
         diagnostics["credible_level_note"] = TAIL_NOTE
         diagnostics["tie_tolerance"] = TIE_TOLERANCE
@@ -344,6 +357,7 @@ def evaluate_graph(
         claims=tuple(claims),
         class_probability=class_probability,
         expected_shd=expected,
+        expected_shd_error=expected_error,
         expected_shd_between_draws=reader.expected_shd_between_draws(),
         p_acyclic=p_acyclic,
         p_acyclic_error=p_error,
@@ -425,7 +439,7 @@ class _Reader:
             conditional[:, b, a],
         )
         values = np.sum([parts[s] for s in states], axis=0)
-        return self.posterior._estimate(np.asarray(values, dtype=np.float64))
+        return self.posterior._estimate(np.asarray(values, dtype=np.float64), indicator=False)
 
     def pair_masses(self) -> FloatArray:
         """``(d, d, 3)``: each unordered pair's state masses, from the marginals."""
@@ -465,25 +479,53 @@ class _Reader:
                     )
         return claims
 
-    def credible_level(self, value: float) -> tuple[FeatureProbability, FeatureProbability]:
-        logs = self.posterior.log_targets
+    def credible_level(
+        self, value: float, matrix: BoolArray
+    ) -> tuple[FeatureProbability, FeatureProbability]:
+        posterior = self.posterior
+        logs = posterior.log_targets
         if not math.isfinite(value):  # off the support: every DAG with mass is above it
             everything = FeatureProbability(1.0, 0.0, True)
             return everything, everything
         tolerance = TIE_TOLERANCE * max(1.0, abs(value))
         above = (logs > value + tolerance).astype(np.float64)
         tie = (np.abs(logs - value) <= tolerance).astype(np.float64)
-        return self.posterior._estimate(above + 0.5 * tie), self.posterior._estimate(above)
+        mass_above = posterior._estimate(above)
+        log_z = posterior.log_normalizer
+        if posterior.exhaustive or log_z is None:
+            return posterior._estimate(above + 0.5 * tie), mass_above
+        # Exact draws: the candidate's own probability is known exactly, so only the
+        # other DAGs' share comes from the draws.
+        own = math.exp(value - log_z)
+        itself = np.all(posterior.adjacency == matrix[None], axis=(1, 2))
+        others = posterior._estimate(above + 0.5 * np.where(itself, 0.0, tie))
+        level = FeatureProbability(
+            min(1.0, others.probability + own / 2.0), others.mc_error, False, others.bound
+        )
+        return level, mass_above
 
-    def expected_shd(self, matrix: BoolArray) -> float:
-        masses = self.pair_masses()
+    def expected_shd(self, matrix: BoolArray) -> tuple[float, float]:
+        """``E[SHD(candidate, G)]`` and its Monte Carlo error (0 when exact).
+
+        It is linear in the pair-state marginals, so under MCMC it is the mean of a
+        per-draw value (the expected disagreement given each draw's conditionals or
+        indicators), whose error comes from its effective sample size.
+        """
         size = len(self.names)
-        total = 0.0
-        for i in range(size):
-            for j in range(i + 1, size):
-                state = 1 if matrix[i, j] else 2 if matrix[j, i] else 0
-                total += 1.0 - float(masses[i, j, state])
-        return total
+        low, high = np.triu_indices(size, k=1)
+        states = np.where(matrix[low, high], 1, np.where(matrix[high, low], 2, 0))
+        if self.pair_exact:
+            masses = self.pair_masses()[low, high]
+            return float((1.0 - masses[np.arange(low.size), states]).sum()), 0.0
+        conditional = self.posterior._conditional
+        assert conditional is not None
+        forward = conditional[:, low, high]
+        backward = conditional[:, high, low]
+        agree = np.where(
+            states == 1, forward, np.where(states == 2, backward, 1 - forward - backward)
+        )
+        estimate = self.posterior._estimate((1.0 - agree).sum(axis=1), indicator=False)
+        return estimate.probability, estimate.mc_error
 
     def expected_shd_between_draws(self) -> float:
         masses = self.pair_masses()

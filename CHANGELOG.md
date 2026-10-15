@@ -104,7 +104,10 @@ Planned as 0.3.0.
   credible level (the mass ranked strictly above, ties half; a Bayesian tail
   probability, not a p-value), one `GraphClaim` per statement with its probability and
   Monte Carlo error, the class probability of a CPDAG, the expected SHD against the
-  between-draw baseline, and P(acyclic) under raw independent marginals. A bidirected
+  between-draw baseline (with the former's Monte Carlo error), and P(acyclic) under raw
+  independent marginals. When every draw agrees, a Monte Carlo error is the rule-of-three
+  bound `3 / draws` (`FeatureProbability.bound`) rather than 0, and under the exact
+  recursion the candidate's own share of its credible level is exact. A bidirected
   edge or latent node is listed as not assessable.
 - Effects over a posterior over DAGs (DEC-082 decision 6). `adjustment_probability(samples,
   treatment, outcome, adjustment)` is the posterior probability that a set satisfies the
@@ -112,12 +115,14 @@ Planned as 0.3.0.
   DAGs by the adjustment set identification picks, estimates once per set (the family
   default, seeded; `strategy=`, `learner=`, `rule="minimal"`) and returns an
   `AveragedEffect`: the `AdjustmentGroup`s (set, mass with its Monte Carlo error, DAG
-  count, estimate, standard error), the mixture mean and its variance by the law of
+  count, estimate, standard error), the mixture mean with its Monte Carlo error from the
+  masses, and its variance by the law of
   total variance, and the zero-effect (no directed path), unidentified (a variable the
   data lacks makes every set invalid) and truncated (beyond `max_sets`) masses, the last
   two left out of the mixture and reported.
 - The `BGe` score (`score="bge"`): the linear-Gaussian marginal likelihood of Geiger and
-  Heckerman with the Kuipers, Moffa and Heckerman correction, decomposable and
+  Heckerman with the Kuipers, Moffa and Heckerman correction and an empirical-Bayes prior
+  mean (the sample mean; BiDAG uses zero, which agrees on centred data), decomposable and
   score-equivalent, for `graph_posterior` and the score-based searches.
   `Score.marginal_likelihood` says whether a score is one (BDeu, BGe).
 

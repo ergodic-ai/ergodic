@@ -28,9 +28,10 @@ to exchange their graphs, accepted with probability
 Metropolis step on the product of the tempered targets, so the ``beta = 1``
 replica, the only one whose draws are kept, still targets ``pi``.
 
-**The chains.** Chain 0 starts from the best graph found before sampling (the
-greedy decode or the exact MAP); the others start from random DAGs drawn
-uniformly over each pair's possible states with cycle rejection. Every chain
+**The chains.** Chain 0 starts from the greedy decode (edge probabilities), or
+from a hill climb (a score, or a decode the knowledge rules out); the others
+start from random DAGs drawn uniformly over each pair's possible states with
+cycle rejection. Every chain
 runs ``warmup`` sweeps, then keeps one draw every ``thin`` sweeps, a sweep being
 one proposal per movable pair. Randomness comes only from the generator passed in.
 

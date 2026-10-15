@@ -228,6 +228,27 @@ def test_exact_draws_and_mcmc_estimate_the_credible_level_within_their_errors() 
     assert not any(claim.exact for claim in chained.claims)
 
 
+def test_exact_draws_use_the_candidates_exact_probability_in_its_level() -> None:
+    probs = _probs(size=5, seed=15)
+    samples = graph_posterior(probs, samples=800, seed=0)
+    best = evaluate_graph(samples.best_graph, samples)
+    own = best.diagnostics["candidate_probability"]
+    assert best.mass_above == 0.0
+    assert best.credible_level == pytest.approx(own / 2, abs=1e-12)
+    assert best.diagnostics["credible_level_error_is_bound"]
+    assert best.credible_level_error == pytest.approx(3 / 800)
+
+
+def test_expected_shd_carries_its_monte_carlo_error() -> None:
+    probs = _probs(size=5, seed=16)
+    candidate = graph_posterior(probs, samples=100, seed=0).best_graph
+    exact = evaluate_graph(candidate, probs, samples=100)
+    assert exact.expected_shd_error == 0.0
+    chained = evaluate_graph(candidate, probs, method="mcmc", samples=4000, seed=0)
+    assert chained.expected_shd_error is not None and chained.expected_shd_error > 0
+    assert abs(chained.expected_shd - exact.expected_shd) < 5 * chained.expected_shd_error + 1e-3  # type: ignore[operator]
+
+
 def test_p_acyclic_is_reported_for_independent_marginals_only() -> None:
     independent = _probs(size=5, seed=12, kind="independent")
     candidate = dag([], nodes=independent.variables)

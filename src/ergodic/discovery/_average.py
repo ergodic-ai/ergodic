@@ -86,6 +86,9 @@ class AveragedEffect:
         groups: One :class:`AdjustmentGroup` per estimated set (and the no-path
             group when it has mass), heaviest first.
         mean: The mixture mean over the identified, estimated mass.
+        mean_mc_error: The mean's Monte Carlo standard error from the posterior masses
+            alone (the estimates held fixed; their own sampling error is in
+            ``within_variance``); 0 when the masses are exact.
         variance: The mixture variance, ``within + between``.
         within_variance: The mass-weighted mean of the squared standard errors.
         between_variance: The mass-weighted variance of the group estimates.
@@ -102,6 +105,7 @@ class AveragedEffect:
     outcome: str
     groups: tuple[AdjustmentGroup, ...] = field(repr=False)
     mean: float
+    mean_mc_error: float
     variance: float | None
     within_variance: float | None
     between_variance: float
@@ -145,7 +149,8 @@ class AveragedEffect:
 
     def __repr__(self) -> str:
         spread = "" if self.std is None else f" (sd {self.std:.4g})"
-        left = 1.0 - self.identified_mass
+        left = max(0.0, 1.0 - self.identified_mass)
+        left = 0.0 if left < 1e-12 else left
         return (
             f"AveragedEffect({self.treatment} -> {self.outcome}: {self.mean:.4g}{spread} "
             f"over {self.identified_mass:.3g} of the mass, {len(self.groups)} groups, "
@@ -250,6 +255,9 @@ def average_effect(
         TypeError: ``samples`` or ``data`` has the wrong type.
         ValueError: Unknown variables, a bad ``rule`` or ``max_sets``, or no mass
             left to average.
+        NotImplementedError: From the estimator: the default (AIPW) and the other
+            binary-treatment estimators refuse a treatment that is not binary; pass
+            ``strategy="dml"`` (or ``"pliv"``) for a continuous one.
     """
     from ..data import TabularData
     from ..inference import estimate
@@ -340,6 +348,13 @@ def average_effect(
     weights = np.asarray([g.mass for g in groups]) / covered
     values = np.asarray([g.value for g in groups])
     mean = float(weights @ values)
+    # The mean is a ratio of two posterior expectations; linearized, its Monte Carlo
+    # error is that of the per-DAG value (effect - mean) * [covered] / covered mass.
+    per_dag = np.zeros(samples.adjacency.shape[0])
+    for group in groups:
+        members = distinct["no_path" if group.adjustment_set is None else group.adjustment_set]
+        per_dag[members] = (group.value - mean) / covered
+    mean_error = samples._estimate(per_dag, indicator=False).mc_error
     between = float(weights @ (values - mean) ** 2)
     errors = [g.std_error for g in groups]
     within: float | None
@@ -368,6 +383,7 @@ def average_effect(
         outcome=outcome,
         groups=tuple(groups),
         mean=mean,
+        mean_mc_error=mean_error,
         variance=None if within is None else within + between,
         within_variance=within,
         between_variance=between,

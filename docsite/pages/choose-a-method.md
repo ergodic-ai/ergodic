@@ -116,8 +116,10 @@ types: all continuous, all categorical, or a mix.
 | `"bge"` | `BGe` | Continuous data, linear Gaussian model, Bayesian score (the marginal likelihood). |
 | `"bic_mixed"`, `"mixed_bic"` | `MixedBIC` | A mix of column types. |
 
-BDeu and BGe are marginal likelihoods, so a score search returns their best DAG, and
-`graph_posterior(data, score="bge")` gives the posterior over DAGs behind it. See
+BDeu and BGe are marginal likelihoods, so a score search looks for their
+highest-scoring graph, the posterior mode under a uniform prior. The searches are
+heuristic except A*, and GES returns the mode's equivalence class as a CPDAG.
+`graph_posterior(data, score="bge")` gives the whole posterior over DAGs. See
 [Evaluate a candidate graph](evaluate-a-graph.md#get-a-posterior-from-data-with-a-score).
 
 ## Give GCM a learner
