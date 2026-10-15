@@ -54,9 +54,12 @@ def discover(
 
     ``method="welt:<model>"`` (for example ``"welt:arrow"``) runs a hosted Welt
     model through :func:`ergodic.welt.discover`, one paid Welt job. It needs
-    ``pip install "ergodic[welt]"``, takes no test, score, knowledge or
-    ``alpha``, and passes only ``client``, ``seed`` and ``timeout`` through the
-    keyword arguments; anything else raises before any request.
+    ``pip install "ergodic[welt]"``, takes no test, score or ``alpha``, and
+    passes only ``client``, ``seed``, ``timeout`` and ``decoder`` through the
+    keyword arguments; anything else raises before any request. ``knowledge``
+    is refused unless ``decoder=`` asks for local decoding of the model's edge
+    scores (:func:`ergodic.decode`), which is also what lets a non-DAG model
+    such as ``"welt:avici"`` return a (decoded) DAG.
     """
     if method.lower().startswith("welt:"):
         return _welt(
@@ -99,11 +102,11 @@ def _welt(
         raise ValueError(
             f"method {method!r} runs a Welt model; alpha is a local test setting and does not apply"
         )
-    local = sorted(set(kwargs) - {"client", "seed", "timeout"})
+    local = sorted(set(kwargs) - {"client", "seed", "timeout", "decoder"})
     if local:
         raise ValueError(
-            f"method {method!r} runs a Welt model and takes only client, seed and timeout; "
-            f"got {local}"
+            f"method {method!r} runs a Welt model and takes only client, seed, timeout "
+            f"and decoder; got {local}"
         )
     try:
         from ..welt import discover as welt_discover
