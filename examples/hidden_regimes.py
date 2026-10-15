@@ -248,5 +248,5 @@ print(report.to_frame())
 # `chain=MarkovChain(...)`. Raise the budgets for real runs. Compare two
 # likelihoods on one trace with `consensus()`; its cross-model amplitude rule is
 # an explicitly empty seam awaiting the volatility-switching likelihood. The
-# hidden-regime guides (https://ergodic.dev/recover-hidden-regimes.html and
-# https://ergodic.dev/certify-and-calibrate.html) document this surface.
+# hidden-regime guides (https://docs.ergodic.dev/recover-hidden-regimes.html and
+# https://docs.ergodic.dev/certify-and-calibrate.html) document this surface.

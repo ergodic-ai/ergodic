@@ -7,7 +7,7 @@ structural causal models, and Bayesian forecasting with drivers. ergodic runs
 locally; the optional `[welt]` extra calls the hosted Welt service. ergodic is
 pre-1.0, so the API can change between minor versions.
 
-**Documentation: [ergodic.dev](https://ergodic.dev)**
+**Documentation: [docs.ergodic.dev](https://docs.ergodic.dev)**
 
 ## Install
 
@@ -47,11 +47,11 @@ EffectEstimate(aipw, analytic: ate=0.7982, se=0.0333, 95% CI [0.733, 0.863], n=1
 ```
 
 The true effect, from the network's own tables, is 0.793: inside the interval. The
-[documentation](https://ergodic.dev) starts from this program and goes step by step.
+[documentation](https://docs.ergodic.dev) starts from this program and goes step by step.
 
 ## Links
 
-- [Documentation](https://ergodic.dev)
+- [Documentation](https://docs.ergodic.dev)
 - [Welt](https://welt.ergodic.dev): hosted models for prediction, causal discovery and
   forecasting
 - [Changelog](CHANGELOG.md), [contributing](CONTRIBUTING.md), [security](SECURITY.md)

@@ -74,7 +74,7 @@ To be released together with welt-client 0.13.
   anything is uploaded. Any failure after the paid run raises `WeltDecodeError`
   with the result and its scores attached. Without `decoder=` nothing changes:
   non-DAG models are still refused before paying.
-- A new documentation site at https://ergodic.dev, one page per task. Each guide
+- A new documentation site at https://docs.ergodic.dev, one page per task. Each guide
   runs one complete program on bundled data and shows its recorded output; the
   docs check reruns every program and compares, and a program that needs a Welt
   key is tested against a fake Welt service. The site is versioned, searchable,
@@ -146,7 +146,7 @@ To be released together with welt-client 0.13.
   than a `KeyError`. KNN used before `fit` raises `RuntimeError`, and `set_params`
   on the native KNN, OLS and logistic learners refuses unknown names, as sklearn
   does.
-- The documentation moved to https://ergodic.dev (Graphite builder); the MkDocs
+- The documentation moved to https://docs.ergodic.dev (Graphite builder); the MkDocs
   site is retired.
 
 ### Fixed

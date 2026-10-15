@@ -34,7 +34,7 @@ The suite includes PyMC tests. The first run compiles PyTensor's C code into
 
 ## Build the docs
 
-The documentation site at [ergodic.dev](https://ergodic.dev) is built from
+The documentation site at [docs.ergodic.dev](https://docs.ergodic.dev) is built from
 `docsite/` by the builder in `scripts/docsite`.
 
 ```bash

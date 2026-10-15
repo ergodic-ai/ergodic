@@ -66,10 +66,10 @@ neural = ["torch>=2.2"]
 foundation = ["torch>=2.2"]
 
 [project.urls]
-Homepage = "https://ergodic.dev"
-Documentation = "https://ergodic.dev"
+Homepage = "https://docs.ergodic.dev"
+Documentation = "https://docs.ergodic.dev"
 Source = "https://github.com/ergodic-ai/ergodic"
-Changelog = "https://ergodic.dev/changelog.html"
+Changelog = "https://docs.ergodic.dev/changelog.html"
 
 [dependency-groups]
 dev = [

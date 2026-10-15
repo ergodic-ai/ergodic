@@ -5,7 +5,7 @@
 # deploys site/ to GitHub Pages.
 # Before the first publish the owner must (1) allow the release tags (v*) in the
 # deployment rules of the `github-pages` environment, which by default admits only the
-# default branch, and (2) set the custom domain ergodic.dev in the Pages settings (the
+# default branch, and (2) set the custom domain docs.ergodic.dev in the Pages settings (the
 # build also writes CNAME). Actions are pinned by full commit SHA.
 name: Documentation
 on:

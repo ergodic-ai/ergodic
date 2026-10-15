@@ -165,7 +165,7 @@ github-pages due to environment protection rules") or goes live with no separate
    notes below), then click Verify. This TXT record changes nothing that is served.
 2. **Enable Pages with the Actions source:**
    `gh api -X POST repos/ergodic-ai/ergodic/pages -f build_type=workflow`
-   Until the custom domain is set in step 8, the site would serve at
+   Until the custom domain is set in step 8.3, the site would serve at
    `https://ergodic-ai.github.io/ergodic/`.
 3. **Gate the `github-pages` environment and allow release tags.** Same calls as
    step 2 (`$REVIEWER_ID` from there):
@@ -240,22 +240,25 @@ gh release create v0.2.0 -R ergodic-ai/ergodic --verify-tag --title "ergodic 0.2
   --notes-file <(awk '/^## \[0.2.0\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md)
 ```
 
-## 8. Docs live at ergodic.dev **[owner go]**
+## 8. Docs live at docs.ergodic.dev **[owner go]**
 
-### What ergodic.dev looks like today (checked 2026-10-14, read-only)
+The docs are served at `docs.ergodic.dev` (owner decision, 2026-10-15). The apex
+`ergodic.dev` and `www` stay unassigned for this release, with no redirect and no
+placeholder: the apex is reserved for a future Ergodic homepage (DEC-078).
+
+### What ergodic.dev looks like today (checked 2026-10-15, read-only)
 
 | Name | Records | Serves |
 | --- | --- | --- |
-| `ergodic.dev` (apex) | No A, AAAA or CNAME. TXT: Resend and Google site verification. MX: `10 inbound-smtp.eu-west-1.amazonaws.com`. No CAA. | Does not resolve (`curl: Could not resolve host`). |
-| `www.ergodic.dev` | Proxied through Cloudflare (104.21.86.169, 172.67.222.101) | HTTP 525 on https and 520 on http: Cloudflare can't reach a working origin. |
+| `ergodic.dev` (apex) | No A, AAAA or CNAME. TXT: Resend and Google site verification. MX: `10 inbound-smtp.eu-west-1.amazonaws.com`. No CAA. | Does not resolve. Leave it (reserved). |
+| `www.ergodic.dev` | CNAME `ergodic.ai`, proxied through Cloudflare | HTTP 525 on https and 520 on http. Not part of this release. |
 | `welt.ergodic.dev` | CNAME `ghs.googlehosted.com` | The Welt docs (Google-hosted mapping). Leave alone. |
-| `docs.ergodic.dev` | none | |
+| `docs.ergodic.dev` | none | The ergodic docs, after step 3. |
 
-The zone is on **Cloudflare** (`NS fish.ns.cloudflare.com`, `west.ns.cloudflare.com`),
-so records are changed in the Cloudflare dashboard of the account that owns
-`ergodic.dev`. It is not in Google Cloud DNS (the Cloud DNS API is not enabled on GCP
-project `ergodic`). Keep the MX and TXT records: the MX receives mail via Amazon SES
-and the TXT records verify Resend and Google.
+The zone is on **Cloudflare** (`NS fish.ns.cloudflare.com`, `west.ns.cloudflare.com`).
+It is not in Google Cloud DNS (the Cloud DNS API is not enabled on GCP project
+`ergodic`). Keep the MX and TXT records: the MX receives mail via Amazon SES and the
+TXT records verify Resend and Google.
 
 ### Steps
 
@@ -263,35 +266,29 @@ and the TXT records verify Resend and Google.
    `docs.yml` (`release: published`); approve its `github-pages` deployment in the
    Actions tab. If the run doesn't start or has to be repeated, use
    `gh workflow run docs.yml -R ergodic-ai/ergodic -f release_tag=v0.2.0`.
-2. **Set the custom domain:**
-   `gh api -X PUT repos/ergodic-ai/ergodic/pages -f cname=ergodic.dev`
+2. **Add the record in Cloudflare, proxy off ("DNS only", grey cloud)** so GitHub can
+   issue the certificate: `CNAME docs → ergodic-ai.github.io`. With an API token
+   scoped to the zone:
+
+   ```bash
+   ZONE=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+     "https://api.cloudflare.com/client/v4/zones?name=ergodic.dev" | jq -r '.result[0].id')
+   curl -s -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+     "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records" \
+     --data '{"type":"CNAME","name":"docs","content":"ergodic-ai.github.io","proxied":false,"ttl":1}'
+   ```
+
+3. **Set the custom domain:**
+   `gh api -X PUT repos/ergodic-ai/ergodic/pages -f cname=docs.ergodic.dev`
    (an Actions-deployed site ignores a `CNAME` file; the setting is what counts).
-3. **Add the apex records in Cloudflare, proxy off ("DNS only", grey cloud)** so
-   GitHub can issue the certificate:
-
-   | Type | Name | Content |
-   | --- | --- | --- |
-   | A | `@` | `185.199.108.153` |
-   | A | `@` | `185.199.109.153` |
-   | A | `@` | `185.199.110.153` |
-   | A | `@` | `185.199.111.153` |
-   | AAAA | `@` | `2606:50c0:8000::153` |
-   | AAAA | `@` | `2606:50c0:8001::153` |
-   | AAAA | `@` | `2606:50c0:8002::153` |
-   | AAAA | `@` | `2606:50c0:8003::153` |
-   | CNAME | `www` | `ergodic-ai.github.io` (replaces the current broken proxied record, DNS only) |
-
-   If the owner prefers a subdomain instead of the apex, add only
-   `CNAME docs → ergodic-ai.github.io` (DNS only) and use `docs.ergodic.dev` in step 2.
 4. **Wait for the certificate, then enforce HTTPS:**
    `gh api repos/ergodic-ai/ergodic/pages --jq '.https_certificate.state'` until
    `approved`, then `gh api -X PUT repos/ergodic-ai/ergodic/pages -F https_enforced=true`.
 5. **Check:**
 
    ```bash
-   dig +short ergodic.dev A     # the four 185.199.x.153 addresses
-   dig +short ergodic.dev AAAA
-   curl -sI https://ergodic.dev | head -3   # HTTP/2 200 from GitHub
+   dig +short docs.ergodic.dev CNAME          # ergodic-ai.github.io.
+   curl -sI https://docs.ergodic.dev | head -3   # HTTP/2 200 from GitHub
    ```
 
 6. The MkDocs site's source is gone in 0.2.0. Once the new site is live, the old
@@ -311,8 +308,8 @@ and the TXT records verify Resend and Google.
 - **The tag was pushed but nothing was uploaded** (a check or build failed): fix on
   `main`, then move the tag: `git tag -d v0.2.0 && git push origin :refs/tags/v0.2.0`,
   re-tag and push. If anything reached PyPI, never move the tag; bump the version.
-- **DNS or Pages misbehaves:** delete the A/AAAA/CNAME records added in step 8 (MX
-  and TXT untouched), or unpublish with
+- **DNS or Pages misbehaves:** delete the `docs` CNAME added in step 8 (MX and TXT
+  untouched), or unpublish with
   `gh api -X DELETE repos/ergodic-ai/ergodic/pages`.
 - **Visibility:** `gh repo edit ergodic-ai/ergodic --visibility private
   --accept-visibility-change-consequences` hides the repository again, but anything
