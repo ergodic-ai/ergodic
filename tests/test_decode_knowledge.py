@@ -30,10 +30,6 @@ from tests.test_decode import (
 from ergodic import DomainKnowledge, EdgeProbabilities, decode, identify_effect
 from ergodic.graph import dag
 
-# Broad statements on random matrices are strong conflicts by design; the warning
-# itself is tested below with pytest.warns.
-pytestmark = pytest.mark.filterwarnings("ignore:.*knowledge statement:UserWarning")
-
 Builder = Callable[[DomainKnowledge, float | None], DomainKnowledge]
 
 # One statement of every soft-capable type, each changing the research matrix's decode.
@@ -50,6 +46,13 @@ STATEMENTS: dict[str, Builder] = {
 }
 NEAR_ONE = 1.0 - 1e-9
 
+# For tests that state knowledge the model rejects on purpose (require D -> B, which the
+# model gives 0.05) or draw random matrices: the conflict warning is expected there and
+# is itself tested in test_strong_conflicts_are_listed_and_warned_once.
+EXPECTED_CONFLICTS = pytest.mark.filterwarnings(
+    "ignore:.*have a pair the model gives a probability below:UserWarning"
+)
+
 
 def _edges(result: Any) -> list[str]:
     return sorted(edge.glyph() for edge in result.graph.edges)
@@ -58,6 +61,7 @@ def _edges(result: Any) -> list[str]:
 # -- soft statements ---------------------------------------------------------------
 
 
+@EXPECTED_CONFLICTS
 @pytest.mark.parametrize("kind", sorted(STATEMENTS))
 @pytest.mark.parametrize(("method", "kwargs"), ALL_METHODS)
 def test_one_half_decodes_exactly_as_no_knowledge(
@@ -77,6 +81,7 @@ def test_one_half_decodes_exactly_as_no_knowledge(
 @pytest.mark.parametrize(
     ("method", "kwargs"), [("greedy", {}), ("greedy", {"threshold": 0.05}), ("exact_map", {})]
 )
+@EXPECTED_CONFLICTS
 def test_confidence_near_one_matches_the_hard_statement(
     kind: str, method: str, kwargs: dict[str, Any]
 ) -> None:
@@ -97,6 +102,7 @@ def test_near_one_matches_hard_on_independent_marginals_with_a_threshold() -> No
         assert soft.graph == hard.graph, kind
 
 
+@EXPECTED_CONFLICTS
 @pytest.mark.parametrize("method", ["greedy", "exact_map"])
 def test_a_soft_requirement_switches_on_once_and_stays_on(method: str) -> None:
     probs = pair_state()
@@ -120,6 +126,7 @@ def test_a_soft_forbid_switches_off_once_and_stays_off() -> None:
     assert not any(present[present.index(False) :])
 
 
+@EXPECTED_CONFLICTS
 def test_soft_statements_combine_and_pool_through_and() -> None:
     probs = pair_state()
     left = DomainKnowledge().forbid("A", "B", confidence=0.95)
@@ -146,6 +153,7 @@ def test_a_soft_statement_on_a_hard_pair_changes_nothing() -> None:
     ]
 
 
+@EXPECTED_CONFLICTS
 @pytest.mark.parametrize("size", [3, 4])
 def test_exact_map_is_exact_on_the_combined_score(size: int) -> None:
     rng = np.random.default_rng(100 + size)
@@ -189,6 +197,7 @@ def test_exact_map_is_exact_on_the_combined_score(size: int) -> None:
                 assert offsets - prior == pytest.approx(constant)
 
 
+@EXPECTED_CONFLICTS
 @pytest.mark.parametrize(("method", "kwargs"), ALL_METHODS)
 def test_soft_decoding_is_deterministic_pure_and_leaves_the_global_rng_alone(
     method: str, kwargs: dict[str, Any]
@@ -292,7 +301,8 @@ def test_the_audit_lists_each_statement_as_stated() -> None:
         .confound("A", "D")
         .restrict_to([("A", "B"), ("B", "C"), ("C", "D"), ("A", "D"), ("B", "D")], confidence=0.7)
     )
-    result = decode(pair_state(), "exact_map", knowledge=knowledge)
+    with pytest.warns(UserWarning, match=r"D -> B \(pair B, D: 0\.05\)"):
+        result = decode(pair_state(), "exact_map", knowledge=knowledge)
     audit = result.diagnostics["knowledge_audit"]
     assert [e["statement"] for e in audit] == [
         "tiers [A] < [B, C, D]",
@@ -307,6 +317,12 @@ def test_the_audit_lists_each_statement_as_stated() -> None:
         (1 - p[1, 0]) * (1 - p[2, 0]) * (1 - p[3, 0])
     )
     assert by["tiers [A] < [B, C, D]"]["confidence"] is None
+    # The weakest pair part: C -> A at 0.60 leaves 0.40 for "no edge into A from C".
+    assert by["tiers [A] < [B, C, D]"]["min_pair_probability"] == pytest.approx(1 - p[2, 0])
+    assert by["tiers [A] < [B, C, D]"]["conflict_pairs"] == ()
+    assert by["D -> B"]["min_pair_probability"] == pytest.approx(p[3, 1])
+    assert by["D -> B"]["conflict_pairs"] == (("B", "D"),)
+    assert [e["statement"] for e in result.diagnostics["knowledge_conflicts"]] == ["D -> B"]
     assert by["D -> B"]["probability"] == pytest.approx(p[3, 1])
     assert by["C is a root"]["probability"] == pytest.approx(
         (1 - p[0, 2]) * (1 - p[1, 2]) * (1 - p[3, 2])
@@ -317,6 +333,7 @@ def test_the_audit_lists_each_statement_as_stated() -> None:
     )
     confound = by["A <-> D"]
     assert confound["probability"] is None and "cannot price" in confound["note"]
+    assert confound["min_pair_probability"] is None and confound["conflict_pairs"] == ()
     assert confound["holds"] is True and confound["holds_without_knowledge"] is False
     assert by["tiers [A] < [B, C, D]"]["holds"] is True
     # Without knowledge the cycle edge C -> A is rejected, so the tiers hold there too.
@@ -346,6 +363,33 @@ def test_strong_conflicts_are_listed_and_warned_once() -> None:
     (conflict,) = result.diagnostics["knowledge_conflicts"]
     assert conflict["statement"] == "D -> B"
     assert conflict["probability"] == pytest.approx(0.05)
+
+
+def test_a_statement_over_many_pairs_conflicts_only_through_a_single_pair() -> None:
+    """The rule is per pair: an unlikely whole made of likely parts is no conflict."""
+    names = tuple(f"x{i}" for i in range(8))
+    values = np.full((8, 8), 0.15)
+    np.fill_diagonal(values, 0.0)
+    probs = EdgeProbabilities(names, values, kind="pair_state")
+    tiers = DomainKnowledge().with_tiers([names[:4], names[4:]], confidence=0.9)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        quiet = decode(probs, knowledge=tiers)
+    (entry,) = quiet.diagnostics["knowledge_audit"]
+    assert entry["probability"] == pytest.approx(0.85**16)  # 0.07: unlikely as a whole
+    assert entry["min_pair_probability"] == pytest.approx(0.85)
+    assert entry["conflict_pairs"] == () and quiet.diagnostics["knowledge_conflicts"] == ()
+    # One cross-tier edge against the order above 0.9 makes it a conflict.
+    strong = values.copy()
+    strong[5, 1], strong[1, 5] = 0.95, 0.01
+    root = DomainKnowledge().root("x1")
+    with pytest.warns(UserWarning, match=r"tiers .* \(pair x1, x5: 0\.05\)"):
+        loud = decode(EdgeProbabilities(names, strong, kind="pair_state"), knowledge=tiers & root)
+    by = {e["kind"]: e for e in loud.diagnostics["knowledge_audit"]}
+    assert by["tiers"]["conflict_pairs"] == (("x1", "x5"),)
+    assert by["root"]["conflict_pairs"] == (("x1", "x5"),)
+    assert by["root"]["min_pair_probability"] == pytest.approx(0.05)
+    assert len(loud.diagnostics["knowledge_conflicts"]) == 2
 
 
 def test_no_warning_and_empty_audit_without_conflicts_or_knowledge() -> None:

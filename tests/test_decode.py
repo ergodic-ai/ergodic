@@ -466,7 +466,9 @@ def test_every_decoder_honours_the_knowledge(method: str, kwargs: dict[str, Any]
         .root("C")
         .order("A", "D")
     )
-    result = decode(probs, method, knowledge=knowledge, **kwargs)
+    # D -> B has model probability 0.05: a strong conflict, warned about.
+    with pytest.warns(UserWarning, match="D -> B"):
+        result = decode(probs, method, knowledge=knowledge, **kwargs)
     assert knowledge.violations(result.graph) == []
     for candidate in result.candidates:
         assert knowledge.violations(candidate) == []
@@ -486,7 +488,10 @@ def test_tiers_and_a_skeleton_restriction_hold_for_every_decoder(
     result = decode(probs, method, knowledge=knowledge, **kwargs)
     assert knowledge.violations(result.graph) == []
     restricted = DomainKnowledge().restrict_to([("A", "B"), ("B", "C"), ("C", "D")])
-    graph = decode(probs, method, knowledge=restricted, **kwargs).graph
+    # The random matrix is dense: the pair A, F (outside the skeleton) is adjacent with
+    # probability above 0.9, a strong conflict.
+    with pytest.warns(UserWarning, match=r"skeleton pairs \(pair A, F"):
+        graph = decode(probs, method, knowledge=restricted, **kwargs).graph
     assert {frozenset((e.u, e.v)) for e in graph.edges} <= {
         frozenset("AB"),
         frozenset("BC"),
@@ -497,7 +502,8 @@ def test_tiers_and_a_skeleton_restriction_hold_for_every_decoder(
 def test_exact_map_under_knowledge_is_the_constrained_optimum() -> None:
     values = research_matrix()
     knowledge = DomainKnowledge().forbid("A", "B").require("D", "A")
-    result = decode(pair_state(), "exact_map", knowledge=knowledge)
+    with pytest.warns(UserWarning, match="D -> A"):  # model probability 0.05
+        result = decode(pair_state(), "exact_map", knowledge=knowledge)
     feasible = [
         g
         for g in all_dags(4)

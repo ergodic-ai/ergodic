@@ -445,9 +445,11 @@ def test_decoding_applies_knowledge_locally_and_samplers_take_their_seed() -> No
     fake = _decoding_fake()
     knowledge = ergodic.DomainKnowledge().forbid("Z", "X").require("W", "Y")
     with fake.client() as client:
-        result = welt_discover(
-            continuous(), "avici", decoder="greedy", knowledge=knowledge, client=client
-        )
+        # W -> Y is required against a 0.05 score: a strong conflict, warned about.
+        with pytest.warns(UserWarning, match="W -> Y"):
+            result = welt_discover(
+                continuous(), "avici", decoder="greedy", knowledge=knowledge, client=client
+            )
         sampled = welt_discover(
             continuous(),
             "avici",

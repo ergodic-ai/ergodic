@@ -226,10 +226,11 @@ Identification(frontdoor: P(slippery | do(sprinkler)) = sum_m P(m | sprinkler) s
 - **Step 2.** The model gives `rain --> wet` 0.91. A 0.8 belief that it isn't there
   doesn't outweigh that, so the edge stays.
 - **Step 3.** The audit has one entry per statement, as you wrote it. `model` is the
-  model's probability that the statement holds; `no rain -> wet` gets 0.09. Anything
-  below 0.1 is a strong conflict: it's listed in `knowledge_conflicts` and `decode`
-  warns once. `knowledge_cost` is how much log score the knowledge cost against a
-  decode without it.
+  model's probability that the statement holds; `no rain -> wet` gets 0.09. A
+  statement is a strong conflict when the model gives one of its pairs less than 0.1,
+  as here: it's listed in `knowledge_conflicts` and `decode` warns once.
+  `knowledge_cost` is how much log score the knowledge cost against a decode without
+  it.
 - **Step 4.** `confound` doesn't change the directed edges. It adds
   `sprinkler <-> slippery`, so the result is an ADMG, and identification reads it as
   one: the effect is still identified, by the front door through `wet`.
@@ -260,13 +261,17 @@ combined score exactly. `knowledge.log_odds(variables)` shows the weights and
 
 | Key | What it holds |
 | --- | --- |
-| `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `holds`, `holds_without_knowledge`. |
-| `knowledge_conflicts` | The entries the model gives less than 0.1. |
+| `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `min_pair_probability`, `conflict_pairs`, `holds`, `holds_without_knowledge`. |
+| `knowledge_conflicts` | The entries with at least one conflict pair. |
 | `knowledge_cost` | The knowledge-free decode's score minus this one's. Never negative for `"exact_map"`; the other decoders can come out negative. |
 
-The model's probability treats each pair on its own, so a statement about many pairs
-(tiers, a root, `restrict_to`) can get a low number even when no single pair is
-surprising. `holds_without_knowledge` comes from a second decode with the same
+`probability` is the chance of the whole statement, with each pair taken on its own,
+so a statement about many pairs (tiers, a root, `restrict_to`) can get a low number
+even when no single pair is surprising. That's why conflicts are judged pair by pair:
+`min_pair_probability` is the smallest chance the model gives the statement's part on
+one pair, and `conflict_pairs` lists the pairs below 0.1, weakest first. For tiers
+that's an edge against the order the model puts above 0.9; for `root("x")`, an edge
+into `x` above 0.9. `holds_without_knowledge` comes from a second decode with the same
 settings and seed but no knowledge. Order and tier statements are read pair by pair
 here, as the decoders weigh them.
 

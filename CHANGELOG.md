@@ -36,11 +36,12 @@ Planned as 0.3.0.
   `L__a__b`. `identify_effect` reads both. `diagnostics` add `graph_kind`,
   `confounded_pairs` and `latent_confounders`.
 - A knowledge audit on every decode with knowledge: `diagnostics["knowledge_audit"]`
-  has one entry per statement as stated (the model's probability that it holds,
-  whether it holds in the decoded graph and in a knowledge-free decode with the same
-  settings and seed), `knowledge_cost` the score the knowledge cost, and
-  `knowledge_conflicts` the statements the model gives under 0.1, which also raise
-  one `UserWarning`. `n_hard_statements` and `n_soft_statements` count them.
+  has one entry per statement as stated (the model's probability that it holds, the
+  weakest of its pairs and the pairs below 0.1, whether it holds in the decoded graph
+  and in a knowledge-free decode with the same settings and seed), `knowledge_cost`
+  the score the knowledge cost, and `knowledge_conflicts` the statements with a pair
+  the model gives under 0.1, which also raise one `UserWarning`.
+  `n_hard_statements` and `n_soft_statements` count them.
 
 ### Changed
 - `ergodic.welt.discover(data, model, knowledge=k)` without `decoder=` decodes with

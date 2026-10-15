@@ -55,7 +55,7 @@ PROBABILITY_FLOOR: Final = 1e-12
 DECODED_NOTE: Final = "not a graph posterior; orientation not certified"
 DEFAULT_MAX_NODES: Final = 20
 CONFLICT_PROBABILITY: Final = 0.1
-"""A statement the model gives less than this probability is a strong conflict."""
+"""A statement is a strong conflict when the model gives one of its pairs less than this."""
 
 
 @dataclass(frozen=True)
@@ -160,18 +160,25 @@ class DecodeResult(DiscoveryResult):
     - ``knowledge_audit``: one entry per statement as stated
       (:meth:`~ergodic.DomainKnowledge.statements`), a dict with ``statement``
       (readable text), ``kind``, ``confidence`` (``None`` for hard),
-      ``probability`` (the model's chance the statement holds, from the input's
-      pair states with pairs taken as independent; ``None`` for a confounder,
-      which no edge state expresses, with the reason in ``note``), ``holds`` (in
-      ``graph``) and ``holds_without_knowledge`` (in a decode with the same
-      settings and seed but no knowledge). Statements are read pair by pair, as
-      the decoders weigh them: an order or tier holds when no direct edge runs
-      against it.
+      ``probability`` (the model's chance the whole statement holds, from the
+      input's pair states with pairs taken as independent), ``min_pair_probability``
+      (the smallest chance among the pairs it covers that the statement's part on
+      that pair holds), ``conflict_pairs`` (the pairs whose part gets less than
+      0.1, weakest first), ``holds`` (in ``graph``) and ``holds_without_knowledge``
+      (in a decode with the same settings and seed but no knowledge). A confounder,
+      which no edge state expresses, has ``None`` probabilities, no conflict pairs
+      and the reason in ``note``. Statements are read pair by pair, as the
+      decoders weigh them: an order or tier holds when no direct edge runs against
+      it.
     - ``knowledge_cost``: the knowledge-free decode's ``objective`` minus this
       one's. Non-negative for ``exact_map``; the other decoders are not exact on
       the score, so it can be negative.
-    - ``knowledge_conflicts``: the audit entries the model gives a probability
-      below 0.1. Any such entry also raises one ``UserWarning``.
+    - ``knowledge_conflicts``: the audit entries with at least one conflict pair,
+      a pair the model gives less than 0.1 for the statement's part on it (for
+      tiers, an edge against the order above 0.9; for ``root(x)``, some
+      ``P(v -> x)`` above 0.9). Any such entry also raises one ``UserWarning``.
+      The whole-statement ``probability`` does not decide it: a statement over
+      many pairs can be unlikely as a whole with no pair surprising.
 
     Without knowledge these are ``()``, ``None`` and ``()``.
 
@@ -353,8 +360,9 @@ def decode(
     With knowledge, the decode runs a second time without it (same settings and
     seed) and ``diagnostics`` records the audit: per statement, the model's
     probability that it holds and whether it holds with and without the
-    knowledge, the score the knowledge cost, and the strong conflicts (model
-    probability below 0.1), which also raise one ``UserWarning``.
+    knowledge, the score the knowledge cost, and the strong conflicts (a pair
+    the statement covers whose part the model gives less than 0.1), which also
+    raise one ``UserWarning``.
 
     Args:
         probabilities: The edge probabilities to decode.
@@ -417,18 +425,17 @@ def decode(
         free_graph = free.graphs[free.chosen]
         cost = _pair_log_score(free_graph, source, PROBABILITY_FLOOR) - objective
         audit = _audit(statements, names, source, run.graphs[run.chosen], free_graph)
-        conflicts = tuple(
-            entry
-            for entry in audit
-            if entry["probability"] is not None and entry["probability"] < CONFLICT_PROBABILITY
-        )
+        conflicts = tuple(entry for entry in audit if entry["conflict_pairs"])
         if conflicts:
             listed = "; ".join(
-                f"{entry['statement']} ({entry['probability']:.3g})" for entry in conflicts
+                f"{entry['statement']} (pair {entry['conflict_pairs'][0][0]}, "
+                f"{entry['conflict_pairs'][0][1]}: {entry['min_pair_probability']:.3g})"
+                for entry in conflicts
             )
             warnings.warn(
-                f"{len(conflicts)} knowledge statement(s) get a model probability below "
-                f"{CONFLICT_PROBABILITY:g}: {listed}. See diagnostics['knowledge_audit']",
+                f"{len(conflicts)} knowledge statement(s) have a pair the model gives a "
+                f"probability below {CONFLICT_PROBABILITY:g}: {listed}. "
+                "See diagnostics['knowledge_audit']",
                 UserWarning,
                 stacklevel=2,
             )
@@ -731,6 +738,8 @@ def _audit(
         if statement.kind == "confound":
             entry.update(
                 probability=None,
+                min_pair_probability=None,
+                conflict_pairs=(),
                 holds=True,
                 holds_without_knowledge=False,
                 note="a hidden common cause is not an edge state, so the edge "
@@ -750,13 +759,20 @@ def _audit(
             current = satisfied.setdefault((low, high), [True, True, True])
             for state in range(3):
                 current[state] = current[state] and states[state]
-        probability = 1.0
+        probability = weakest = 1.0
+        offending: list[tuple[float, str, str]] = []
         for (low, high), mask in sorted(satisfied.items()):
             forward, reverse = float(source[low, high]), float(source[high, low])
             masses = (max(0.0, 1.0 - forward - reverse), forward, reverse)
-            probability *= min(1.0, sum(m for m, keep in zip(masses, mask, strict=True) if keep))
+            part = min(1.0, sum(m for m, keep in zip(masses, mask, strict=True) if keep))
+            probability *= part
+            weakest = min(weakest, part)
+            if part < CONFLICT_PROBABILITY:
+                offending.append((part, names[low], names[high]))
         entry.update(
             probability=probability,
+            min_pair_probability=weakest,
+            conflict_pairs=tuple((a, b) for _, a, b in sorted(offending)),
             holds=bool(holds),
             holds_without_knowledge=bool(holds_free),
             note=None,
