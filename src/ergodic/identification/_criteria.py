@@ -109,14 +109,24 @@ def _mixed_face_hint(graph: MixedGraph) -> str:
     Only advice: the graph is still refused. The checks follow the marks so a
     partially directed graph is never pointed at the MAG or PAG face, where an
     undirected edge would mean selection bias rather than an undecided
-    orientation.
+    orientation. The face a graph should take depends on where it came from,
+    which the graph does not record, so a graph that fits both a single-world
+    face and the MAG face gets both readings, each with its condition: an FCI
+    or RFCI result means ancestry, and its directed edges can hide
+    confounding, so re-facing it as a DAG or ADMG would be unsound.
     """
     edges = graph.edges
+    mag_reading = (
+        "; if it came from FCI or RFCI (or otherwise means ancestry, where a "
+        "directed edge can hide confounding), re-face it with graph.as_kind('mag') "
+        "instead, which identification reads as an equivalence class"
+    )
     if graph.is_dag():
         return (
-            "every edge is directed and there is no directed cycle (PC returns "
-            "this when domain knowledge orients every edge), so if you read it "
-            "as one causal world, re-face it with graph.as_kind('dag')"
+            "every edge is directed and there is no directed cycle. If it came "
+            "from a search that assumes no hidden confounding (PC or GES with "
+            "domain knowledge orienting every edge, say) and you read it as one "
+            "causal world, re-face it with graph.as_kind('dag')" + mag_reading
         )
     if all(e.is_directed or e.is_undirected for e in edges):
         if graph.is_cpdag():
@@ -134,20 +144,21 @@ def _mixed_face_hint(graph: MixedGraph) -> str:
         count = "1 edge is" if len(undirected) == 1 else f"{len(undirected)} edges are"
         return (
             f"it is partially directed ({count} undirected, such as "
-            f"{undirected[0]!r}) and is neither a dag nor a cpdag (PC returns "
-            "this when domain knowledge orients edges the data leaves open). "
-            "Orient the rest with more knowledge (DomainKnowledge.require) and "
-            "re-face with graph.as_kind('dag'), take one member with "
-            "ergodic.graph.consistent_extension(graph) (a dag; the answer then "
-            "holds for that member only), or rediscover without the orienting "
-            "knowledge to keep the cpdag face"
+            f"{undirected[0]!r}) and is neither a dag nor a cpdag, which is what "
+            "a search such as PC can return when domain knowledge orients edges "
+            "the data leaves open. Orient the rest with more knowledge "
+            "(DomainKnowledge.require) and re-face with graph.as_kind('dag'), "
+            "take one member with ergodic.graph.consistent_extension(graph) (a "
+            "dag; the answer then holds for that member only), or rediscover "
+            "without the orienting knowledge, which usually keeps the cpdag face"
         )
     if graph.is_admg():
-        return (
-            "its edges are directed or bidirected with no directed cycle, so if "
-            "you read it as one causal world with hidden confounders, re-face it "
-            "with graph.as_kind('admg')"
+        single = (
+            "its edges are directed or bidirected with no directed cycle. If you "
+            "read it as one causal world whose only hidden confounding is the "
+            "drawn <-> edges, re-face it with graph.as_kind('admg')"
         )
+        return single + (mag_reading if graph.is_mag() else "")
     for kind in (GraphKind.PAG, GraphKind.MAG):
         try:
             graph.validate(kind)
@@ -158,11 +169,13 @@ def _mixed_face_hint(graph: MixedGraph) -> str:
             f"equivalence class, re-face it with graph.as_kind('{kind.value}')"
         )
     return (
-        "its marks satisfy no face's rules (FCI and RFCI return this when the "
-        "data and the orientation rules disagree, with diagnostics['pag_valid'] "
-        "at 0.0), so identification has no certified reading of it; rerun "
-        "discovery with more data or another alpha, or write the graph you "
-        "believe with dag(), admg(), or pag()"
+        "its marks satisfy no face's rules. If the search ran with domain "
+        "knowledge, the marks the knowledge seeded are the likely cause (FCI and "
+        "RFCI keep them even where the class disagrees, and report "
+        "diagnostics['pag_valid'] at 0.0): rerun without that knowledge, which "
+        "usually returns the class face. Otherwise the data and the orientation "
+        "rules disagree: rerun with more data or another alpha, or write the "
+        "graph you believe with dag(), admg(), or pag()"
     )
 
 

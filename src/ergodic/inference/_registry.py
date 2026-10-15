@@ -171,12 +171,12 @@ def cate_estimator_for(strategy: str | None = None) -> type[CausalEstimator]:
     if name in _CATE_NEURAL:
         raise NotImplementedError(
             f"the neural CATE learner {name!r} needs the optional 'neural' extra "
-            "(pip install ergodic[neural]); it is a reserved seam and not built yet"
+            "(pip install 'ergodic[neural]'); it is a reserved seam and not built yet"
         )
     if name in _CATE_FOUNDATION:
         raise NotImplementedError(
             f"the foundation-model CATE learner {name!r} needs the optional 'foundation' "
-            "extra (pip install ergodic[foundation]); it is a reserved seam and not built yet"
+            "extra (pip install 'ergodic[foundation]'); it is a reserved seam and not built yet"
         )
     allowed = ", ".join(sorted(_CATE_BY_NAME))
     raise ValueError(f"unknown CATE method {strategy!r}; use one of {allowed}, or 'auto'")

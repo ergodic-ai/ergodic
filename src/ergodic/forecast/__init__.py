@@ -30,7 +30,7 @@ forecasts a horizon (:class:`ForecastModel`) can be backtested, so a baseline,
 the Bayesian forecaster, and somebody else's model all land in one table.
 
 pymc is imported inside the methods that sample, so the bare install never loads
-it; ``pip install ergodic[forecast]`` adds it. Sampling runs through PyMC's JAX
+it; ``pip install 'ergodic[forecast]'`` adds it. Sampling runs through PyMC's JAX
 backend when jax and numpyro are installed, which the engine spike measured at
 about four times the C backend on this model.
 

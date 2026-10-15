@@ -20,15 +20,29 @@ from ergodic import (
     mixed,
     tabular,
 )
-from ergodic.discovery import GCM, PC, DSeparationOracle
+from ergodic.discovery import BIC, FCI, GCM, GES, PC, DSeparationOracle
 from ergodic.graph import consistent_extension, dag
 from ergodic.inference.learners import OLS
 
 PREFIX = "identification needs a verified graph face (dag, admg, mag, cpdag, or pag), not 'mixed'; "
+MAG_READING = (
+    "; if it came from FCI or RFCI (or otherwise means ancestry, where a directed "
+    "edge can hide confounding), re-face it with graph.as_kind('mag') instead, which "
+    "identification reads as an equivalence class"
+)
 DAG_HINT = (
-    "every edge is directed and there is no directed cycle (PC returns this when "
-    "domain knowledge orients every edge), so if you read it as one causal world, "
-    "re-face it with graph.as_kind('dag')"
+    "every edge is directed and there is no directed cycle. If it came from a search "
+    "that assumes no hidden confounding (PC or GES with domain knowledge orienting "
+    "every edge, say) and you read it as one causal world, re-face it with "
+    "graph.as_kind('dag')" + MAG_READING
+)
+NO_FACE_HINT = (
+    "its marks satisfy no face's rules. If the search ran with domain knowledge, the "
+    "marks the knowledge seeded are the likely cause (FCI and RFCI keep them even "
+    "where the class disagrees, and report diagnostics['pag_valid'] at 0.0): rerun "
+    "without that knowledge, which usually returns the class face. Otherwise the data "
+    "and the orientation rules disagree: rerun with more data or another alpha, or "
+    "write the graph you believe with dag(), admg(), or pag()"
 )
 
 
@@ -36,12 +50,13 @@ def _partial_hint(n: int, example: str) -> str:
     count = "1 edge is" if n == 1 else f"{n} edges are"
     return (
         f"it is partially directed ({count} undirected, such as {example!r}) and is "
-        "neither a dag nor a cpdag (PC returns this when domain knowledge orients "
-        "edges the data leaves open). Orient the rest with more knowledge "
-        "(DomainKnowledge.require) and re-face with graph.as_kind('dag'), take one "
-        "member with ergodic.graph.consistent_extension(graph) (a dag; the answer "
-        "then holds for that member only), or rediscover without the orienting "
-        "knowledge to keep the cpdag face"
+        "neither a dag nor a cpdag, which is what a search such as PC can return when "
+        "domain knowledge orients edges the data leaves open. Orient the rest with "
+        "more knowledge (DomainKnowledge.require) and re-face with "
+        "graph.as_kind('dag'), take one member with "
+        "ergodic.graph.consistent_extension(graph) (a dag; the answer then holds for "
+        "that member only), or rediscover without the orienting knowledge, which "
+        "usually keeps the cpdag face"
     )
 
 
@@ -88,6 +103,53 @@ def test_pc_with_partial_knowledge_names_the_partially_directed_options() -> Non
     assert discover(data, method="pc").graph.kind.value == "cpdag"
 
 
+def _confounded_world() -> pd.DataFrame:
+    # A latent L confounds x and y; the true effect of x on y is 1.0.
+    rng = np.random.default_rng(0)
+    n = 4000
+    latent = rng.normal(size=n)
+    z = rng.normal(size=n)
+    w = rng.normal(size=n)
+    x = z + latent + rng.normal(size=n)
+    y = 1.0 * x + latent + w + rng.normal(size=n)
+    return pd.DataFrame({"z": z, "x": x, "y": y, "w": w})
+
+
+@pytest.mark.parametrize("method", ["fci", "rfci"])
+def test_fci_with_required_edges_points_at_the_mag_reading(method: str) -> None:
+    # Review finding F1: knowledge seeds directed edges into an FCI/RFCI result,
+    # which stays mixed. Its edges mean ancestry, so the DAG reading is unsound
+    # (it adjusts a confounded effect to about 1.5) and the MAG reading is right.
+    data = tabular(_confounded_world())
+    knowledge = DomainKnowledge().require("z", "x").require("x", "y").require("w", "y")
+    result = discover(data, method=method, knowledge=knowledge)
+    assert result.graph.kind.value == "mixed"
+    assert result.diagnostics["pag_valid"] == 0.0
+    with pytest.raises(ValueError) as info:
+        identify_effect(result.graph, "x", "y")
+    assert str(info.value) == PREFIX + DAG_HINT
+    assert identify_effect(result.graph.as_kind("mag"), "x", "y").strategy == "none"
+    unsound = estimate_effect(result.graph.as_kind("dag"), data, "x", "y", strategy="dml")
+    assert unsound.value > 1.3  # the bias the MAG reading guards against
+
+
+def test_fci_with_tiers_that_fit_no_face_names_the_knowledge() -> None:
+    # Review finding F4: strong data, tier knowledge, and FCI keeps a seeded mark.
+    rng = np.random.default_rng(0)
+    n = 4000
+    x = rng.normal(size=n)
+    m = 0.8 * x + rng.normal(size=n)
+    y = 0.7 * m + rng.normal(size=n)
+    data = tabular(pd.DataFrame({"X": x, "M": m, "Y": y}))
+    knowledge = DomainKnowledge().with_tiers([["X"], ["M"], ["Y"]])
+    result = discover(data, method="fci", knowledge=knowledge)
+    assert result.graph.kind.value == "mixed"
+    with pytest.raises(ValueError) as info:
+        identify_effect(result.graph, "X", "Y")
+    assert str(info.value) == PREFIX + NO_FACE_HINT
+    assert discover(data, method="fci").graph.kind.value == "pag"
+
+
 @pytest.mark.parametrize(
     ("edges", "hint"),
     [
@@ -106,9 +168,9 @@ def test_pc_with_partial_knowledge_names_the_partially_directed_options() -> Non
         ),
         (
             ["X -> Y", "Y <-> Z"],
-            "its edges are directed or bidirected with no directed cycle, so if you "
-            "read it as one causal world with hidden confounders, re-face it with "
-            "graph.as_kind('admg')",
+            "its edges are directed or bidirected with no directed cycle. If you read "
+            "it as one causal world whose only hidden confounding is the drawn <-> "
+            "edges, re-face it with graph.as_kind('admg')" + MAG_READING,
         ),
         (
             ["X o-> Y", "Z o-> Y"],
@@ -122,11 +184,7 @@ def test_pc_with_partial_knowledge_names_the_partially_directed_options() -> Non
         ),
         (
             ["X o-> Y"],
-            "its marks satisfy no face's rules (FCI and RFCI return this when the data "
-            "and the orientation rules disagree, with diagnostics['pag_valid'] at 0.0), "
-            "so identification has no certified reading of it; rerun discovery with "
-            "more data or another alpha, or write the graph you believe with dag(), "
-            "admg(), or pag()",
+            NO_FACE_HINT,
         ),
     ],
 )
@@ -141,29 +199,65 @@ def test_mixed_refusal_names_the_face_it_fits(edges: list[str], hint: str) -> No
 # -- a bound test takes its data in one place ----------------------------------
 
 
+def _bound_message(algorithm: str) -> str:
+    return (
+        "GCM is already bound to its own data, but this run was handed data too (by "
+        "fit, or by discover, which always passes it); give the data in one place "
+        f"only: keep the bound test and fit with no data, e.g. {algorithm}(test=GCM("
+        f"data, ...)).fit(), or build the test unbound and pass the data, e.g. "
+        f"{algorithm}(test=GCM(...)).fit(data) or discover(data, method=..., "
+        "test=GCM(...))"
+    )
+
+
 def test_bound_gcm_with_data_at_fit_names_both_usages() -> None:
     rng = np.random.default_rng(0)
     data = tabular({"A": rng.normal(size=40), "B": rng.normal(size=40)})
     with pytest.raises(ValueError) as info:
         PC(test=GCM(data, learner=OLS())).fit(data)
-    assert str(info.value) == (
-        "GCM is already bound to its own data, so it takes no data here; give the "
-        "data in one place only: keep the bound test and call fit() with no data, "
-        "e.g. PC(test=GCM(data, ...)).fit(), or build the test unbound and pass the "
-        "data to fit or discover, e.g. PC(test=GCM(...)).fit(data) or "
-        "discover(data, method='pc', test=GCM(...))"
-    )
+    assert str(info.value) == _bound_message("PC")
+    with pytest.raises(ValueError) as info:
+        FCI(test=GCM(data, learner=OLS())).fit(data)
+    assert str(info.value) == _bound_message("FCI")
+    with pytest.raises(ValueError) as info:
+        discover(data, method="fci", test=GCM(data, learner=OLS()))
+    assert str(info.value) == _bound_message("FCI")
     # Both named usages run.
     assert PC(test=GCM(data, learner=OLS())).fit().graph.nodes == {"A", "B"}
     assert PC(test=GCM(learner=OLS())).fit(data).graph.nodes == {"A", "B"}
     assert discover(data, method="pc", test=GCM(learner=OLS())).graph.nodes == {"A", "B"}
 
 
-def test_oracle_with_data_at_fit_says_it_needs_none() -> None:
+def test_oracle_with_data_says_it_needs_none() -> None:
     rng = np.random.default_rng(0)
     data = tabular({"A": rng.normal(size=8), "B": rng.normal(size=8)})
-    with pytest.raises(ValueError) as info:
-        PC(DSeparationOracle(dag(["A -> B"]))).fit(data=data)
-    assert str(info.value) == (
-        "DSeparationOracle is already bound and answers without data; call fit() with no data"
+    oracle = DSeparationOracle(dag(["A -> B"]))
+    expected = (
+        "DSeparationOracle answers from its graph and takes no data, but this run was "
+        "handed data (by fit, or by discover, which always passes it); run the "
+        "algorithm with no data, e.g. {}(DSeparationOracle(graph)).fit()"
     )
+    with pytest.raises(ValueError) as info:
+        PC(oracle).fit(data=data)
+    assert str(info.value) == expected.format("PC")
+    with pytest.raises(ValueError) as info:
+        discover(data, method="fci", test=oracle)
+    assert str(info.value) == expected.format("FCI")
+    assert PC(oracle).fit().graph.nodes == {"A", "B"}
+
+
+def test_bound_score_with_other_data_names_both_usages() -> None:
+    rng = np.random.default_rng(0)
+    data = tabular({"A": rng.normal(size=40), "B": rng.normal(size=40)})
+    other = tabular({"A": rng.normal(size=30), "B": rng.normal(size=30)})
+    with pytest.raises(ValueError) as info:
+        GES(score=BIC(data)).fit(other)
+    assert str(info.value) == (
+        "BIC is bound to a different dataset than the one this run was handed (rows "
+        "or variables differ after dropna); give the data in one place only: keep the "
+        "bound score and fit with no data, e.g. GES(score=BIC(data)).fit(), or build "
+        "the score unbound and pass the data, e.g. GES(score=BIC()).fit(data) or "
+        "discover(data, method=..., score=BIC())"
+    )
+    assert GES(score=BIC(data)).fit().graph.nodes == {"A", "B"}
+    assert GES(score=BIC()).fit(data).graph.nodes == {"A", "B"}

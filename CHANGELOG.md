@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - Unreleased
 
-To be released together with Welt (welt-api DEC-078, API-140).
+To be released together with Welt.
 
 ### Added
 - A versioned graph format. `MixedGraph.to_dict()` writes
@@ -24,25 +24,33 @@ To be released together with Welt (welt-api DEC-078, API-140).
 - ergodic.welt optional Welt integration (API-141)
 
 ### Changed
-- Identification's refusal of a `mixed` graph now says how to fix it. A fully
-  directed acyclic graph (what PC returns when domain knowledge orients every
-  edge) points at `graph.as_kind("dag")`; a partially directed graph lists the
-  options (orient the rest with more knowledge, take one member with
-  `consistent_extension`, or rediscover without the orienting knowledge to keep
-  the CPDAG face); a graph that fits the ADMG, CPDAG, MAG, or PAG rules names
-  that face; anything else says no face fits. Which graphs identification
-  accepts is unchanged, and `estimate_effect` and `cate` raise the same
-  message.
-- A bound conditional-independence test handed data at fit (for example
-  `PC(test=GCM(data)).fit(data)`) still raises, and the message now names both
-  correct usages: `PC(test=GCM(data, ...)).fit()`, or an unbound test with the
-  data at fit or `discover`. The `discover` docstring now says it binds an
-  unbound test.
+- Identification's refusal of a `mixed` graph now says how to fix it, reading
+  the graph's marks. A fully directed acyclic graph gets two readings with their
+  conditions: `graph.as_kind("dag")` for a search that assumes no hidden
+  confounding (PC or GES with knowledge orienting every edge), and
+  `graph.as_kind("mag")` for an FCI or RFCI result, whose directed edges mean
+  ancestry and can hide confounding. A directed-plus-bidirected graph gets the
+  same pair with `"admg"`. A partially directed graph lists the options (orient
+  the rest with more knowledge, take one member with `consistent_extension`, or
+  rediscover without the orienting knowledge); a graph that fits the CPDAG, MAG,
+  or PAG rules names that face; a graph that fits none names seeded domain
+  knowledge as the likely cause. Which graphs identification accepts is
+  unchanged, and `estimate_effect` and `cate` raise the same message.
+- A bound conditional-independence test or score handed data it was not bound
+  to (for example `FCI(test=GCM(data)).fit(data)`) still raises, and the message
+  now names the algorithm and both correct usages: fit the algorithm with no
+  data, or build the test or score unbound and pass the data to `fit` or
+  `discover`. A `DSeparationOracle` handed data says it takes none. The
+  `discover` docstring now says it binds an unbound test.
+- Install hints in error messages and module docs quote their extras
+  (`pip install 'ergodic[scm]'`), which zsh would otherwise read as a glob.
 
 ### Fixed
 - Docs: the GCM example in the discovery guide passed data twice and raised;
   the end-to-end discover-then-estimate example passed a `mixed` graph to
-  `estimate_effect` and now re-faces it with `as_kind("dag")`; the graph guide's
+  `estimate_effect` and now re-faces it with `as_kind("dag")`, and says an FCI
+  result goes in as it is or, when knowledge leaves it `mixed`, as a MAG and
+  never a DAG; the graph guide's
   `as_kind` example imports `mixed`. The graph guide documents the format field.
 - The README quotes the install extras (`pip install 'ergodic[bayes]'`), which
   zsh would otherwise read as a glob.

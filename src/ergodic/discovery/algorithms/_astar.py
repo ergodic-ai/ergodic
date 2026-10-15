@@ -97,7 +97,7 @@ class AStar:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Search for a highest-scoring DAG and return it with its provenance."""
-        score = resolve_score(self._score, data)
+        score = resolve_score(self._score, data, algorithm=type(self).__name__)
         variables = list(score.variables)
         if len(variables) > self._node_limit:
             raise ValueError(

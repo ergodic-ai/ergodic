@@ -18,7 +18,7 @@ determine.
 PyMC is an optional dependency. Importing this package never imports pymc; the
 ``import pymc`` lives inside the methods that fit or query, so the bare install
 keeps working (the :class:`~ergodic.inference.PyMCLearner` precedent). Install the
-extra with ``pip install ergodic[scm]``.
+extra with ``pip install 'ergodic[scm]'``.
 
 Mechanisms are auto-assigned by the column schema (continuous to a Bayesian-linear
 Gaussian-additive, binary and categorical to a Gumbel-max), and overridable.

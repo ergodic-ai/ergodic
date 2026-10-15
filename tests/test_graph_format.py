@@ -105,17 +105,25 @@ def test_to_dict_layout_is_unchanged_apart_from_the_format_field() -> None:
 
 
 def test_minimal_payload_without_format_latent_or_selection() -> None:
-    # The shape welt-client sends: kind, nodes, and {u, v, u_mark, v_mark} edges.
+    # The shape welt-client sends: kind, nodes, and {u, v, u_mark, v_mark} edges,
+    # including an edge written head-first and a node with no edges.
     payload = {
         "kind": "dag",
-        "nodes": ["X", "Y", "Z"],
+        "nodes": ["X", "Y", "Z", "Q"],
         "edges": [
             {"u": "X", "v": "Y", "u_mark": "tail", "v_mark": "arrow"},
-            {"u": "Y", "v": "Z", "u_mark": "tail", "v_mark": "arrow"},
+            {"u": "Z", "v": "Y", "u_mark": "arrow", "v_mark": "tail"},
         ],
     }
-    assert MixedGraph.from_dict(payload) == dag(["X -> Y", "Y -> Z"])
-    assert MixedGraph.from_dict({**payload, "format": GRAPH_FORMAT}) == dag(["X -> Y", "Y -> Z"])
+    expected = dag(["X -> Y", "Y -> Z"], nodes=["Q"])
+    for data in (payload, {**payload, "format": GRAPH_FORMAT}):
+        graph = MixedGraph.from_dict(data)
+        assert graph == expected
+        assert graph.kind is GraphKind.DAG
+        assert graph.nodes == {"X", "Y", "Z", "Q"}
+        edge = graph.get_edge("Y", "Z")
+        assert edge is not None
+        assert edge.directed_pair() == ("Y", "Z")
 
 
 @pytest.mark.parametrize("fmt", ["ergodic.graph/2", "ergodic.graph/0", "", None, 1])

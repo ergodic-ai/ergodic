@@ -125,7 +125,7 @@ class GRaSP:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Walk tucks to convergence and return the class found."""
-        score = resolve_score(self._score, data)
+        score = resolve_score(self._score, data, algorithm=type(self).__name__)
         variables = list(score.variables)
         if not type(score).score_equivalent:
             warnings.warn(

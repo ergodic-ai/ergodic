@@ -98,11 +98,12 @@ def _test_class(key: str) -> type[CITest]:
     return cast("type[CITest]", getattr(import_module(module_name), attr))
 
 
-def resolve_test(spec: CITest | str, data: TabularData | None) -> CITest:
+def resolve_test(spec: CITest | str, data: TabularData | None, *, algorithm: str = "PC") -> CITest:
     """Resolve the test spec and the data into one bound oracle.
 
     Data comes from exactly one place: an unbound spec needs ``data`` at fit,
     a bound test carries its own and must not be handed a different dataset.
+    ``algorithm`` names the caller's class, for the error messages only.
     """
     _require_exchangeable(data)
     if isinstance(spec, CITest):
@@ -111,15 +112,18 @@ def resolve_test(spec: CITest | str, data: TabularData | None) -> CITest:
                 name = type(spec).__name__
                 if spec.data is None:
                     raise ValueError(
-                        f"{name} is already bound and answers without data; call fit() with no data"
+                        f"{name} answers from its graph and takes no data, but this run "
+                        "was handed data (by fit, or by discover, which always passes "
+                        f"it); run the algorithm with no data, e.g. "
+                        f"{algorithm}({name}(graph)).fit()"
                     )
                 raise ValueError(
-                    f"{name} is already bound to its own data, so it takes no data "
-                    "here; give the data in one place only: keep the bound test "
-                    f"and call fit() with no data, e.g. PC(test={name}(data, ...)).fit(), "
-                    "or build the test unbound and pass the data to fit or discover, "
-                    f"e.g. PC(test={name}(...)).fit(data) or "
-                    f"discover(data, method='pc', test={name}(...))"
+                    f"{name} is already bound to its own data, but this run was handed "
+                    "data too (by fit, or by discover, which always passes it); give the "
+                    "data in one place only: keep the bound test and fit with no data, "
+                    f"e.g. {algorithm}(test={name}(data, ...)).fit(), or build the test "
+                    f"unbound and pass the data, e.g. {algorithm}(test={name}(...)).fit(data) "
+                    f"or discover(data, method=..., test={name}(...))"
                 )
             return spec
         if data is None:
@@ -170,12 +174,13 @@ def _score_class(key: str) -> type[Score]:
     return cast("type[Score]", getattr(import_module(module_name), attr))
 
 
-def resolve_score(spec: Score | str, data: TabularData | None) -> Score:
+def resolve_score(spec: Score | str, data: TabularData | None, *, algorithm: str = "GES") -> Score:
     """Resolve the score spec and the data into one bound score.
 
     Data comes from exactly one place: an unbound spec needs ``data`` at fit,
     a bound score carries its own and must agree with any dataset it is handed,
-    and a string needs data to bind (``"auto"`` reads its schema).
+    and a string needs data to bind (``"auto"`` reads its schema). ``algorithm``
+    names the caller's class, for the error messages only.
     """
     _require_exchangeable(data)
     if isinstance(spec, Score):
@@ -187,10 +192,15 @@ def resolve_score(spec: Score | str, data: TabularData | None) -> Score:
                     and tuple(sorted(complete.variables)) == spec.variables
                 )
                 if not same:
+                    name = type(spec).__name__
                     raise ValueError(
-                        "the score is bound to a different dataset (rows or variables "
-                        "differ after dropna); bind the score to this data or pass an "
-                        "unbound score"
+                        f"{name} is bound to a different dataset than the one this run "
+                        "was handed (rows or variables differ after dropna); give the "
+                        "data in one place only: keep the bound score and fit with no "
+                        f"data, e.g. {algorithm}(score={name}(data)).fit(), or build the "
+                        f"score unbound and pass the data, e.g. "
+                        f"{algorithm}(score={name}()).fit(data) or "
+                        f"discover(data, method=..., score={name}())"
                     )
             return spec
         if data is None:

@@ -138,7 +138,7 @@ class HillClimb:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Climb to a high-scoring DAG and return it with its provenance."""
-        score = resolve_score(self._score, data)
+        score = resolve_score(self._score, data, algorithm=type(self).__name__)
         variables = sorted(score.variables)
         parents_of: dict[str, set[str]] = {v: set() for v in variables}
         required: frozenset[tuple[str, str]] = frozenset()

@@ -374,7 +374,7 @@ Background knowledge enters PCMCI with variables read as processes, so a constra
 
 ## Putting the pieces together
 
-The pillars compose end to end, and you do not have to pick a member of the class to do it. Identification accepts the CPDAG or PAG directly and answers with the generalized adjustment criterion, so a success holds in every graph the class represents, and `estimate_effect` rides on that:
+The pillars compose end to end. Identification accepts a CPDAG or PAG directly and answers with the generalized adjustment criterion, so a success holds in every graph the class represents, and `estimate_effect` rides on that. Here PC runs with the tier knowledge from above:
 
 ```python
 from ergodic import estimate_effect
@@ -383,9 +383,9 @@ result = discover(data, method="pc", knowledge=dk)
 est = estimate_effect(result.graph.as_kind("dag"), data, "X", "Y", strategy="dml")
 ```
 
-The `as_kind("dag")` is there because of the knowledge. The tiers `X < M < Y` orient every edge, including ones the data alone leaves open, which takes the result out of the CPDAG class: it keeps the `mixed` face, and identification refuses a `mixed` graph until you re-face it as the DAG it is. When some edges stay undirected, the error names the options.
+The `as_kind("dag")` is there because of the knowledge. The tiers `X < M < Y` orient every edge, including ones the data alone leaves open, which takes the result out of the CPDAG class: it keeps the `mixed` face, and identification refuses a `mixed` graph until you re-face it as the DAG it is. That reading is right for PC, which assumes no hidden confounding. When some edges stay undirected, the error names the options.
 
-The same line works on an FCI result: the PAG may keep circles where confounding cannot be ruled out, and the effect still estimates whenever the treatment's outgoing edge is visible (certified clean of hidden confounding in every member). When the class genuinely disagrees about the effect, identification says so and names why, and the per-member route is still there: enumerate with `dags_of_cpdag` or `mags_of_pag` (or take one member with `consistent_extension` / `mag_of_pag`) and identify each, the IDA pattern. The [identification guide](identification.md) walks through both outcomes.
+An FCI result without knowledge goes in as it is, with no `as_kind`: `estimate_effect(discover(data, method="fci").graph, data, "X", "Y")`. The PAG may keep circles where confounding cannot be ruled out, and the effect still estimates whenever the treatment's outgoing edge is visible (certified clean of hidden confounding in every member). When knowledge leaves an FCI result `mixed`, never re-face it as a DAG: its directed edges mean ancestry and can hide confounding, so read it as a `"mag"` when it fits the MAG rules (the error says when it does). When the class genuinely disagrees about the effect, identification says so and names why, and the per-member route is still there: enumerate with `dags_of_cpdag` or `mags_of_pag` (or take one member with `consistent_extension` / `mag_of_pag`) and identify each, the IDA pattern. The [identification guide](identification.md) walks through both outcomes.
 
 And the ingredients compose sideways: a warmed oracle across algorithms, a skeleton from one method restricting the next, a d-separation oracle standing in for data, your test inside unchanged PC.
 
