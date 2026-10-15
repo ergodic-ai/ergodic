@@ -102,7 +102,12 @@ class LatentResult:
     #: ``n_decoded`` of them, evenly spaced.
     n_draws: int
     divergences: int | None = None
+    #: Worst split R-hat over the delta blocks after label alignment (the one to
+    #: judge the verdicts by), over the decode subsample grouped by chain.
     rhat_max: float | None = None
+    #: Worst split R-hat over the raw sampler draws, before alignment. Chains in
+    #: mirror modes push it high even when the aligned fit is fine.
+    rhat_max_unaligned: float | None = None
 
     def __post_init__(self) -> None:
         gammas = np.array(self.gammas, dtype=np.float64)

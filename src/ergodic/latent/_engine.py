@@ -265,8 +265,9 @@ def fit_recover(
         GateOutcome(gate.name, gate.blocks, *_run_gate(gate.check, sub)) for gate in spec.gates
     )
 
-    divergences, rhat_max = _diagnostics(
-        idata, target, spec, total_draws, n_flipped=int(flips.sum())
+    rhat_aligned = aligned_rhat(delta_draws, idx, total_draws // max(chains, 1))
+    divergences, rhat_unaligned = _diagnostics(
+        idata, target, spec, total_draws, rhat_aligned=rhat_aligned
     )
 
     return LatentResult(
@@ -281,7 +282,8 @@ def fit_recover(
         likelihood=likelihood,
         n_draws=total_draws,
         divergences=divergences,
-        rhat_max=rhat_max,
+        rhat_max=rhat_aligned,
+        rhat_max_unaligned=rhat_unaligned,
     )
 
 
@@ -336,20 +338,57 @@ def _run_gate(check: Any, sub: Mapping[str, Array]) -> tuple[float, bool]:
     return float(value), bool(passed)
 
 
+def aligned_rhat(
+    delta_draws: Mapping[str, Array], idx: npt.NDArray[np.integer[Any]], draws_per_chain: int
+) -> float | None:
+    """Worst split R-hat over the label-aligned delta draws, grouped by chain.
+
+    ``delta_draws`` are the sign-corrected per-draw deltas over the decode
+    subsample, ``idx`` their positions in the flattened ``(chains * draws)``
+    posterior, so ``idx // draws_per_chain`` is each draw's chain. Every chain
+    keeps the same number of draws (the shortest), as R-hat needs. This is the
+    R-hat the verdicts should be judged by: two chains sitting in mirror modes
+    disagree on every raw signed site, but agree once aligned. ``None`` when
+    fewer than four draws per chain survive or arviz cannot compute it.
+    """
+    if not delta_draws or draws_per_chain <= 0:
+        return None
+    chain_of = np.asarray(idx, dtype=np.int64) // draws_per_chain
+    chains = np.unique(chain_of)
+    per_chain = min(int(np.sum(chain_of == c)) for c in chains)
+    if per_chain < 4:
+        return None
+    try:
+        import arviz as az
+
+        worst = 0.0
+        for draws in delta_draws.values():
+            values = np.asarray(draws, dtype=np.float64)
+            grid = np.stack([values[chain_of == c][:per_chain] for c in chains])
+            worst = max(worst, float(az.rhat(grid)))
+    except Exception:  # diagnostics never cost the result
+        return None
+    return worst if np.isfinite(worst) else None
+
+
 def _diagnostics(
-    idata: Any, target: str, spec: EmissionSpec, total_draws: int, *, n_flipped: int
+    idata: Any,
+    target: str,
+    spec: EmissionSpec,
+    total_draws: int,
+    *,
+    rhat_aligned: float | None,
 ) -> tuple[int | None, float | None]:
-    """Divergence count and worst split R-hat over the verdict-bearing sites.
+    """Divergence count and worst raw split R-hat over the verdict-bearing sites.
 
     Wrapped defensively like the reference implementations: a diagnostic that
     cannot be computed is reported as ``None`` rather than costing the fit.
 
-    R-hat needs one caveat in a label-symmetric model. Two chains that each
-    mix well but sit in mirror modes disagree wildly on every signed site, so
-    a breach with flipped draws in the decode record is the symmetry talking,
-    and the alignment has already handled it. The breach is therefore warned
-    about only when nothing flipped; the number itself is always recorded on
-    the result for the caller to read either way.
+    The raw R-hat reads the sampler's draws before label alignment, so two
+    chains that each mix well but sit in mirror modes disagree wildly on every
+    signed site; that number is kept on the result as ``rhat_max_unaligned``.
+    The warning reads ``rhat_aligned``, the R-hat after alignment, which only a
+    genuine disagreement between chains raises.
     """
     divergences: int | None
     try:
@@ -377,11 +416,11 @@ def _diagnostics(
                 UserWarning,
                 stacklevel=3,
             )
-    if rhat_max is not None and rhat_max > RHAT_WARN and n_flipped == 0:
+    if rhat_aligned is not None and rhat_aligned > RHAT_WARN:
         warnings.warn(
-            f"{target!r}: split R-hat reaches {rhat_max:.3f} on a verdict-bearing "
-            "site with no label flips to explain it; chains genuinely disagree, "
-            "so consider more warmup or more chains",
+            f"{target!r}: split R-hat reaches {rhat_aligned:.3f} on a verdict-bearing "
+            "delta after label alignment; chains genuinely disagree, so consider "
+            "more warmup or more chains",
             UserWarning,
             stacklevel=3,
         )

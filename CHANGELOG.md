@@ -192,6 +192,11 @@ To be released together with Welt.
   in every SCM fit, including the latent-district and sensitivity refits. PyMC
   otherwise ran up to four chains in parallel processes. The draws do not depend
   on it.
+- `LatentResult.rhat_max` is the split R-hat after label alignment, over the
+  sign-corrected delta draws grouped by chain. It was the raw R-hat, so chains
+  sitting in mirror modes of a good fit reported 1.83 (the spread arm of the
+  golden worlds; aligned, 1.01). The raw number moves to the new
+  `rhat_max_unaligned`, and the R-hat warning now reads the aligned value.
 
 ## [0.1.1] - 2026-08-30
 

@@ -221,3 +221,37 @@ def test_switching_ar_level_fires_and_tracks_the_switch() -> None:
     path = result.tick_path()
     assert result.offset == 3 and len(path) == N_AR - 3
     assert agreement(path, switch[3:]) > 0.9
+
+
+# -- diagnostics after alignment (API-149) ------------------------------------
+
+
+def test_rhat_is_reported_after_label_alignment() -> None:
+    """Regression: rhat_max was the raw R-hat, 1.83 on mirrored chains of a good fit.
+
+    On the spread arm the two chains sit in mirror modes (half the decoded draws
+    flip). The raw signed sites disagree across chains, but the aligned deltas
+    agree; ``rhat_max`` now reports the aligned number and the raw one moves to
+    ``rhat_max_unaligned``.
+    """
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)  # no R-hat warning on a good fit
+        result, _ = run_spectral(SPREAD)
+    assert int(result.flips.sum()) > 0
+    assert result.rhat_max_unaligned is not None and result.rhat_max_unaligned > 1.5
+    assert result.rhat_max is not None and result.rhat_max < 1.05
+
+
+def test_aligned_rhat_groups_draws_by_chain() -> None:
+    from ergodic.latent._engine import aligned_rhat
+
+    rng = np.random.default_rng(0)
+    idx = np.arange(0, 400, 2)  # a decode subsample over 2 chains of 200
+    agree = {"level": rng.normal(1.0, 0.1, size=idx.shape[0])}
+    assert aligned_rhat(agree, idx, 200) == pytest.approx(1.0, abs=0.03)
+    split = np.where(idx < 200, 1.0, -1.0) + rng.normal(0.0, 0.1, size=idx.shape[0])
+    rhat = aligned_rhat({"level": split}, idx, 200)
+    assert rhat is not None and rhat > 1.5
+    assert aligned_rhat(agree, idx[:4], 200) is None  # too few draws per chain
