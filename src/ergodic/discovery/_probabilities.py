@@ -13,6 +13,7 @@ Turning them into a DAG is an explicit modelling step, :func:`ergodic.decode`.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
@@ -22,7 +23,7 @@ import numpy as np
 from ..graph import Mark, mixed
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable
 
     import numpy.typing as npt
     import pandas as pd
@@ -38,7 +39,7 @@ PAIR_SIMPLEX_TOLERANCE = 1e-12
 
 def _frozen(value: Any) -> Any:
     """A read-only deep copy of a provenance value (mappings and sequences)."""
-    if isinstance(value, dict) or (hasattr(value, "items") and hasattr(value, "keys")):
+    if isinstance(value, Mapping):
         return MappingProxyType({str(k): _frozen(v) for k, v in value.items()})
     if isinstance(value, list | tuple):
         return tuple(_frozen(v) for v in value)
@@ -140,7 +141,7 @@ class EdgeProbabilities:
         values.setflags(write=False)
         object.__setattr__(self, "variables", names)
         object.__setattr__(self, "values", values)
-        if not hasattr(self.provenance, "items"):
+        if not isinstance(self.provenance, Mapping):
             raise TypeError("provenance must be a mapping")
         object.__setattr__(self, "provenance", _frozen(dict(self.provenance)))
 
