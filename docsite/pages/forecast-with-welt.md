@@ -212,14 +212,18 @@ per job, or `multivariate=True`, which sends the covariates once.
 
 - `fit` reads a `TimeSeriesData` or `HierarchicalTSData` with a regular datetime
   index, or an evenly spaced numeric one. A numeric index, or a datetime index on a
-  business or custom calendar (`freq="B"` or `"C"`, declared or inferred), is sent
-  as consecutive days from 1 January 2000. Chronos-2 reads the order of the rows,
+  calendar Welt has no unit for, such as business days or business-month ends
+  (`freq="B"`, `"BME"`, `"BQE"` and the like, declared or inferred), is sent as
+  consecutive days from 1 January 2000. pandas can't infer every calendar (a
+  semi-month index needs `freq="SME"`), and a declared calendar is trusted as given:
+  its rows aren't checked against it. Chronos-2 reads the order of the rows,
   not the calendar, so the forecast is the same, but the job's records in Welt show
   those dates. `time_encoding` in the diagnostics says which was sent.
 - Any other irregular datetime index, such as daily data with missing days, raises:
   sending it as steps would close up the gaps. Reindex to the regular frequency and
   leave the missing targets as NaN, which Chronos-2 handles, for example
-  `frame.set_index("day").asfreq("D").reset_index()`.
+  `frame.set_index("day").asfreq("D").reset_index()`. If the rows follow a
+  calendar, declare it with `freq=`, for example `"B"` or `"BME"`.
 - Targets must be continuous. Missing target values are sent as missing, and
   Chronos-2 handles them.
 - Covariates are continuous or categorical. A categorical cell goes as a string or

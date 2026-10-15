@@ -864,11 +864,6 @@ def _max_request_bytes() -> int:
     return int(getattr(welt.forecast, "MAX_REQUEST_BYTES", _DEFAULT_MAX_REQUEST_BYTES))
 
 
-# pandas offsets of business and custom calendars: their rows are consecutive
-# observations, but Welt reads the timestamps as irregular, so they go as days.
-_CALENDARS = ("BusinessDay", "CustomBusinessDay", "BusinessHour", "CustomBusinessHour")
-
-
 def _offset_name(freq: str | None) -> str | None:
     if not freq:
         return None
@@ -886,13 +881,15 @@ def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
 
     A datetime index is sent as timestamps when its frequency is known (the
     dataset's ``freq``, else pandas' inferred one, mapped to Welt's units) or its
-    spacing is constant, so Welt can infer it. An index on a business or custom
-    calendar (a declared or inferred ``B``, ``C``, ``BH`` or ``CBH``, or a declared
-    ``freq`` Welt has no unit for) is sent as consecutive days, which Chronos-2
-    reads the same way. Any other irregular datetime index, a daily series with
-    missing days say, is refused: sending it as steps would close up the gaps. A
-    numeric index must be evenly spaced (relative tolerance 1e-9) and is always
-    sent as days.
+    spacing is constant, so Welt can infer it. An index on a calendar pandas
+    recognises but Welt has no unit for (business days ``B``, custom ``C``,
+    business-month ends ``BME``, semi-month ``SME`` and the like), declared or
+    inferred by pandas (which cannot infer every one, ``SME`` for instance), is sent
+    as consecutive days, which Chronos-2 reads the same way. A declared calendar is
+    trusted as given: its rows are not checked against it. Any
+    other irregular datetime index, a daily series with missing days say, is
+    refused: sending it as steps would close up the gaps. A numeric index must be
+    evenly spaced (relative tolerance 1e-9) and is always sent as days.
     """
     times = np.asarray(data.times)
     if times.dtype.kind == "M":
@@ -914,8 +911,8 @@ def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
             mapped = _frequency(inferred)
             if mapped is not None:
                 return "timestamps", mapped
-        if _offset_name(inferred) in _CALENDARS:
-            return "steps-as-days", dict(_DAY)
+        if inferred and _offset_name(inferred) is not None:
+            return "steps-as-days", dict(_DAY)  # a regular calendar Welt has no unit for
         seconds = np.diff(times.astype("datetime64[s]").astype(np.int64))
         if seconds.size and bool(np.all(seconds == seconds[0])) and seconds[0] > 0:
             return "timestamps", None
@@ -923,8 +920,8 @@ def _time_plan(data: TimeSeriesData) -> tuple[str, dict[str, Any] | None]:
             f"the time index {data.time!r} is irregular (missing or uneven steps), and Welt "
             "forecasts regular series only. Reindex it to its regular frequency and leave "
             "the missing targets as NaN, which Chronos-2 reads natively, for example "
-            "frame.set_index(time).asfreq('D').reset_index(); or declare a business "
-            "calendar with freq='B'"
+            "frame.set_index(time).asfreq('D').reset_index(); or, if the rows follow a "
+            "calendar, declare the calendar with freq=, e.g. 'B' or 'BME'"
         )
     if times.dtype.kind not in "iuf":
         raise ValueError(

@@ -854,3 +854,38 @@ def test_the_result_versions_are_compared_with_the_pin_locally() -> None:
         fake.version = "chronos-2-fixture-2"
         with pytest.raises(ValueError, match="every job of this forecaster runs"):
             fitted.forecast(3)
+
+
+@pytest.mark.parametrize("freq", ["B", "BME", "BMS", "BQE"])
+def test_an_undeclared_regular_calendar_pandas_infers_is_sent_as_days(freq: str) -> None:
+    """S1: an inferred calendar Welt has no unit for is treated like a declared one."""
+    from ergodic.welt._forecast import _time_plan
+
+    index = pd.date_range("2024-01-01", periods=30, freq=freq)
+    data = timeseries(pd.DataFrame({"t": index, "y": np.arange(30.0)}), time="t")
+    assert _time_plan(data) == ("steps-as-days", {"unit": "day", "every": 1})
+
+
+def test_a_semi_month_index_needs_its_calendar_declared() -> None:
+    """S1: pandas cannot infer SME, so undeclared it is refused; declared it goes as days."""
+    from ergodic.welt._forecast import _time_plan
+
+    index = pd.date_range("2024-01-01", periods=30, freq="SME")
+    frame = pd.DataFrame({"t": index, "y": np.arange(30.0)})
+    with pytest.raises(ValueError, match="declare the calendar with freq="):
+        _time_plan(timeseries(frame, time="t"))
+    declared = timeseries(frame, time="t", freq="SME")
+    assert _time_plan(declared) == ("steps-as-days", {"unit": "day", "every": 1})
+
+
+def test_the_refusal_names_the_calendar_to_declare_and_a_declared_one_is_trusted() -> None:
+    """S1: the hint shows freq= with B and BME; a declared calendar is not checked."""
+    from ergodic.welt._forecast import _time_plan
+
+    days = pd.date_range("2026-01-01", periods=40, freq="D").delete([10, 25])
+    frame = pd.DataFrame({"day": days, "y": np.linspace(1, 2, 38)})
+    with pytest.raises(ValueError, match=r"declare the calendar with freq=, e\.g\. 'B' or 'BME'"):
+        WeltForecaster().fit(timeseries(frame, time="day"))
+    # Documented: a declared calendar is trusted as given, even when the rows disagree.
+    trusted = timeseries(frame, time="day", freq="B")
+    assert _time_plan(trusted) == ("steps-as-days", {"unit": "day", "every": 1})

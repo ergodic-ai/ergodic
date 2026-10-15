@@ -105,8 +105,9 @@ Planned as 0.3.0.
   `max_forecasts` budget (10) of jobs Welt accepted. Each node's
   `WeltForecastDiagnostics` records the job id, versions, quantile levels, Welt's own
   quantiles, `context_length` and `rearranged_steps`. A numeric time index, or a
-  datetime index on a business or custom calendar (`B`, `C`, declared or inferred),
-  is sent as consecutive days from 2000-01-01; any other irregular datetime index
+  datetime index on a calendar Welt has no unit for (`B`, `C`, `BME`, `SME` and the
+  like, declared or inferred by pandas; a declared one is trusted as given), is sent as
+  consecutive days from 2000-01-01; any other irregular datetime index
   (daily data with missing days, say) is refused with a hint to reindex and leave
   the gaps as NaN. `NATIVE_QUANTILE_LEVELS` lists the 21 levels requested by default.
 - `ergodic.forecast.quantile_draws(levels, quantiles, *, draws, seed)` turns
