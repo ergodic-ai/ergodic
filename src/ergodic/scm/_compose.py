@@ -64,17 +64,22 @@ def _merged_idata(fits: Mapping[str, FitResult]) -> Any:
     present them as a single chain of S draws. No joint sampling ever happened;
     this is the compose step the pressure-test validated (max |composed - joint|
     interventional mean 0.004).
+
+    The result is a plain posterior ``xarray.Dataset``, which
+    ``sample_posterior_predictive`` reads the same way on PyMC 5 (arviz 0.23,
+    Python 3.11) and PyMC 6 (arviz 1.x). ``az.from_dict`` is not portable here: arviz
+    0.23 would read a group-keyed dict as one variable named "posterior", and the
+    parameters would then be silently drawn from the prior.
     """
-    import arviz as az
+    import xarray as xr
 
     posterior: dict[str, Any] = {}
     for fit in fits.values():
         for pname, draws in fit.params.items():
             arr = np.asarray(draws, dtype=np.float64)
-            posterior[pname] = arr.reshape(1, arr.shape[0], *arr.shape[1:])
-    # arviz v2 keys the dict by group (DataTree); the posterior group is what
-    # sample_posterior_predictive reads its parameter draws from.
-    return az.from_dict({"posterior": posterior})
+            dims = ("chain", "draw", *(f"{pname}_dim_{i}" for i in range(arr.ndim - 1)))
+            posterior[pname] = (dims, arr.reshape(1, arr.shape[0], *arr.shape[1:]))
+    return xr.Dataset(posterior)
 
 
 def _resolved_mechanisms(

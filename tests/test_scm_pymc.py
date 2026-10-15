@@ -565,7 +565,7 @@ def test_generative_rv_names_match_the_merged_posterior_golden() -> None:
     mechs = _resolved_mechanisms(scm.mechanisms, scm._fits)
     model = _build_generative(scm._order, mechs, n)
     idata = _merged_idata(scm._fits)
-    posterior_names = set(idata.posterior.data_vars)
+    posterior_names = set(idata.data_vars)
     free_rv_names = {rv.name for rv in model.free_RVs}
     # every free PARAMETER RV (not a node RV) must be in the merged posterior. The
     # node RVs themselves (Z, C, Y) are the likelihood vars, not parameters.
