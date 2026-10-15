@@ -87,7 +87,10 @@ dropped: ['asia <-- xray']
 | `summary(threshold)` | A graph of the pairs at or above `threshold`, each with its most frequent glyph. |
 
 Shares are over the runs that finished. A resample can fail, for example when a column
-comes out constant. It is counted in `n_failed` and skipped.
+comes out constant, or when its graph can't satisfy `knowledge=`. It is counted in
+`n_failed` and skipped, so with knowledge the shares describe only the runs that agreed
+with it. Only a `ValueError` or `RuntimeError` is skipped; any other error stops the
+bootstrap.
 
 !!! caution "Frequencies are not probabilities"
     An edge at 0.9 came back in 90% of resamples. That measures how much the result

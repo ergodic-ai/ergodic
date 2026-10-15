@@ -209,9 +209,9 @@ print(answer)
 # `.value` at all, so you can't read a point off it by accident.
 #
 # What it gives you instead is the effect as a function of how much confounding you
-# assume. Here `c` is the share of the discount-spend covariance you attribute to the
+# assume. Here `c` is the amount of the discount-spend covariance you attribute to the
 # hidden confounder. With `c = 0` you're assuming no confounding, and you get the
-# observed slope back.
+# observed slope back. The loop below sets `c` to a share of the observed covariance.
 
 # %%
 cov_xy = float(np.cov(df["discount"], df["spend"])[0, 1])

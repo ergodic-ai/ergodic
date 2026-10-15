@@ -87,6 +87,12 @@ low = scm.do({"ads": 0.0}).interventional("sales")
 An intervention is not the same as filtering the data. Weeks with high ad spend also
 had high demand, so their sales overstate what ads alone do. `do` removes that link.
 
+`interventional` returns draws of individual outcomes under the intervention. Its
+`.value` is their mean, but its interval and `std_error` describe the spread of
+single weeks' sales, not your uncertainty about the mean. For the mean contrast with a
+credible interval, use `scm.ate(treatment, outcome)`, as in
+[Fit a structural causal model](fit-an-scm.md).
+
 ## Read a counterfactual
 
 `counterfactual` needs every observed node's value for each unit: pass a dataset or a

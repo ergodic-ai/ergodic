@@ -63,14 +63,15 @@ need          1.98  [1.87, 2.09]
 effect by predicted fifth: [-1.63 -0.07  0.95  2.12  3.92]
 ```
 
-- **Step 3.** `cate` fits the doubly robust DR-learner by default. Its covariates
+- **Step 3.** `cate` fits the doubly robust DR-learner by default (Kennedy, 2023). Its covariates
   are the adjustment set the graph implies: `age` and `need`. Each row of
   `to_frame()` has the effect, its standard error and a 90% interval.
 - The estimated effects are close to the truth: the root-mean-square error is
-  about 0.12 on effects that range from about −5 to 7.
+  about 0.12 on true effects that range from −5.0 to 7.5.
 - **Calibration test.** A tiny p-value rejects "no heterogeneity".
 - **Best linear projection.** The effect rises by about 2 per unit of `need`, the
-  true slope. The `age` slope is small, and its interval includes 0.
+  true slope. The `age` slope is small, and its interval includes 0. The
+  intercept, 1.06, is the effect where both covariates are 0.
 - **GATES.** Sorted into fifths by predicted effect, the measured effect climbs
   from below 0 to almost 4. The lowest fifth is harmed.
 
@@ -78,12 +79,13 @@ effect by predicted fifth: [-1.63 -0.07  0.95  2.12  3.92]
 
 `effects.explain()` returns a `Heterogeneity` record. Its methods summarize the
 doubly robust scores, not the per-unit points, so their intervals are valid even
-when the per-unit model is wrong.
+when the per-unit model is wrong (Semenova and Chernozhukov, 2021; Chernozhukov,
+Demirer, Duflo and Fernández-Val, 2025; Yadlowsky and others, 2024).
 
 | Method | Question it answers |
 | --- | --- |
 | `calibration_test()` | Is there heterogeneity, and is it calibrated? `heterogeneity_pvalue` is one-sided. |
-| `blp(level=0.9)` | Which covariates go with a bigger effect? The intercept is the average effect. |
+| `blp(level=0.9)` | Which covariates go with a bigger effect? The intercept is the effect where every covariate is 0; it equals the average effect only when the covariates are centred. |
 | `gates(n_groups=5)` | Does the measured effect rise across groups of predicted effect? `difference` is top minus bottom. |
 | `clan(n_groups=5)` | How do the most and least affected groups differ in their covariates? |
 | `rate("autoc")` | Does ranking by predicted effect put the biggest gains first? Also `"qini"`. |
@@ -101,8 +103,9 @@ names: `"r_learner"`, `"x_learner"`, `"t_learner"`, `"s_learner"`, `"dml"` and
 `"causal_forest"`. `learner=` fills the nuisance models, as in `estimate_effect`.
 
 - The uncertainty depends on the method. The DR-learner with its default linear
-  final model has analytic standard errors. `"causal_forest"` uses the
-  infinitesimal jackknife. The other learners bootstrap: `n_boot=` refits (default
+  final model has analytic standard errors. `"causal_forest"` (Athey, Tibshirani
+  and Wager, 2019) uses the infinitesimal jackknife; its per-unit intervals are
+  currently too narrow and cover the truth less often than stated. The other learners bootstrap: `n_boot=` refits (default
   1,000), which can be slow. Pass `uncertainty=False` to skip that step.
 - With the default linear models, `"s_learner"` and `"dml"` return one constant
   effect for every unit. Give `"s_learner"` a flexible `learner=` to see variation.

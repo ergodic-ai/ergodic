@@ -188,7 +188,7 @@ pages = [
 eyebrow = "Python 3.11+ · Apache-2.0"
 title = "From data"
 title_muted = "to a causal effect."
-lead = "Learn a causal graph from your data, check that the effect you want is identifiable, and estimate it with an interval. Every example on this site runs as written."
+lead = "Learn a causal graph from your data, check that the effect you want is identifiable, and estimate it with an interval. Every program on this site is tested: most run on bundled data, and those that need a Welt key run against a fake Welt service."
 program = "start.md#first_effect.py"        # complete program (and its recorded output) shown on the landing
 secondary = { label = "Python reference", page = "reference" }
 

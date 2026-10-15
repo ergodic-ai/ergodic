@@ -68,8 +68,9 @@ Identification(adjustment: P(dysp | do(smoke)) = sum_z P(dysp | smoke, z) P(z), 
 ## Why the result is `mixed`
 
 A CPDAG is the set of graphs the data alone can't tell apart. Once knowledge orients
-an edge the data left open, the graph is no longer that set, so the search labels it
-`mixed` and sets `diagnostics["cpdag_valid"]` to `0.0`. FCI does the same with
+an edge the data left open, the graph stands for a smaller set that is no longer an
+equivalence class, so it fails the CPDAG rules. The search labels it `mixed` and sets
+`diagnostics["cpdag_valid"]` to `0.0`. FCI does the same with
 `diagnostics["pag_valid"]`.
 
 Identification refuses a `mixed` graph, and its error says what to do. When every edge
@@ -108,15 +109,21 @@ The methods read knowledge in different ways:
 
 !!! caution "Only FCI and RFCI can represent `confound`"
     A CPDAG or a DAG has no bidirected edge. With `confound`, PC, GES, BOSS, GRaSP,
-    HillClimb and A* raise an error saying the graph violates the knowledge. Use
+    HillClimb and A* raise an error, because their graph can't satisfy the knowledge.
+    LiNGAM raises too. MMPC and glasso accept it and only keep the pair adjacent. Use
     `method="fci"`.
 
 <details markdown="1"><summary>What if my knowledge contradicts itself or the data?</summary>
 
 `knowledge.conflicts()` lists contradictions, such as a required edge that a tier
-forbids, and `knowledge.validate()` raises on them. If the knowledge is consistent but
-the data disagrees, the search raises a `ValueError`. Then
-`knowledge.violations(graph)` lists what broke.
+forbids, and `knowledge.validate()` raises on them.
+
+When the knowledge is consistent but the data disagrees, the search usually imposes
+the knowledge without a word. Forbid a true edge and a score search routes the
+dependence through other edges; require a false one and it appears in the result. A
+search raises an error only when its final graph can't satisfy the knowledge, and
+then `knowledge.violations(graph)` lists what broke. To check your knowledge against
+the data, run the search with and without it and compare the edges that change.
 
 </details>
 

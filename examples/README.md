@@ -18,7 +18,7 @@ question attached (the treatment, the outcome, the confounders, and the target).
 
 | Script | Dataset | Question | What it shows |
 | --- | --- | --- | --- |
-| `adjustment_birthweight.py` | birthweight | Does smoking lower birthweight? | Backdoor adjustment, naive -275 g moves to about -210 g |
+| `adjustment_birthweight.py` | birthweight | Does smoking lower birthweight? | Backdoor adjustment, naive -275 g moves to -222 g (literature: -225 g) |
 | `confounding_berkeley.py` | berkeley | Did admissions favor men? | Simpson's paradox: a pooled gap reverses under the confounder |
 | `double_ml_pension.py` | pension401k | Effect of 401(k) eligibility on wealth | Double machine learning, $19.5k naive falls to about $9k |
 | `synthetic_control_smoking.py` | smoking | Did Proposition 99 cut sales? | Synthetic control with placebo inference |

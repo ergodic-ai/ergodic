@@ -91,9 +91,9 @@ block fires only when its interval excludes zero. Then the likelihood's gates ca
 veto blocks. The spectral model's `wave_present` gate vetoes `freq` and `amp` when no
 periodic component stands above the noise, as here.
 
-!!! caution "A verdict doesn't prove a regime exists"
+!!! caution "A verdict doesn't prove there's a switch"
     `recover` always fits two states. A delta that excludes zero says which block
-    differs, given that there are two regimes. Whether there's a regime at all is a
+    differs, given that there are two. Whether two states fit better than one is a
     separate test: see [Certify and calibrate](certify-and-calibrate.md).
 
 ## Choose a likelihood
@@ -109,8 +109,7 @@ The likelihood decides how a regime shows up in the data. Two are built in, in
   coefficients and noise scale switch. Its blocks are `level`, `rhythm` and
   `spread`, and its path has one state per tick after the first `p`. It needs at
   least 32 ticks after the lags. A change in amplitude alone doesn't change its
-  parameters, so it has no `amp` block. It's also much slower, because it steps
-  through every tick.
+  parameters, so it has no `amp` block. It's also much slower.
 
 ## Tell it how long regimes last
 
@@ -122,10 +121,8 @@ Leave it as `None` unless you know the dwell time. Each likelihood has a default
 its own step size: `Beta(60, 1)` per tick for `switching_ar` (a mean stay
 probability of 60/61 ≈ 0.98), and `Beta(4, 2)` per 96-tick frame for
 `spectral_whittle`. A per-tick prior is wrong for the spectral model by a factor of
-the frame length.
-
-`semi_markov(min_dwell=...)`, an explicit dwell-time distribution, is reserved and
-raises `NotImplementedError`.
+the frame length. Dwell times are geometric: a chain with an explicit dwell-time
+distribution isn't supported.
 
 <details markdown="1"><summary>What does recover refuse, and what do the diagnostics mean?</summary>
 
@@ -133,16 +130,12 @@ raises `NotImplementedError`.
   `TypeError`: select one series first.
 - The target must be continuous and finite. Non-finite values raise `ValueError`;
   drop or fill them first.
-- Only two states are supported, and `graph=` is reserved: anything but `None`
-  raises `NotImplementedError`.
+- Only two states and one series are supported.
 - `result.divergences` counts divergent transitions, and the fit warns when they
   exceed 0.5% of the draws. `result.rhat_max` is the worst split R-hat over the
   delta and stay sites, computed before label alignment. Chains that settle in
   mirror-image labelings inflate it, so it warns only when no draw had to be flipped.
-- `result.gamma()` gives each step's probability of each state, and
-  `result.to_frame()` gives the path as a table with the first tick of each step.
-- `latent_model(model=..., **options)` freezes these keywords as a reusable
-  configuration, a `LatentModel`. Its `run(data, target)` calls `recover`.
+- `result.to_frame()` gives the path as a table with the first tick of each step.
 
 </details>
 
@@ -150,7 +143,7 @@ raises `NotImplementedError`.
 
 <div class="cards" markdown="1">
 
-- [Certify and calibrate](certify-and-calibrate.md): test whether a regime exists, and how often the detector fires on noise.
+- [Certify and calibrate](certify-and-calibrate.md): test whether two states beat one, and how often the detector fires on noise.
 - [Forecast with causal drivers](forecast-with-drivers.md): model a series forward instead of backward.
 - [Python reference](reference-latent.md): every option of `recover` and `LatentResult`.
 

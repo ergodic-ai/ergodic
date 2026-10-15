@@ -302,7 +302,7 @@ fig.tight_layout()
 #
 # What you saw is a slice. Discovery has score-based searches and learner-driven tests for nonlinear
 # worlds ([choosing a method](../../docsite/pages/choose-a-method.md)) and discovery from time
-# series, estimation has the estimator library and the Bayesian path
+# series, estimation has a library of estimators
 # ([estimating an average effect](../../docsite/pages/estimate-average-effect.md)), and
 # identification generalizes further than adjustment, to the front door, instruments and the full
 # do-calculus ([identifying an effect](../../docsite/pages/identify-an-effect.md)). Simulation was

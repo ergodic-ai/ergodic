@@ -51,9 +51,9 @@ print(identify_mediation(graph, "training", "wage", "certified"))
 split = estimate_mediation(
     graph, data, "training", "wage", "certified", treated=1, random_state=0, n_boot=200
 )
-print("direct:  ", split.nde)
-print("indirect:", split.nie)
-print("total:   ", split.total)
+for name, effect in [("direct", split.nde), ("indirect", split.nie), ("total", split.total)]:
+    low, high = effect.interval()
+    print(f"{name:8} {effect.value:.2f}  95% interval [{low:.2f}, {high:.2f}]")
 print(f"proportion mediated: {split.proportion_mediated:.2f}")
 
 # 4. The planted indirect effect: 3.0 times the rise in certification.
@@ -68,9 +68,9 @@ print(identify_mediation(confounded, "training", "wage", "certified"))
 
 ```output from="mediation.py"
 MediationID(identifiable, ['training'] -> [certified] -> ['wage'], W={experience}, cde=True)
-direct:   EffectEstimate(mediation_gcomputation, bootstrap: ate=1.168, se=0.112, 95% CI [0.976, 1.38], n=2000)
-indirect: EffectEstimate(mediation_gcomputation, bootstrap: ate=1.212, se=0.0873, 95% CI [1.04, 1.37], n=2000)
-total:    EffectEstimate(mediation_gcomputation, bootstrap: ate=2.38, se=0.144, 95% CI [2.11, 2.68], n=2000)
+direct   1.17  95% interval [0.98, 1.38]
+indirect 1.21  95% interval [1.04, 1.37]
+total    2.38  95% interval [2.11, 2.68]
 proportion mediated: 0.51
 planted: direct 1.00, indirect 1.32
 MediationID(NDE/NIE not identifiable, ['training'] -> [certified] -> ['wage'], cde=True)
@@ -81,9 +81,10 @@ MediationID(NDE/NIE not identifiable, ['training'] -> [certified] -> ['wage'], c
 - **Step 3.** Training raises the wage by about 1.17 directly and 1.21 through
   certification. Each interval comes from 200 bootstrap resamples of the rows.
 - **Step 4.** Both intervals contain the planted values, 1.00 and 1.32.
-- **Step 5.** If training changes motivation, and motivation affects both
-  certification and wage, no adjustment set separates the two paths. The natural
-  effects are not identifiable. The controlled direct effect still is.
+- **Step 5.** Motivation now confounds certification and wage, and training itself
+  changes it. Adjusting for motivation would block part of the effect; leaving it out
+  leaves the mediator confounded. No set of pre-treatment variables fixes both, so
+  the natural effects are not identifiable. The controlled direct effect still is.
 
 ## Three effects
 
@@ -101,8 +102,9 @@ assumptions in words.
 
 !!! caution "The natural effects rest on an assumption no data can test"
     They compare outcomes across two worlds that never both happen: treated, with the
-    mediator at its untreated value. The graph certifies that assumption, but no
-    experiment can check it. The CDE needs no such assumption.
+    mediator at its untreated value. The graph implies that assumption only if you
+    read it as a structural model with independent errors, and no experiment can
+    check it. The CDE needs no such assumption.
 
 ## Read the estimate
 

@@ -4,7 +4,9 @@ Pin the future of a driver you control or already know, such as a planned price,
 compare the forecasts it leads to.
 
 !!! need "You'll need"
-    - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`.
+    - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`. It adds
+      PyMC only. Optionally, `pip install jax numpyro` switches sampling to the
+      faster NumPyro backend, which recorded the output on this page.
     - A window graph from the driver to the series you forecast.
       [Forecast with causal drivers](forecast-with-drivers.md) shows how to write one.
 

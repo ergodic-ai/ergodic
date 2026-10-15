@@ -85,9 +85,9 @@ By default, for `cdfm` and `avici`, `ergodic.welt.discover` raises
 returning another graph type is refused the same way. Pass `decoder=` (for example
 `decoder="greedy"`) to run the model and decode its edge scores with
 `ergodic.decode`: the graph is then the decoder's choice, not the model's, and the
-result says so. See [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm). A model with no known graph type runs, and if its
-result is not a declared DAG, the error carries the paid result in `.result` and
-its edge scores in `.scores`.
+result says so. See [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm). A model
+with no known graph type runs, and if its result is not a declared DAG, the error
+carries the paid result in `.result` and its edge scores in `.scores`.
 
 !!! caution "A converted graph is still a model's guess"
     Conversion checks the format, not the science. Read the graph before you

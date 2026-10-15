@@ -4,8 +4,10 @@ Score a forecaster on months it has not seen, next to simple baselines, before y
 trust its numbers or its bands.
 
 !!! need "You'll need"
-    - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`. The
-      baselines alone need no extra.
+    - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`. It adds
+      PyMC only. Optionally, `pip install jax numpyro` switches sampling to the
+      faster NumPyro backend, which recorded the output on this page.
+      The baselines alone need no extra.
     - A series long enough to hold out a few horizons: by default, each fold trains
       on at least twice the horizon.
 
@@ -67,10 +69,10 @@ Bayesian        5.30   6.00  0.29   3.46      1.00
   forecasts the 6 months that follow.
 - **Step 4.** The Bayesian forecaster halves the error of the best baseline on every
   error measure. Its 90% bands held all 12 held-out months.
-- **Step 4.** `SeasonalNaive` repeats last year, so it misses a year of trend: its
+- **Step 4, continued.** `SeasonalNaive` repeats last year, so it misses a year of trend: its
   bands never contain the actuals.
-- **Step 5.** One divergent transition across both folds' 1,000 draws, and about 26
-  effective draws per parameter. Raise `draws` and `warmup` for decisions.
+- **Step 5.** One divergent transition across both folds' 1,000 draws, and at least
+  25 effective draws for the worst parameter in each fold. Raise `draws` and `warmup` for decisions.
 
 ## Read the scores
 

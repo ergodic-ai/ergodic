@@ -69,7 +69,7 @@ say how it was found.
 | --- | --- |
 | `graph` | The learned graph. Its `kind` says how to read it: `cpdag`, `pag`, `dag` or `mixed`. |
 | `method` | The method that ran, such as `"ges"`. |
-| `test`, `score` | The independence test or the score it used. The other one is `None`. |
+| `test`, `score` | The independence test or the score it used. The other one is `None`; both are `None` for `"lingam"` and `"glasso"`. |
 | `alpha` | The significance level, for methods that run tests. |
 | `n` | The number of rows used. |
 | `diagnostics` | Run counters: tests by size, score evaluations, validity flags. |
@@ -80,7 +80,7 @@ Each edge prints as a glyph. The marks at the two ends carry the meaning:
 | Glyph | Meaning |
 | --- | --- |
 | `A --> B` | A causes B. |
-| `A --- B` | Adjacent, direction unknown: graphs in the class disagree. |
+| `A --- B` | In a CPDAG: adjacent, direction unknown. In a PAG: both cause the selection of the sample. |
 | `A <-> B` | A hidden common cause, and neither causes the other. |
 | `A o-> B` | B doesn't cause A. A may cause B, or a hidden cause may link them. |
 | `A o-o B` | Adjacent, and the data can't say more. |
@@ -100,14 +100,19 @@ refuses time series, whose rows aren't independent.
 | `"rfci"` | PAG | As FCI, with many variables: faster, but it can keep extra edges. |
 | `"ges"` | CPDAG | You prefer a score to many tests. |
 | `"boss"`, `"grasp"` | CPDAG | You want a score-based search over variable orders. Prefer `"boss"` with a lot of domain knowledge. |
-| `"astar"` | DAG | You want the highest-scoring graph exactly. It refuses more than 20 variables by default. |
-| `"hc"` | DAG | You want a quick greedy baseline, with no optimality guarantee. |
+| `"astar"` | One DAG of the best class | You want a highest-scoring graph exactly. It refuses more than 20 variables by default. |
+| `"hc"` | One DAG | You want a quick greedy baseline, with no optimality guarantee. |
 | `"lingam"` | DAG | The data is continuous and linear, with non-Gaussian noise. |
-| `"mmpc"`, `"glasso"` | Undirected skeleton | You want a cheap screen to narrow a later search. |
+| `"mmpc"`, `"glasso"` | Undirected graph | You want a cheap screen to narrow a later search. MMPC returns a skeleton; glasso returns the moral graph, which also joins parents of a common child. |
 | `"pcmci"` | Window graph | Your data is a time series or a panel. |
 
 [Choose a method and test](choose-a-method.md) lists the assumptions behind each one
 and shows how to swap the independence test or the score.
+
+The scores are score-equivalent: every DAG in an equivalence class gets the same
+score. So A* and HillClimb return one member of a class, picked by tie-breaking, and
+some of its directions are arbitrary. Before you identify an effect, turn the result
+back into its class with `ergodic.graph.cpdag_of_dag(result.graph)`.
 
 !!! caution "A CPDAG stands for a set of graphs"
     An undirected edge such as `lung --- smoke` means the data can't tell the
