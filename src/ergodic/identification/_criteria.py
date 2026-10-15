@@ -186,7 +186,8 @@ def _is_class_kind(graph: MixedGraph) -> bool:
     every graph the class represents, through the generalized criterion.
     MIXED raises: identification needs a verified face, and an FCI fallback
     output (``pag_valid`` 0.0) stays mixed on purpose because it is not a
-    class object.
+    class object. A selection mark raises on every face: the criteria assume
+    the data are not selected on any node.
     """
     if graph.kind is GraphKind.MIXED:
         raise ValueError(
@@ -194,6 +195,16 @@ def _is_class_kind(graph: MixedGraph) -> bool:
             f"or pag), not 'mixed'; {_mixed_face_hint(graph)}"
         )
     if graph.kind not in _CLASS_KINDS:
+        if graph.selection:
+            raise ValueError(
+                f"the {graph.kind.value} marks selection nodes "
+                f"({_join(frozenset(graph.selection))}), so its data are a "
+                "selection-biased sample; identification assumes no selection, and "
+                "an effect is generally not identifiable from a selected sample "
+                "(recovering it needs selection-recoverability conditions, which "
+                "are not supported). Drop selection= only if the data were not "
+                "selected on those nodes"
+            )
         return False
     if graph.latent or graph.selection:
         raise ValueError(

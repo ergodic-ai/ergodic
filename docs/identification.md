@@ -139,7 +139,7 @@ Because `estimate_effect` runs identification first, the whole bridge composes i
 
 ## Bad inputs raise
 
-`identify_effect` and the helpers check their inputs up front. An empty treatment or outcome, a treatment that overlaps the outcome, or a name that is not a node in the graph raises `ValueError` naming the offender, instead of returning an estimand for a variable the graph has never seen.
+`identify_effect` and the helpers check their inputs up front. An empty treatment or outcome, a treatment that overlaps the outcome, or a name that is not a node in the graph raises `ValueError` naming the offender, instead of returning an estimand for a variable the graph has never seen. A graph that marks selection nodes (`selection=`) raises on every face: the criteria assume the data weren't selected on any node, and an effect generally isn't identifiable from a selected sample.
 
 ## The result record
 

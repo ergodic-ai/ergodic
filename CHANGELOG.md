@@ -83,6 +83,12 @@ To be released together with Welt.
   `treat_none_value` is now 0 and `treat_all_value` (the ATE) is unchanged;
   `std_error` and `interval()` are on the new scale. The learned rule is the same
   (the two objectives share their argmax).
+- Identification on a DAG or ADMG with `selection=` nodes now raises, as the
+  class faces already did. It used to ignore the selection mark, so a selected
+  collider `X -> S <- Y` identified as plain `P(Y | X)` although selecting on `S`
+  makes the two dependent in the sample. This covers `identify_effect`,
+  `identify_distribution`, `identify_mediation`, the adjustment, front-door and
+  instrument helpers, and so `estimate_effect` and `cate`.
 
 ## [0.1.1] - 2026-08-30
 
