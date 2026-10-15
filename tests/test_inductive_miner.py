@@ -222,3 +222,23 @@ def test_noise_out_of_range_raises() -> None:
     for bad in (-0.1, 1.0, 1.5):
         with pytest.raises(ValueError, match="noise"):
             discover_model(log, noise=bad)
+
+
+def test_nested_same_operator_nodes_are_flattened() -> None:
+    """Regression (API-149): IMf returned seq(..., seq(xor(TAU, s), xor(TAU, e)), ...).
+
+    Sequence is associative, so the canonical form splices a nested seq into its
+    parent; the mined tree then equals the hand-written one. A nested xor stays
+    (decision_points reads each xor as its own decision), and so does par.
+    """
+    from ergodic.process import TAU, loop, par, seq, xor
+
+    nested = seq("a", seq(xor(TAU, "s"), xor(TAU, "e")), "b")
+    assert nested == seq("a", xor(TAU, "s"), xor(TAU, "e"), "b")
+    assert len(nested.children) == 4
+    assert xor("a", xor("b", "c")) != xor("a", "b", "c")
+    assert par(par("a", "b"), "c") != par("a", "b", "c")
+    # different operators and loops are left alone
+    assert seq("a", xor("b", "c")).children[1] == xor("b", "c")
+    assert loop(seq("a", "b"), "c").children[0] == seq("a", "b")
+    assert repr(seq(seq("a", "b"), seq("c", "d"))) == "seq('a', 'b', 'c', 'd')"

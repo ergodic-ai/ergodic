@@ -205,6 +205,12 @@ To be released together with Welt.
   trees gave 25% zero-width bands and 68% coverage of a nominal 90%, 1,600 trees
   1% and 87%. The estimator is unchanged; its docstring states these
   measurements and recommends `n_trees` of the order of half the rows or more.
+- Process trees splice a nested sequence into its parent, so
+  `seq(a, seq(b, c))` is `seq(a, b, c)`. `discover_model(noise=...)` could return
+  an unflattened `seq(..., seq(xor(TAU, 'standard'), xor(TAU, 'expedite')), ...)`
+  that did not compare equal to the same model written by hand, although the
+  tree docstring promised a canonical form. Nested `xor` and `par` nodes are
+  kept as built (`decision_points` reads each `xor` as its own decision).
 
 ## [0.1.1] - 2026-08-30
 
