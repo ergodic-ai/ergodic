@@ -111,9 +111,10 @@ is exactly the model's own product of coin flips, restricted to DAGs.
     We checked this on 240 research graphs with known true DAGs, using pair-state
     matrices from Ergodic's research. The posterior's edge probabilities were well
     calibrated (expected calibration error 0.0037). The true DAG fell inside
-    the 80%, 90% and 95% credible sets in 79%, 87% and 92% of the graphs, a little
-    below nominal at the top. On the 12 twenty-variable graphs it fell inside them in
-    only 50%, 58% and 67%. The sampler agreed with the exact computation (median
+    the 80%, 90% and 95% credible sets in 79%, 87% and 92% of the graphs, slightly
+    below nominal at each level, significantly so at 95%. On the 12 twenty-variable
+    graphs it fell inside them in only 50%, 58% and 67%, and the expected calibration
+    error there was 0.014. The sampler agreed with the exact computation (median
     largest pair-state difference 0.0015). These results cover those research
     matrices only. They don't cover AVICI or CDFM on the Welt API, or any other model.
 
@@ -460,7 +461,9 @@ continuous one, and `rule="minimal"` to adjust for a minimal set instead.
 posterior masses (0 when every DAG was enumerated), and `evaluate_graph` reports
 `expected_shd_error`. When every draw agrees, for example nothing ranks above the
 candidate, an error of 0 would claim too much, so the error is the rule-of-three bound
-`3 / draws` instead and `bound` is `True` on that `FeatureProbability`. Under the exact
+`3 / draws` instead, a one-sided 95% bound rather than a standard error. `bound` is
+`True` wherever that happens: on a `FeatureProbability`, a `GraphClaim` (and the
+`bound` column of `claims_frame()`) and an `AdjustmentGroup`'s `mass_error`. Under the exact
 recursion the candidate's own share of the credible level is exact. The between-draws
 SHD baseline is a plug-in without an error.
 

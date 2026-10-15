@@ -106,7 +106,8 @@ Planned as 0.3.0.
   Monte Carlo error, the class probability of a CPDAG, the expected SHD against the
   between-draw baseline (with the former's Monte Carlo error), and P(acyclic) under raw
   independent marginals. When every draw agrees, a Monte Carlo error is the rule-of-three
-  bound `3 / draws` (`FeatureProbability.bound`) rather than 0, and under the exact
+  bound `3 / draws` (`bound` on `FeatureProbability`, `GraphClaim` and
+  `AdjustmentGroup`) rather than 0, and under the exact
   recursion the candidate's own share of its credible level is exact. A bidirected
   edge or latent node is listed as not assessable.
 - Effects over a posterior over DAGs (DEC-082 decision 6). `adjustment_probability(samples,

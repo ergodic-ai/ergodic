@@ -157,6 +157,22 @@ def test_the_mean_from_draws_carries_a_monte_carlo_error() -> None:
     assert total == pytest.approx(1.0)
 
 
+def test_a_group_every_draw_agrees_on_carries_the_bound() -> None:
+    values = np.array([[0.0, 0.7], [0.1, 0.0]])
+    probs = EdgeProbabilities(("t", "y"), values, kind="pair_state")
+    pinned = DomainKnowledge().require("t", "y")
+    samples = graph_posterior(probs, knowledge=pinned, method="mcmc", samples=400)
+    rng = np.random.default_rng(5)
+    t = (rng.random(500) < 0.5).astype(float)
+    data = tabular({"t": t, "y": t + rng.normal(size=500)})
+    result = average_effect(samples, data, "t", "y")
+    (group,) = result.groups
+    assert group.mass == 1.0 and group.bound
+    assert group.mass_error == pytest.approx(3 / samples.n_draws)
+    assert result.to_frame()["bound"].tolist() == [True]
+    assert result.diagnostics["zero_effect_mass_error_is_bound"]
+
+
 def test_sets_beyond_the_cap_are_truncated_and_reported() -> None:
     result = average_effect(_posterior(), _data(), "t", "y", max_sets=1)  # type: ignore[arg-type]
     assert result.truncated_mass == pytest.approx(P_TC, abs=1e-9)

@@ -95,6 +95,8 @@ class GraphClaim:
             assessable).
         exact: Whether ``probability`` was computed exactly.
         note: Why a claim is not assessable, else ``None``.
+        bound: Whether ``mc_error`` is the rule-of-three bound ``3 / draws`` (every
+            draw agreed), a one-sided 95% bound, not a standard error.
     """
 
     claim: str
@@ -104,6 +106,7 @@ class GraphClaim:
     mc_error: float | None
     exact: bool
     note: str | None = None
+    bound: bool = False
 
 
 @dataclass(frozen=True, eq=False)
@@ -164,7 +167,10 @@ class GraphEvaluation:
     diagnostics: dict[str, Any] = field(repr=False)
 
     def claims_frame(self) -> pd.DataFrame:
-        """The claims as a dataframe, one row each, weakest assessable claim first."""
+        """The claims as a dataframe, one row each, weakest assessable claim first.
+
+        ``bound`` marks the rows whose ``mc_error`` is the rule-of-three bound.
+        """
         import pandas as pd
 
         rows = [
@@ -174,12 +180,13 @@ class GraphEvaluation:
                 "probability": c.probability,
                 "mc_error": c.mc_error,
                 "exact": c.exact,
+                "bound": c.bound,
                 "note": c.note,
             }
             for c in self.claims
         ]
         frame = pd.DataFrame(
-            rows, columns=["claim", "kind", "probability", "mc_error", "exact", "note"]
+            rows, columns=["claim", "kind", "probability", "mc_error", "exact", "bound", "note"]
         )
         return frame.sort_values("probability", kind="stable", na_position="last").reset_index(
             drop=True
@@ -439,7 +446,10 @@ class _Reader:
             conditional[:, b, a],
         )
         values = np.sum([parts[s] for s in states], axis=0)
-        return self.posterior._estimate(np.asarray(values, dtype=np.float64), indicator=False)
+        # Draw frequencies are indicators (an all-agree claim gets the bound);
+        # Rao-Blackwellized conditionals are not.
+        frequency = self.posterior.diagnostics["edge_estimator"] == "frequency"
+        return self.posterior._estimate(np.asarray(values, dtype=np.float64), indicator=frequency)
 
     def pair_masses(self) -> FloatArray:
         """``(d, d, 3)``: each unordered pair's state masses, from the marginals."""
@@ -453,7 +463,15 @@ class _Reader:
     def _claim(
         self, text: str, kind: str, pair: tuple[str, ...], estimate: FeatureProbability
     ) -> GraphClaim:
-        return GraphClaim(text, kind, pair, estimate.probability, estimate.mc_error, estimate.exact)
+        return GraphClaim(
+            text,
+            kind,
+            pair,
+            estimate.probability,
+            estimate.mc_error,
+            estimate.exact,
+            bound=estimate.bound,
+        )
 
     # -- DAG ---------------------------------------------------------------------------------
 
@@ -582,6 +600,7 @@ class _Reader:
                 estimate.probability,
                 estimate.mc_error,
                 estimate.exact,
+                bound=estimate.bound,
             )
         )
         return claims, estimate

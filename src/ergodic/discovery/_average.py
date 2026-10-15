@@ -65,6 +65,8 @@ class AdjustmentGroup:
             ``None`` when the estimator gives none).
         estimate: The full :class:`~ergodic.inference.EffectEstimate`, or ``None``
             for the no-path group.
+        bound: Whether ``mass_error`` is the rule-of-three bound ``3 / draws``
+            (every draw agreed), a one-sided 95% bound, not a standard error.
     """
 
     adjustment_set: frozenset[str] | None
@@ -74,6 +76,7 @@ class AdjustmentGroup:
     value: float
     std_error: float | None
     estimate: EffectEstimate | None = field(default=None, repr=False)
+    bound: bool = False
 
 
 @dataclass(frozen=True, eq=False)
@@ -122,7 +125,10 @@ class AveragedEffect:
         return None if self.variance is None else math.sqrt(self.variance)
 
     def to_frame(self) -> pd.DataFrame:
-        """The groups as a dataframe: set, mass, its error, DAG count, estimate, SE.
+        """The groups as a dataframe, one row per group.
+
+        Columns: the set, its mass, the mass's error, whether that error is the
+        rule-of-three bound, the DAG count, the estimate and its standard error.
 
         The set reads ``"(empty)"`` for no adjustment and ``"(no directed path)"``
         for the zero-effect group.
@@ -136,6 +142,7 @@ class AveragedEffect:
                 else ", ".join(sorted(g.adjustment_set)) or "(empty)",
                 "mass": g.mass,
                 "mass_error": g.mass_error,
+                "bound": g.bound,
                 "n_dags": g.n_dags,
                 "estimate": g.value,
                 "std_error": g.std_error,
@@ -144,7 +151,15 @@ class AveragedEffect:
         ]
         return pd.DataFrame(
             rows,
-            columns=["adjustment_set", "mass", "mass_error", "n_dags", "estimate", "std_error"],
+            columns=[
+                "adjustment_set",
+                "mass",
+                "mass_error",
+                "bound",
+                "n_dags",
+                "estimate",
+                "std_error",
+            ],
         )
 
     def __repr__(self) -> str:
@@ -311,7 +326,13 @@ def average_effect(
     if zero.probability > 0.0:
         groups.append(
             AdjustmentGroup(
-                None, zero.probability, zero.mc_error, len(distinct["no_path"]), 0.0, 0.0
+                None,
+                zero.probability,
+                zero.mc_error,
+                len(distinct["no_path"]),
+                0.0,
+                0.0,
+                bound=zero.bound,
             )
         )
     x, y = frozenset([treatment]), frozenset([outcome])
@@ -335,7 +356,14 @@ def average_effect(
         )
         groups.append(
             AdjustmentGroup(
-                key, mass.probability, mass.mc_error, count, effect.value, effect.std_error, effect
+                key,
+                mass.probability,
+                mass.mc_error,
+                count,
+                effect.value,
+                effect.std_error,
+                effect,
+                bound=mass.bound,
             )
         )
     groups.sort(key=lambda g: -g.mass)
@@ -374,6 +402,8 @@ def average_effect(
         "masses_exact": samples.exhaustive,
         "zero_effect_mass_error": zero.mc_error,
         "unidentified_mass_error": unidentified.mc_error,
+        "zero_effect_mass_error_is_bound": zero.bound,
+        "unidentified_mass_error_is_bound": unidentified.bound,
         "note": POSTERIOR_NOTE,
     }
     if within is None:

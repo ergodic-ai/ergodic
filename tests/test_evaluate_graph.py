@@ -112,7 +112,15 @@ def test_dag_claims_are_the_pair_states() -> None:
     assert absent.kind == "no_edge"
     assert absent.probability == pytest.approx(1 - edge("A", "D") - edge("D", "A"))
     frame = result.claims_frame()
-    assert list(frame.columns) == ["claim", "kind", "probability", "mc_error", "exact", "note"]
+    assert list(frame.columns) == [
+        "claim",
+        "kind",
+        "probability",
+        "mc_error",
+        "exact",
+        "bound",
+        "note",
+    ]
     assert frame["probability"].is_monotonic_increasing
     assert "credible level" in repr(result)
 
@@ -237,6 +245,34 @@ def test_exact_draws_use_the_candidates_exact_probability_in_its_level() -> None
     assert best.credible_level == pytest.approx(own / 2, abs=1e-12)
     assert best.diagnostics["credible_level_error_is_bound"]
     assert best.credible_level_error == pytest.approx(3 / 800)
+
+
+def test_claims_every_draw_agrees_on_carry_the_bound() -> None:
+    from ergodic import tabular
+    from ergodic.graph import cpdag_of_dag
+
+    rng = np.random.default_rng(4)
+    x = rng.normal(size=(400, 6))
+    for j in range(1, 6):
+        x[:, j] += 1.2 * x[:, j - 1]
+    data = tabular({f"x{j}": x[:, j] for j in range(6)})
+    samples = graph_posterior(data, method="mcmc", samples=800, seed=0)
+    assert samples.diagnostics["edge_estimator"] == "frequency"
+    chain = dag([f"x{j} -> x{j + 1}" for j in range(5)])
+    result = evaluate_graph(cpdag_of_dag(chain), samples)
+    certain = [c for c in result.claims if c.probability in (0.0, 1.0)]
+    assert certain
+    for claim in certain:
+        assert claim.bound and claim.mc_error == pytest.approx(3 / samples.n_draws)
+    frame = result.claims_frame()
+    assert frame["bound"].any()
+    # PAG ancestor claims from exact draws carry it too.
+    probs = _probs(size=5, seed=17)
+    drawn = graph_posterior(probs, samples=500, seed=0)
+    pag = pag_of_mag(mag_of_dag(drawn.best_graph))
+    for claim in evaluate_graph(pag, drawn).claims:
+        if claim.kind in ("ancestor", "not_ancestor") and claim.probability in (0.0, 1.0):
+            assert claim.bound
 
 
 def test_expected_shd_carries_its_monte_carlo_error() -> None:
