@@ -66,7 +66,7 @@ Refutation(placebo_treatment: estimate=-275.3, under perturbation=4.529, p=0.009
 
 - **Placebo treatment.** With the smoking column shuffled, the effect drops from
   −222 g to a few grams. In none of the 100 shuffles was the placebo effect as large
-  as the real one, so `p` is the smallest value 100 runs can give: 1/101.
+  in size as the real one, so `p` is the smallest value 100 runs can give: 1/101.
 - **Random common cause.** Adding an independent random confounder to the graph
   leaves the estimate where it was, within a gram.
 - **Data subset.** Re-estimating on random 80% subsets gives about the same effect,
@@ -89,8 +89,8 @@ used for the estimate.
 The result is a `Refutation`. `estimand_value` is the effect on the real data;
 `refuted_value` and `refuted_std` are the mean and spread of the perturbed runs.
 `p_value` is set for the placebo check only: one plus the number of runs whose
-effect is at least as large as the real one, over one plus the number of runs. `diagnostics` holds the smallest and largest
-perturbed effect.
+effect is at least as large in size as the real one, over one plus the number of
+runs. `diagnostics` holds the smallest and largest perturbed effect.
 
 !!! caution "Passing is not proof"
     These checks catch a broken pipeline: an estimator that finds an effect in

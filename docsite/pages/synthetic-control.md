@@ -65,8 +65,9 @@ interrupted time series: -28.3 packs, 95% interval [-40.8, -15.8]
   California's, so the p-value is 2/39. The band adds and subtracts the 95th
   percentile of the placebo states' mean gaps, in absolute value.
 - **Step 4.** The interrupted time series projects California's own pre-1989
-  trend forward. Its estimate is larger, because it attributes all of the
-  post-1989 change to the law.
+  trend forward. Its estimate is larger, because it attributes any
+  departure from California's own linear pre-1989 trend to the law, including a
+  change that would have happened without it.
 
 ## Read a synthetic control
 
@@ -99,7 +100,8 @@ errors are Newey-West, which allow for autocorrelated residuals.
   standard error.
 - `seasonality=12` adds Fourier terms for a monthly cycle.
 - It assumes the pre-period trend would have continued and that nothing else
-  changed at `at`. A national decline after 1989, as here, breaks that assumption.
+  changed at `at`. Here the other 38 states also fell, on average, about 20
+  packs below their own linear pre-1989 trend, which breaks that assumption.
   Prefer synthetic control when donors exist.
 
 <details markdown="1">

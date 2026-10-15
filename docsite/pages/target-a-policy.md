@@ -1,7 +1,7 @@
 # Target a policy
 
-Learn a short, readable rule that says whom to treat, and estimate how much better
-it does than treating everyone or no one. The example uses a simulation in which the
+Learn a short, readable rule that says whom to treat, and measure how much it gains
+over treating no one. The example uses a simulation in which the
 treatment helps some people and harms others.
 
 !!! need "You'll need"
@@ -12,16 +12,18 @@ treatment helps some people and harms others.
 ## Run the program
 
 In the simulation a coaching programme helps only people with both `need` and `age`
-above 0. Everyone else is slightly or clearly worse off. On average it harms.
+above 0. Everyone else is slightly or clearly worse off. On average it harms. The
+program learns the rule on one half of the people and measures it on the other.
 
 ```python file="target_policy.py"
 import numpy as np
 import pandas as pd
-from ergodic import cate, dag, policy_tree, tabular
+from ergodic import cate, dag, identify_effect, policy_tree, tabular
+from ergodic.inference import dr_scores
 
-# 1. Simulate 2,000 people. The effect is +0.8 when need > 0 and age > 0, else negative.
+# 1. Simulate 4,000 people. The effect is +0.8 when need > 0 and age > 0, else negative.
 rng = np.random.default_rng(0)
-n = 2000
+n = 4000
 age = rng.normal(0, 1, n)
 need = rng.normal(0, 1, n)
 income = rng.normal(0, 1, n)
@@ -32,8 +34,6 @@ frame = pd.DataFrame(
     {"age": age, "need": need, "income": income, "coached": coached, "outcome": outcome}
 )
 data = tabular(frame, types={"coached": "categorical"})
-
-# 2. Estimate the per-unit effects. The tree needs their scores, not their intervals.
 graph = dag(
     [
         "age -> coached",
@@ -44,76 +44,103 @@ graph = dag(
         "coached -> outcome",
     ]
 )
-effects = cate(graph, data, "coached", "outcome", random_state=0, uncertainty=False)
 
-# 3. Learn the best depth-2 rule.
+# 2. Split the rows in half: one half learns the rule, the other evaluates it.
+learn = np.arange(n) < n // 2
+train, test = data.take(np.flatnonzero(learn)), data.take(np.flatnonzero(~learn))
+
+# 3. Learn the best depth-2 rule from the per-unit effects on the first half.
+effects = cate(graph, train, "coached", "outcome", random_state=0, uncertainty=False)
 tree = policy_tree(effects, depth=2)
 print(tree.describe())
+in_sample = (tree.value - tree.treat_none_value) / 2  # value is on a doubled scale
+print(f"gain over treating no one, in sample: {in_sample:.3f}")
 
-# 4. Read its value against the two trivial rules.
-low, high = tree.interval()
-print(f"rule:        {tree.value:.3f}  (90% interval {low:.3f} to {high:.3f})")
-print(f"treat all:   {tree.treat_all_value:.3f}")
-print(f"treat none:  {tree.treat_none_value:.3f}")
-gain = (tree.value - tree.treat_none_value) / 2
-print(f"estimated gain over treating no one: {gain:.3f} per person")
+# 4. Evaluate the rule on the held-out half, with fresh doubly robust scores.
+held_out = dr_scores(identify_effect(graph, "coached", "outcome"), test, random_state=0)
+treat = tree.predict(held_out.covariates)  # columns in tree.covariates order
+gain = treat * held_out.scores
+half_width = 1.96 * gain.std(ddof=1) / np.sqrt(len(gain))
+low, high = gain.mean() - half_width, gain.mean() + half_width
+print(f"gain over treating no one, held out: {gain.mean():.3f} [{low:.3f}, {high:.3f}]")
+print(f"held-out share treated: {treat.mean():.2f}")
 
-# 5. Check the rule against the truth.
-treat = tree.assign()
-print(f"share treated: {treat.mean():.2f}")
-print(f"true gain: {np.mean(treat * true_effect):.3f}")
-print(f"best possible gain: {np.mean(np.maximum(true_effect, 0)):.3f}")
+# 5. Check the rule against the truth on the held-out half.
+truth = true_effect[~learn]
+print(f"true gain: {np.mean(treat * truth):.3f}")
+print(f"best possible gain: {np.mean(np.maximum(truth, 0)):.3f}")
 ```
 
 ```output from="target_policy.py"
-if need <= -0.0101:
-  if age <= 1.358:
-    -> treat=0 (n=921)
-  else:  # age > 1.358
-    -> treat=1 (n=93)
-else:  # need > -0.0101
-  if age <= -0.1285:
-    -> treat=0 (n=465)
-  else:  # age > -0.1285
-    -> treat=1 (n=521)
-rule:        0.660  (90% interval 0.574 to 0.745)
-treat all:   -0.238
-treat none:  0.238
-estimated gain over treating no one: 0.211 per person
-share treated: 0.31
-true gain: 0.172
-best possible gain: 0.187
+if need <= -0.01998:
+  if age <= -2.295:
+    -> treat=1 (n=13)
+  else:  # age > -2.295
+    -> treat=0 (n=982)
+else:  # need > -0.01998
+  if age <= -0.04976:
+    -> treat=0 (n=502)
+  else:  # age > -0.04976
+    -> treat=1 (n=503)
+gain over treating no one, in sample: 0.204
+gain over treating no one, held out: 0.143 [0.095, 0.192]
+held-out share treated: 0.26
+true gain: 0.188
+best possible gain: 0.195
 ```
 
 - **The rule.** The tree splits on `need` near 0 and then on `age`, the two
-  variables that drive the effect. It treats about 3 people in 10.
-- **Value.** `value` takes each person's doubly robust score, a noisy
-  signal of their effect, with a plus sign when the rule treats them and a minus
-  sign when it does not, then averages. Treating
-  everyone scores the average effect; treating no one scores its negative.
-- **Gain.** Half the difference between two values is the gain in outcome units.
-  The rule adds about 0.21 per person over treating no one.
-- **Truth.** The rule's true gain is close to the best any rule could reach.
+  variables that drive the effect. One small leaf, 13 people with very low `age`,
+  is noise.
+- **In sample.** On the half it was learned from, the rule seems to add 0.20 per
+  person over treating no one. That is above even the best possible gain, 0.195,
+  because the tree was chosen to make exactly those scores look good.
+- **Held out.** On the other half the estimate is 0.14, with a 95% interval
+  from 0.10 to 0.19. Use this number.
+- **Truth.** The rule's true gain on the held-out half is 0.19, inside the
+  interval and close to the best any rule could reach.
+
+## Measure a rule on held-out data
+
+The tree is picked to maximize its own scores, so its value on those scores is
+optimistic: a winner's curse. `tree.value` and `tree.interval()` are valid only for
+a rule fixed in advance. To measure a learned rule, score it on rows it never saw:
+
+```python
+held_out = dr_scores(identify_effect(graph, "coached", "outcome"), test, random_state=0)
+treat = tree.predict(held_out.covariates)  # columns in tree.covariates order
+gain = treat * held_out.scores
+```
+
+`dr_scores` returns one doubly robust score per held-out person: a noisy signal of
+their effect. Averaging the score over the people the rule treats, with 0 for the
+rest, estimates the gain over treating no one, in outcome units. Its standard error
+is valid because the rule is fixed before these rows are used. `predict` needs the
+columns in `tree.covariates` order; both use the sorted adjustment set, so they
+match here.
+
+!!! caution "In-sample values are on a doubled scale"
+    `tree.value` averages each score with a plus sign when the rule treats and a
+    minus sign when it does not. Treating everyone scores the average effect;
+    treating no one scores its negative. Halve a difference of two values to get a
+    gain in outcome units, as step 3 does. `tree.regret()` is on the same scale.
 
 ## How the tree is chosen
 
 `policy_tree(effects, covariates=None, *, depth=2)` reads the doubly robust scores
-that `cate` stores on its result. A leaf treats its people when their scores sum
-to more than 0. The tree maximizes the total over leaves.
+that `cate` stores on its result (Athey and Wager, 2021). A leaf treats its people
+when their scores sum to more than 0. The tree maximizes the total over leaves.
 
 - At `depth=1` or `depth=2` the search tries every split on every covariate, so the
-  tree is the best of its depth. `tree.exhaustive` is `True`. The search time grows
-  quickly with rows and covariates.
+  tree is the best of its depth on the learning rows (Zhou, Athey and Wager, 2023).
+  `tree.exhaustive` is `True`. The search time grows quickly with rows and
+  covariates.
 - At `depth=3` or more the search is greedy, one split at a time, and may miss the
   best tree.
 - `covariates=` limits the splits to named columns, for example
   `policy_tree(effects, ["need"], depth=1)`.
-
-!!! caution "Trust the value, not the exact splits"
-    The value and its interval are averages of per-person scores, so they have a
-    valid standard error. The splits do not. Here one leaf treats 93 people with
-    `need` below 0 and `age` above 1.36, where the true effect is negative: the
-    tree fit noise. Prefer shallow trees and check them with domain knowledge.
+- The splits are a point estimate with no interval. Prefer shallow trees, and check
+  their splits with domain knowledge.
 
 <details markdown="1">
 <summary>Apply and inspect the rule</summary>
@@ -123,7 +150,7 @@ to more than 0. The tree maximizes the total over leaves.
   `tree.covariates`, in that order.
 - `tree.leaves()` lists the leaves with their action and size.
 - `tree.regret("treat_all")`, `("treat_none")` or `("best_trivial")` returns
-  `value` minus that baseline's value, on the same doubled scale as the values.
+  `value` minus that baseline's value, on the same doubled, in-sample scale.
 - `effects.explain().policy_tree(depth=2)` builds the same tree.
 
 </details>
