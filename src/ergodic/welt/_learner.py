@@ -12,7 +12,7 @@ fits more than you allowed.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -80,9 +80,17 @@ class WeltLearner:
     ``{"outcome": WeltLearner(), "propensity": WeltLearner(task="classification")}``.
 
     Each fit uploads the training rows as a new Welt dataset and fits a predictor:
-    one paid fit. Each predict is a paid prediction, sent in batches no larger than
-    the model's prediction-row limit. DML with ``n_folds=k`` fits ``2 * k`` times.
-    The learner and its clones share one budget of ``max_fits`` fits.
+    one paid fit. Both stay in your Welt workspace afterwards; nothing here deletes
+    them (``welt.Client().predictors()`` and ``.datasets()`` list them). Each predict
+    is a paid prediction, sent in batches no larger than the model's prediction-row
+    limit. DML with ``n_folds=k`` fits ``2 * k`` times.
+
+    The learner and its clones share one budget of ``max_fits`` fits. It caps paid
+    fits only, not predictions: each fit is followed by one prediction call per
+    batch of held-out rows (DML on 8,000 rows with five folds and a 100-row limit
+    makes about 160). Fits take no row weights, so ``supports_sample_weight`` is
+    ``False`` and ergodic refuses this learner in a weighted slot (the R-learner's
+    ``final``) before fitting anything.
 
     Args:
         model: Any Welt classification or regression model id; none is checked
@@ -98,6 +106,7 @@ class WeltLearner:
             opens a short-lived ``welt.Client()`` per request.
         max_fits: The most paid fits this learner and its clones may make together;
             ``None`` removes the cap. The default 10 covers DML with five folds.
+            Predictions are not counted.
         configuration: The Welt model configuration.
         seed: The fit seed Welt records with each predictor.
         timeout: Seconds to wait for each fit or pending prediction. A timeout
@@ -107,7 +116,10 @@ class WeltLearner:
         predictor_id_: The fitted Welt predictor's id.
         model_version_: The exact model version Welt fitted.
         classes_: The class labels, sorted (classification only).
+        supports_sample_weight: Always ``False``; read by ergodic's weighted slots.
     """
+
+    supports_sample_weight: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -244,10 +256,15 @@ class WeltLearner:
             labels = [_label(value) for value in target]
         columns = [f"x{i}" for i in range(matrix.shape[1])]
         rows = [[*row, label] for row, label in zip(matrix_rows(matrix), labels, strict=True)]
-        self._budget.charge(self.model)
         for name in ("predictor_id_", "model_version_", "classes_", "_order"):
             self.__dict__.pop(name, None)
         with using(self.client) as client:
+            # The free catalogue read comes first, so a failed lookup costs no fit
+            # and cannot strand a paid predictor.
+            key = (self.model, self.task)
+            if key not in self._budget.prediction_rows:
+                self._budget.prediction_rows[key] = self._limit(client)
+            self._budget.charge(self.model)
             dataset = client.upload(
                 columns=[*columns, _TARGET], rows=rows, name="ergodic fit", target=_TARGET
             )
@@ -259,9 +276,6 @@ class WeltLearner:
                 seed=self.seed,
             )
             predictor = job.result(timeout=self.timeout)
-            key = (self.model, self.task)
-            if key not in self._budget.prediction_rows:
-                self._budget.prediction_rows[key] = self._limit(client)
         if predictor.get("task") != self.task:
             raise ValueError("Welt fitted a predictor for a different task")
         self.predictor_id_: str = predictor["id"]

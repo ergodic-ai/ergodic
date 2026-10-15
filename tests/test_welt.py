@@ -49,8 +49,11 @@ class FakeWelt:
         graph_type: str = "dag",
         prediction_rows: int | None = 100,
         catalogue_graph: dict[str, str] | None = None,
+        pending_predictions: bool = False,
     ) -> None:
         self.graph_type = graph_type
+        # When set, every prediction answers 504 prediction_timeout with a job to poll.
+        self.pending_predictions = pending_predictions
         # Native graph types the fake catalogue states, by model id (none by default,
         # as Welt's catalogue does not state them today).
         self.catalogue_graph = catalogue_graph or {}
@@ -186,6 +189,18 @@ class FakeWelt:
         return httpx.Response(202, json={"id": job})
 
     def _predict(self, ident: str, body: dict[str, Any]) -> Any:
+        answer = self._answer(ident, body)
+        if not self.pending_predictions:
+            return httpx.Response(200, json=answer)
+        job = f"job_p{len(self.jobs) + 1}"
+        self.jobs[job] = {
+            "status": {"id": job, "status": "succeeded", "operation": "predict"},
+            "result": answer,
+        }
+        error = {"code": "prediction_timeout", "message": "Continue polling.", "job_id": job}
+        return httpx.Response(504, json={"error": error})
+
+    def _answer(self, ident: str, body: dict[str, Any]) -> dict[str, Any]:
         rows = np.asarray(body["rows"], dtype=float)
         self.predict_batches.append(len(rows))
         if self.prediction_rows is not None:
@@ -193,16 +208,13 @@ class FakeWelt:
         state = self.predictors[ident]
         if "coef" in state:
             design = np.column_stack([np.ones(len(rows)), rows])
-            return httpx.Response(200, json={"predictions": (design @ state["coef"]).tolist()})
+            return {"predictions": (design @ state["coef"]).tolist()}
         proba = [state["proba"]] * len(rows)
         top = state["public"]["classes"][int(np.argmax(state["proba"]))]
-        return httpx.Response(
-            200,
-            json={
-                "predictions": [top] * len(rows),
-                "probabilities": proba if body["probabilities"] else None,
-            },
-        )
+        return {
+            "predictions": [top] * len(rows),
+            "probabilities": proba if body["probabilities"] else None,
+        }
 
 
 @pytest.fixture(autouse=True)
@@ -532,3 +544,47 @@ def test_ergodic_welt_names_the_extra_when_welt_client_is_missing() -> None:
     )
     done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
     assert "pip install 'ergodic[welt]'" in done.stdout
+
+
+def test_a_pending_prediction_is_awaited_through_its_job() -> None:
+    fake = FakeWelt(pending_predictions=True)
+    X = np.arange(30.0).reshape(-1, 1)
+    y = 1.0 + 2.0 * X[:, 0]
+    with fake.client() as client:
+        learner = WeltLearner(client=client).fit(X, y)
+        predicted = learner.predict(X)
+    np.testing.assert_allclose(predicted, y, atol=1e-9)
+    assert fake.count("GET", "/v1/jobs/job_p") >= 2  # status, then the result
+
+
+def test_a_weighted_slot_refuses_a_welt_learner_before_any_fit() -> None:
+    """R-learner's final stage is fit with sample_weight; WeltLearner says it can't."""
+    from ergodic import cate
+
+    fake = FakeWelt()
+    rng = np.random.default_rng(5)
+    z = rng.normal(size=80)
+    t = (rng.normal(size=80) + z > 0).astype(float)
+    y = 2.0 * t + z + rng.normal(size=80)
+    data = tabular(pd.DataFrame({"Z": z, "T": t, "Y": y}), types={"T": "categorical"})
+    graph = dag(["Z -> T", "Z -> Y", "T -> Y"])
+    assert WeltLearner.supports_sample_weight is False
+    with fake.client() as client:
+        learners = {
+            "outcome": WeltLearner(client=client),
+            "propensity": WeltLearner(task="classification", client=client),
+            "final": WeltLearner(client=client),
+        }
+        with pytest.raises(TypeError, match="sample_weight"):
+            cate(graph, data, "T", "Y", method="r_learner", learner=learners)
+    assert fake.calls == []
+
+
+def test_welt_methods_refuse_local_only_arguments_before_any_request() -> None:
+    fake = FakeWelt()
+    with fake.client() as client:
+        with pytest.raises(ValueError, match="alpha"):
+            discover(continuous(), method="welt:arrow", alpha=0.01, client=client)
+        with pytest.raises(ValueError, match="max_cond_size"):
+            discover(continuous(), method="welt:arrow", max_cond_size=2, client=client)
+    assert fake.calls == []

@@ -32,7 +32,7 @@ class RLearner(_MetaLearnerBase):
     slots = (
         Slot("outcome", Task.REGRESSION),
         Slot("propensity", Task.CLASSIFICATION),
-        Slot("final", Task.REGRESSION),
+        Slot("final", Task.REGRESSION, weighted=True),
     )
     targets = frozenset({EffectTarget.ATE})
 

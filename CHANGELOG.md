@@ -42,6 +42,10 @@ To be released together with Welt (welt-api DEC-078, API-140).
   carry its provenance. Learner cloning honors a learner's own
   `__sklearn_clone__` override; scikit-learn estimators keep the `get_params`
   path.
+- A weighted nuisance slot (the R-learner's `final`) refuses, before any fit, a
+  learner that declares `supports_sample_weight = False`, as `WeltLearner` does.
+  `discover(..., method="welt:<model>")` refuses `alpha` and local-only keyword
+  arguments before any request.
 
 ### Changed
 - Identification's refusal of a `mixed` graph now says how to fix it. A fully

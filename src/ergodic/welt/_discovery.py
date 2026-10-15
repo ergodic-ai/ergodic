@@ -177,6 +177,9 @@ def discover(
         raise ValueError(f"Welt discovery needs complete rows; {incomplete} have missing values")
     columns, rows = frame_rows(data.to_pandas()[variables])
     with using(client) as welt_client:
+        # cdfm and avici are refused here, before anything is paid for. A later opt-in
+        # local decoder (decoder=..., built on the edge scores) would branch off this
+        # check; until then a non-DAG model is never run through ergodic.
         expected = native_graph_type(model, welt_client)
         if expected is not None and expected != "dag":
             raise WeltGraphNotDAGError(model, expected)
