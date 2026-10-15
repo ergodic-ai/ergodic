@@ -159,6 +159,9 @@ Planned as 0.3.0.
 - Pickles of `DomainKnowledge` from 0.2.x load, with no soft statements. A pair the
   pickle forbids in both directions becomes an adjacency ban (`nonadjacent`), its
   0.2 meaning, so it still rules out a bidirected edge.
+- The `welt` extra requires `welt-client>=0.14`, the release that serves Chronos-2
+  forecasting (DEC-085). `WeltForecaster` talks to `POST /v1/forecasts` through
+  `welt.Client.request`, so the Welt API must serve that route.
 
 ## [0.2.1] - 2026-10-15
 

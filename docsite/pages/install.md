@@ -40,7 +40,7 @@ uv add "ergodic[forecast]"
 | `scm` | pymc 5 or later | Structural causal models (`ergodic.scm`) |
 | `forecast` | pymc 5 or later | Forecasting (`ergodic.forecast`) |
 | `latent` | pymc 5 or later | Hidden regimes (`ergodic.latent`) |
-| `welt` | welt-client 0.13 or later | Welt's hosted models (`ergodic.welt`), Python 3.11 to 3.13 |
+| `welt` | welt-client 0.14 or later | Welt's hosted models (`ergodic.welt`), Python 3.11 to 3.13 |
 
 `bayes`, `scm`, `forecast` and `latent` add the same package; any one of them is
 enough for all four. Combine extras with commas: `pip install "ergodic[scm,welt]"`.
