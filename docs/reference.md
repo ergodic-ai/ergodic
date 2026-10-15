@@ -10,6 +10,7 @@ The shared objects live at the top level of `ergodic`, and the pillars under the
 | Estimate per-unit effects (CATE) | `cate` | [Causal inference](inference.md) |
 | Stress-test an estimate | `refute_effect` | [Checking an estimate](inference.md#checking-an-estimate) |
 | Learn a graph from data | `discover`, `bootstrap` | [Causal discovery](discovery.md) |
+| Decode edge probabilities into a DAG | `EdgeProbabilities`, `decode` | [Causal discovery](discovery.md) |
 | Measure a rollout with no graph | `did`, `synthetic_control`, `interrupted_time_series` | [Panel designs](panel.md) |
 | Forecast a series, or a whole hierarchy | `forecast`, `backtest` | [Forecasting](forecast.md) |
 | Recover a hidden regime from one series | `recover`, `certify`, `calibrate` | [Hidden regimes](latent.md) |
@@ -42,7 +43,7 @@ Graph to estimand: adjustment, front-door, instruments, the general ID algorithm
 
 ## Causal discovery
 
-Structure learning: the algorithms, the CI tests and scores they consume, and the `discover` facade.
+Structure learning: the algorithms, the CI tests and scores they consume, the `discover` facade, and the edge-probability decoders (`EdgeProbabilities`, `decode`).
 
 ::: ergodic.discovery
 

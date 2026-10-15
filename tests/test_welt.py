@@ -24,7 +24,15 @@ import welt  # noqa: E402
 
 import ergodic  # noqa: E402
 from ergodic import dag, estimate_effect, tabular  # noqa: E402
-from ergodic.discovery import DiscoveryResult, bootstrap, discover  # noqa: E402
+from ergodic.discovery import (  # noqa: E402
+    Decoder,
+    DecodeResult,
+    DiscoveryResult,
+    EdgeProbabilities,
+    bootstrap,
+    decode,
+    discover,
+)
 from ergodic.inference import Learner  # noqa: E402
 from ergodic.welt import (  # noqa: E402
     WeltGraphNotDAGError,
@@ -50,8 +58,12 @@ class FakeWelt:
         prediction_rows: int | None = 100,
         catalogue_graph: dict[str, str] | None = None,
         pending_predictions: bool = False,
+        native: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.graph_type = graph_type
+        # Per-model native output: {"values", "edges" (source, target), "decoder"},
+        # overriding the default chain and flat scores.
+        self.native = native or {}
         # When set, every prediction answers 504 prediction_timeout with a job to poll.
         self.pending_predictions = pending_predictions
         # Native graph types the fake catalogue states, by model id (none by default,
@@ -125,6 +137,14 @@ class FakeWelt:
             {"u": a, "v": b, "u_mark": "tail", "v_mark": "arrow"} for a, b in pairwise(names[:-1])
         ]
         values = [[0.0 if i == j else 0.25 for j in range(len(names))] for i in range(len(names))]
+        decoder: dict[str, Any] = {"name": "fixture-decoder"}
+        native = self.native.get(body["model_id"])
+        if native is not None:
+            values = native["values"]
+            edges = [
+                {"u": a, "v": b, "u_mark": "tail", "v_mark": "arrow"} for a, b in native["edges"]
+            ]
+            decoder = native["decoder"]
         result = {
             "id": f"causal_{job}",
             "workspace_id": "ws_fixture",
@@ -136,7 +156,7 @@ class FakeWelt:
             "edge_marks": edges,
             "score_semantics": "native_directed_edge_probability",
             "score_reference": f"scores_{job}",
-            "decoder": {"name": "fixture-decoder"},
+            "decoder": decoder,
             "assumptions": ["fixture only"],
             "constraints_applied": body["constraints"],
             "diagnostics": {"job_id": job, "seed": body["seed"]},
@@ -332,6 +352,156 @@ def test_discovery_refusals_happen_before_any_request() -> None:
         with pytest.raises(ValueError, match="paid Welt jobs"):
             bootstrap(continuous(), method="welt:arrow", n_bootstrap=5, client=client)
     assert fake.calls == []
+
+
+# -- explicit local decoding (API-148, DEC-079) ----------------------------------------
+
+ORDER = ["Z", "X", "Y", "W"]
+
+
+def _scores(cells: dict[tuple[str, str], float], floor: float = 0.05) -> list[list[float]]:
+    return [[0.0 if a == b else cells.get((a, b), floor) for b in ORDER] for a in ORDER]
+
+
+# AVICI: independent marginals with a reciprocal pair (Z <-> X) and a cycle Z -> X -> Y -> Z.
+AVICI = {
+    "values": _scores({("Z", "X"): 0.9, ("X", "Z"): 0.55, ("X", "Y"): 0.8, ("Y", "Z"): 0.6}),
+    "edges": [("Z", "X"), ("X", "Z"), ("X", "Y"), ("Y", "Z")],
+    "decoder": {
+        "name": "native strict probability>0.5; directed cycles/reciprocals preserved",
+        "parameters": {"threshold": 0.5, "threshold_mode": "native_fixed"},
+    },
+}
+# CDFM: an adaptive native threshold of 0.3, below the 0.5 that greedy uses by default.
+CDFM = {
+    "values": _scores({("Z", "X"): 0.4, ("X", "Y"): 0.35, ("W", "Y"): 0.32, ("Y", "W"): 0.1}),
+    "edges": [("Z", "X"), ("X", "Y"), ("W", "Y")],
+    "decoder": {
+        "name": "native suggest_threshold exact calibration over logits",
+        "parameters": {"threshold": 0.3, "threshold_mode": "native_adaptive"},
+    },
+}
+
+
+def _decoding_fake() -> FakeWelt:
+    return FakeWelt(graph_type="directed", native={"avici": AVICI, "cdfm": CDFM})
+
+
+def _glyphs(graph: ergodic.MixedGraph) -> list[str]:
+    return sorted(edge.glyph() for edge in graph.edges)
+
+
+def test_avici_with_a_decoder_returns_the_decoded_dag_labelled_decoded() -> None:
+    fake = _decoding_fake()
+    data = continuous()
+    with fake.client() as client:
+        result = welt_discover(data, "avici", decoder="greedy", client=client, seed=3)
+    assert isinstance(result, DecodeResult) and isinstance(result, DiscoveryResult)
+    assert result.method == "welt:avici" and result.n == data.n_rows
+    assert result.graph.kind.value == "dag"
+    # The native 0.5 rule keeps four edges; greedy keeps the stronger of the reciprocal
+    # pair and drops Y -> Z, which would close the cycle.
+    assert _glyphs(result.graph) == ["X --> Y", "X <-- Z"]
+    assert result.graph.nodes == frozenset(ORDER)
+    d = result.diagnostics
+    assert d["decoded"] is True and d["native"] is False
+    assert d["decoder"] == "greedy_v1" and d["rejected_cycles"] == (1,)
+    assert d["parameters"]["threshold"] == 0.5 and d["threshold_source"] == "welt_native"
+    assert d["note"] == "not a graph posterior; orientation not certified"
+    assert d["welt_native_graph_type"] == "directed"
+    assert set(d["welt_native_edges"]) == {("Z", "X"), ("X", "Z"), ("X", "Y"), ("Y", "Z")}
+    assert d["welt_job_id"] == "job_d1" and d["welt_seed"] == 3
+    probs = d["edge_probabilities"]
+    assert isinstance(probs, EdgeProbabilities) and probs is result.probabilities
+    assert probs.kind == "independent" and probs.calibrated is False
+    assert probs.variables == tuple(ORDER)
+    assert probs.values[0, 1] == 0.9  # Z -> X, source row and target column
+    assert probs.provenance["native_graph_type"] == "directed"
+    assert probs.provenance["welt_model"] == "avici"
+    assert probs.provenance["native_decoder"]["parameters"]["threshold"] == 0.5
+    assert fake.count("POST", "/v1/discoveries") == 1
+
+
+def test_cdfm_defaults_to_its_native_adaptive_threshold() -> None:
+    fake = _decoding_fake()
+    with fake.client() as client:
+        result = welt_discover(continuous(), "cdfm", decoder="greedy", client=client)
+        explicit = welt_discover(
+            continuous(), "cdfm", decoder=Decoder("greedy", threshold=0.38), client=client
+        )
+        exact = welt_discover(continuous(), "cdfm", decoder="exact_map", client=client)
+    assert _glyphs(result.graph) == ["W --> Y", "X --> Y", "X <-- Z"]
+    assert result.diagnostics["parameters"]["threshold"] == 0.3
+    assert result.diagnostics["threshold_source"] == "welt_native"
+    assert _glyphs(explicit.graph) == ["X <-- Z"]
+    assert explicit.diagnostics["threshold_source"] == "decoder"
+    # The other decoders read the scores themselves: no CDFM edge clears w > 0 here.
+    assert exact.graph.edges == frozenset()
+    assert exact.diagnostics["threshold_source"] is None
+    # The edge probabilities allow any other decoding locally, with no new run.
+    local = decode(result.diagnostics["edge_probabilities"])
+    assert local.graph.edges == frozenset()
+
+
+def test_decoding_applies_knowledge_locally_and_samplers_take_their_seed() -> None:
+    fake = _decoding_fake()
+    knowledge = ergodic.DomainKnowledge().forbid("Z", "X").require("W", "Y")
+    with fake.client() as client:
+        result = welt_discover(
+            continuous(), "avici", decoder="greedy", knowledge=knowledge, client=client
+        )
+        sampled = welt_discover(
+            continuous(),
+            "avici",
+            decoder=Decoder("pair_sampler", samples=5, seed=1),
+            client=client,
+        )
+    assert knowledge.violations(result.graph) == []
+    assert "W --> Y" in _glyphs(result.graph)
+    assert result.diagnostics["knowledge_applied"] is True
+    # Welt itself still ran unconstrained.
+    assert all(not v for v in fake.jobs["job_d1"]["result"]["constraints_applied"].values())
+    assert isinstance(sampled, DecodeResult)
+    assert len(sampled.candidates) == 5 and sampled.diagnostics["seed"] == 1
+
+
+def test_facade_passes_the_decoder_through() -> None:
+    fake = _decoding_fake()
+    with fake.client() as client:
+        result = discover(continuous(), method="welt:avici", decoder="greedy", client=client)
+    assert result.method == "welt:avici" and result.diagnostics["decoded"] is True
+
+
+def test_decoder_refusals_happen_before_any_request() -> None:
+    fake = _decoding_fake()
+    with fake.client() as client:
+        with pytest.raises(WeltGraphNotDAGError):
+            welt_discover(continuous(), "avici", client=client)  # still the default
+        with pytest.raises(ValueError, match="explicit integer seed"):
+            welt_discover(continuous(), "avici", decoder="pair_sampler", client=client)
+        with pytest.raises(ValueError, match="unknown decoder"):
+            welt_discover(continuous(), "avici", decoder="magic", client=client)
+        with pytest.raises(TypeError, match="decoder must be"):
+            welt_discover(continuous(), "avici", decoder=0.5, client=client)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="lack"):
+            welt_discover(
+                continuous(),
+                "avici",
+                decoder="greedy",
+                knowledge=ergodic.DomainKnowledge().require("Z", "Q"),
+                client=client,
+            )
+        with pytest.raises(ValueError, match="latent confounder"):
+            welt_discover(
+                continuous(),
+                "cdfm",
+                decoder="greedy",
+                knowledge=ergodic.DomainKnowledge().confound("Z", "X"),
+                client=client,
+            )
+    # Only the catalogue lookup of the default refusal touched the API.
+    assert fake.count("POST", "/v1/datasets") == 0
+    assert fake.count("POST", "/v1/discoveries") == 0
 
 
 # -- the learner --------------------------------------------------------------
