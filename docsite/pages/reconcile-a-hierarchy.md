@@ -5,7 +5,9 @@ levels add up. You choose which level to believe; ergodic does the arithmetic on
 every posterior draw.
 
 !!! need "You'll need"
-    - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`.
+    - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`. It adds
+      PyMC only. Optionally, `pip install jax numpyro` switches sampling to the
+      faster NumPyro backend, which recorded the output on this page.
     - One column per series and a parent-to-children mapping, read with
       `ergodic.hts`. A parent must be the sum of its children.
 
@@ -75,15 +77,17 @@ mint(weights=mint_shrink)        coherent=True  total in month 6: 183.8
 |---|---|---|
 | `"bottom_up"` | The leaves. Each parent becomes the sum of its children. | None |
 | `"top_down"` | The root. Its draws are split among the children. | `data=` (required), `proportions="historical"` or `"forecast"` |
-| `"middle_out"` | One level in between, summed up and split down from there. | `data=`, `level=` (the root is 0), `proportions=` |
+| `"middle_out"` | One level in between, summed up and split down from there. | `data=` and `level=` (both required; the root is 0), `proportions=` |
 | `"mint"` | Every level, weighted by how sure it is. | `weights="posterior"` or `"mint_shrink"`, `trust={node: weight}` |
 | `"none"` | No level. Nothing changes. | None |
 
 `historical` proportions split a parent by the children's shares in the training
 data. `forecast` proportions use the shares in each draw of the children's own
-forecasts. `mint` moves each forecast as little as possible, weighted by its
-precision: the posterior variance by default, or the in-sample residuals with
-`mint_shrink`. A node with `trust` weight 10 moves about a tenth as far.
+forecasts. `mint` moves the forecasts as little as possible in total, and a node
+with a larger variance moves further. The variances are diagonal: each node's
+posterior forecast variance by default, or its in-sample residual second moment with
+`mint_shrink`. That is a diagonal, not the full shrinkage covariance some MinT
+variants use. A node with `trust` weight 10 moves about a tenth as far.
 
 An option a strategy doesn't read raises a `ValueError`, so give each method its own
 options, as the program does.
@@ -110,8 +114,9 @@ strategies without sampling again.
 - A strict tree from `{parent: [children]}`. Deeper trees work the same way.
 - A node without a column is forecast as the sum of its children's forecasts.
   Every leaf needs a column.
-- Reconciliation needs sum aggregation. A hierarchy built with
-  `aggregation="mean"` raises.
+- Forecasting a hierarchy needs sum aggregation. `forecast` refuses a hierarchy
+  built with `aggregation="mean"` with a `NotImplementedError`, whatever
+  `reconcile=` says.
 - On flat data, any reconciliation option raises: there is nothing to reconcile.
 - The result lists the total first, then each level down.
 

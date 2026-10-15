@@ -94,9 +94,15 @@ print(f"effect if the hidden path carries covariance 2.0: {bounds.at(2.0):.2f}")
 
 The range runs from no confounding (`c = 0`, the raw slope) to all of the covariance
 being confounding (an effect of zero). Here `U` adds a covariance of 2.0, so
-`.at(2.0)` lands near the truth. With real data you don't know `c`, and the range is
-the honest answer. For a binary treatment or outcome, the band comes from refitting
-the model under a grid of confounding priors instead.
+`.at(2.0)` lands near the truth. With real data you don't know `c`.
+
+The range covers the truth only if the hidden path pushes in the same direction as
+the observed association, and adds no more than all of it. For any other `c`,
+`.at(c)` extrapolates exactly along the line.
+
+For a binary or categorical treatment with a continuous outcome, the band comes from
+refitting the model under a grid of confounding priors instead. Then `.confounding`
+holds prior scales, not covariances.
 
 ## Choose the mechanisms
 
@@ -116,15 +122,20 @@ To override one, pass `mechanisms={"Y": "linear"}`. The names are `"linear"`,
 seconds.
 
 !!! caution "The graph carries the assumptions"
-    The front-door answer holds only if `M` carries all of the effect of `X` and
-    nothing hidden links `M` and `Y`. The data can't check either assumption.
+    The front-door answer holds only if `M` carries all of the effect of `X`,
+    nothing hidden links `X` and `M`, and nothing hidden links `M` and `Y`. The data
+    can't check these assumptions.
 
 <details markdown="1"><summary>Which graphs and effects does the SCM accept?</summary>
 
 - A DAG, an ADMG, or a DAG with `latent=` nodes. Each `<->` edge becomes one hidden
-  variable per unit, fitted jointly with the nodes it links. A latent node can't be
-  a query target or an intervention target.
-- A CPDAG, MAG or PAG raises a `ValueError`. Pick one member of the class first.
+  variable per unit. Nodes connected through `<->` edges are fitted jointly, as one
+  group. A latent node can't be a query target or an intervention target.
+- A graph with undirected or circle edges, such as a CPDAG or PAG, raises a
+  `ValueError`. Pick one member of the class first.
+- A MAG made only of `->` and `<->` edges is not refused: it is fitted as an ADMG,
+  which reads each `->` as a direct effect. A MAG's edges mean ancestry, so convert
+  it to an ADMG yourself first.
 - A custom mechanism can't sit on a node with a `<->` edge; only the built-in
   mechanisms carry the hidden variable.
 - `ate` needs a numeric outcome. For a binary or categorical outcome, use
@@ -134,7 +145,7 @@ seconds.
   `levels=(low_code, high_code)`.
 - An effect identified only by an instrument, or only by the general ID formula,
   raises `NotImplementedError`. Use `estimate_effect` for those.
-- A confounded group of more than 8 nodes still fits, with a warning that it may be
+- A jointly fitted group of more than 8 nodes still fits, with a warning that it may be
   slow. Raise `district_size_cap=` to silence it.
 
 </details>
