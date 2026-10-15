@@ -31,7 +31,15 @@ from .data import (
     tabular,
     timeseries,
 )
-from .discovery import DecodeResult, EdgeProbabilities, decode, discover, granger
+from .discovery import (
+    DecodeResult,
+    EdgeProbabilities,
+    GraphTest,
+    decode,
+    discover,
+    granger,
+    test_graph,
+)
 
 # `forecast` names both the pillar and its facade, and the function is what the
 # top level exports: `from ergodic import forecast` gives the callable, while
@@ -156,6 +164,7 @@ __all__ = [
     "Functional",
     "GaussianAdditive",
     "GraphKind",
+    "GraphTest",
     "Hedge",
     "HierarchicalTSData",
     "Hierarchy",
@@ -242,5 +251,6 @@ __all__ = [
     "select_cate",
     "synthetic_control",
     "tabular",
+    "test_graph",
     "timeseries",
 ]
