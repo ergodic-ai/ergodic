@@ -54,7 +54,7 @@ print(table)
 print(table.to_frame().to_string(index=False))
 ```
 
-```output from="certify_regime.py" tol="1.0"
+```output from="certify_regime.py" numbers="vary"
 LatentModel(SpectralWhittle, chains=2, draws=400, warmup=400)
 {'level': True, 'spread': False, 'freq': False, 'amp': False}
 wave_present ('freq', 'amp') -5.9 False

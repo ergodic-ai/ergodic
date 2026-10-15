@@ -129,6 +129,14 @@ def test_numeric_tolerance() -> None:
     assert not examples.same("ate=0.7982", "att=0.7982", tol=0.01)
 
 
+def test_numbers_vary_compares_text_only() -> None:
+    assert examples.same("min_ess=25.8 ok=True", "min_ess=5.4 ok=True", numbers_vary=True)
+    assert examples.same("x  25.8", "x   5.4", numbers_vary=True)
+    assert not examples.same("min_ess=25.8 ok=True", "min_ess=5.4 ok=False", numbers_vary=True)
+    assert not examples.same("a=1 b=2", "a=1", numbers_vary=True)
+    assert not examples.same("min_ess=25.8", "min_ess=5.4")
+
+
 def test_programs_run_without_network(tmp_path: Path) -> None:
     code = (
         "import socket\ntry:\n    socket.create_connection(('example.com', 80), timeout=1)\n"

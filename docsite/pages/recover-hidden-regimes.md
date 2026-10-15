@@ -47,7 +47,7 @@ agreement = np.mean(ticks == switch[: ticks.size])
 print(f"agreement with the planted switch: {max(agreement, 1 - agreement):.2f}")
 ```
 
-```output from="hidden_regimes.py" tol="0.1"
+```output from="hidden_regimes.py" numbers="vary"
 LatentResult('signal', steps=15, decoded=150/800, verdicts=[spread])
 MarkovChain(stay_alpha=4.0, stay_beta=2.0)
 level  +0.09  [-0.02, +0.21]

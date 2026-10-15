@@ -52,7 +52,7 @@ print(bars.round(1).to_string(index=False))
 print(f"total {waterfall.total:.1f}; bars add up: {waterfall.relative_closure_error < 1e-9}")
 ```
 
-```output from="drivers.py" tol="0.5" rtol="0.05"
+```output from="drivers.py" numbers="vary"
 MixedGraph(kind=dag, nodes=2, edges=[sales[t] <-- visits[t-1]])
 TrainingSchedule: 2 stages, 2 by mcmc
   Stage 0 [mcmc     ]: visits

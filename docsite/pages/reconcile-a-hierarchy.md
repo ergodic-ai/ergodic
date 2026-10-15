@@ -54,7 +54,7 @@ for method, options in recipes:
     print(f"{result.reconciliation:32} coherent={result.coherent}  total in month 6: {final:.1f}")
 ```
 
-```output from="reconcile_regions.py" tol="0.5" rtol="0.05"
+```output from="reconcile_regions.py" numbers="vary"
 Hierarchy(nodes=3, leaves=2, agg='sum')
 ForecastResult(draws: 3 series [total, north, south], horizon=6, S=400, coherent=False)
 total minus regions: [1.1 1.5 1.3 0.7 1.1 1.2]

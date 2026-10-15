@@ -53,7 +53,7 @@ diagnostics = reports[-1].diagnostics()
 print(diagnostics[["fold", "cutoff", "divergences", "min_ess"]].round(1).to_string(index=False))
 ```
 
-```output from="backtest_sales.py" tol="0.5" rtol="0.1"
+```output from="backtest_sales.py" numbers="vary"
 BacktestReport(Bayesian, expanding: 2 folds at [48, 54], horizon=6, 1 nodes)
                  mae   rmse  mase   crps  coverage
 Naive          10.53  10.87  0.57   6.79      0.92

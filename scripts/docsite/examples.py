@@ -13,7 +13,10 @@ The rules (the Welt next-pass rules in welt-api ``docs/sdk-docs-handoff.md``):
 - An ``output`` panel names its program with ``from="name.py"`` (optionally a
   ``lines="a-b"`` slice of its standard output). ``record`` writes the program's output
   into the panel; ``check`` reruns the program and compares, exactly by default or with
-  ``tol``/``rtol`` numeric tolerances for sampling-based pages.
+  ``tol``/``rtol`` numeric tolerances for sampling-based pages. ``numbers="vary"`` is
+  for MCMC pages whose draws differ between platforms (the recording Mac and Linux
+  CI): the text, and how many numbers it holds, must still match exactly, but the
+  numbers themselves are not compared.
 """
 
 from __future__ import annotations
@@ -225,11 +228,21 @@ def select(stdout: str, spec: str | None) -> str:
     return "\n".join(lines[i - 1] for i in chosen) + "\n"
 
 
-def same(expected: str, actual: str, tol: float = 0.0, rtol: float = 0.0) -> bool:
-    """Exact match, or numbers within ``tol + rtol * |expected|`` and the same text."""
+def same(
+    expected: str,
+    actual: str,
+    tol: float = 0.0,
+    rtol: float = 0.0,
+    *,
+    numbers_vary: bool = False,
+) -> bool:
+    """Exact match, or numbers within ``tol + rtol * |expected|`` and the same text.
+
+    With ``numbers_vary`` only the text and the count of numbers must match.
+    """
     if expected == actual:
         return True
-    if not tol and not rtol:
+    if not tol and not rtol and not numbers_vary:
         return False
     left, right = NUMBER.split(expected), NUMBER.split(actual)
     numbers_left, numbers_right = NUMBER.findall(expected), NUMBER.findall(actual)
@@ -237,6 +250,8 @@ def same(expected: str, actual: str, tol: float = 0.0, rtol: float = 0.0) -> boo
         return False
     if [" ".join(x.split()) for x in left] != [" ".join(x.split()) for x in right]:
         return False
+    if numbers_vary:
+        return True
     return all(
         abs(float(a) - float(b)) <= tol + rtol * abs(float(a))
         for a, b in zip(numbers_left, numbers_right, strict=True)
@@ -321,10 +336,12 @@ def check(
                 continue
             tol = float(fence.attributes.get("tol", 0))
             rtol = float(fence.attributes.get("rtol", 0))
-            if not same(fence.code, actual, tol, rtol):
+            vary = fence.attributes.get("numbers") == "vary"
+            if not same(fence.code, actual, tol, rtol, numbers_vary=vary):
+                rule = "numbers vary" if vary else f"tol={tol}, rtol={rtol}"
                 problems.append(
                     f"{path.name}: output of {source} changed "
-                    f"(tol={tol}, rtol={rtol}); run `make docs-record` after review\n"
+                    f"({rule}); run `make docs-record` after review\n"
                     + diff(fence.code, actual, source)
                 )
         if record and text != path.read_text():

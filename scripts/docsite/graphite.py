@@ -6,7 +6,8 @@ Ported functions: ``icon``, ``format_signature``, ``highlight``, ``mark_lines``,
 and ``search_records``. Changes from the source, all product-neutral:
 
 - typed for mypy strict and formatted for ruff; errors raise :class:`DocsError`;
-- fence attributes add ``from``/``lines``/``tol``/``rtol`` (recorded output panels),
+- fence attributes add ``from``/``lines``/``tol``/``rtol``/``numbers`` (recorded output
+  panels),
   ``timeout`` (programs) and ``requires`` (a program that needs an outside service,
   shown as a "Needs …" note and never run by the checker); a ``file="…"`` header
   links its download;
@@ -145,7 +146,7 @@ CALLOUTS = {
 # Attributes each fence kind accepts. ``output`` panels name the program they record.
 FENCE_ATTRIBUTES = {
     "code": frozenset({"file", "tab", "hl", "title", "timeout", "slow", "requires"}),
-    "output": frozenset({"title", "from", "lines", "tol", "rtol"}),
+    "output": frozenset({"title", "from", "lines", "tol", "rtol", "numbers"}),
 }
 
 
