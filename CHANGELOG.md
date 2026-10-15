@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `max_fits`, and `predictor_id_` is `None`. In 0.2.0 it raised, so the "Discover in
   Welt, estimate in ergodic" guide stopped whenever Welt's Arrow found no confounders
   for the treatment, as it does on the guide's own data today. With no adjustment
-  variables, DML is then the regression slope of the outcome on the treatment, the
-  same as with ergodic's `ols` learner.
+  variables, DML is then the cross-fitted regression slope of the outcome on the
+  treatment, identical to DML with ergodic's `ols` learner.
 - `ArcStats` treats two NaN gaps (START and END arcs) as equal and hashes them alike,
   so `process_map(log) == process_map(log)` holds on Python 3.13 and 3.14, where
   dataclass equality compares fields one by one.

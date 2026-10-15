@@ -1,7 +1,8 @@
 # Discover in Welt, estimate in ergodic
 
 Learn a causal graph with a hosted Welt model, then identify and estimate an effect
-on it in ergodic. Welt also fits the nuisance models inside the estimate.
+on it in ergodic. When the graph leaves variables to adjust for, Welt also fits the
+nuisance models inside the estimate.
 
 !!! need "You'll need"
     - Python 3.11, 3.12 or 3.13.
