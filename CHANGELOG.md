@@ -118,6 +118,14 @@ To be released together with Welt.
   the graph kind as `cpdag` rather than `GraphKind.CPDAG`.
 - `SyntheticControlEffect.kind` is `"placebo"` instead of `"analytic"`: there is
   no standard error, and the interval is a placebo band.
+- `HillClimb` breaks ties between score-equivalent moves by its documented
+  enumeration order instead of by floating-point rounding. Adding `x -> y` and
+  `y -> x` (or reversing a covered edge) score the same, but the computed deltas
+  differ in the last bits depending on the BLAS build, so the climb took
+  machine-dependent paths; on Apple Accelerate the default run on a five-node
+  world stopped at a lower-scoring graph (BIC -127.0 against the truth's -123.2)
+  with an extra edge. Moves within a relative 1e-9 are now ties, and a tie keeps
+  the first move.
 
 ## [0.1.1] - 2026-08-30
 

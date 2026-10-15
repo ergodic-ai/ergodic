@@ -178,6 +178,26 @@ def test_the_tabu_ring_and_max_iter_are_honored() -> None:
     assert cpdag_of_dag(result.graph) == cpdag_of_dag(truth)
 
 
+def test_score_equivalent_ties_keep_the_first_move() -> None:
+    """Regression (API-149): rounding noise, not the enumeration order, broke ties.
+
+    Adding ``x -> y`` and ``y -> x`` score the same under BIC, but the two computed
+    deltas differ in the last bits, and which one came out larger depended on the
+    BLAS build. The climb then took machine-dependent paths (on Apple Accelerate
+    the default run on the five-node world stuck at a lower-scoring graph with an
+    extra ``b - c`` edge). A tie within rounding now keeps the first move in the
+    documented order, so the first add is always ``x -> y``.
+    """
+    for seed in range(40):
+        rng = np.random.default_rng(seed)
+        x = rng.normal(size=300)
+        y = 0.8 * x + rng.normal(size=300)
+        result = HillClimb("bic", max_iter=1).fit(tabular({"x": x, "y": y}))
+        edge = result.graph.get_edge("x", "y")
+        assert edge is not None
+        assert edge.directed_pair() == ("x", "y"), seed
+
+
 def test_max_parents_caps_the_in_degree() -> None:
     data, _ = _diamond()
     result = HillClimb("bic", max_parents=1).fit(data)
