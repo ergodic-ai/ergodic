@@ -336,11 +336,17 @@ w = 0.7 * y - 0.6 * z + rng.normal(size=300)
 data = tabular({"x": x, "y": y, "z": z, "w": w})
 truth = dag(["x -> y", "y -> w", "z -> w"])
 
-# 2. The BGe posterior: exact, every DAG enumerated.
+# 2. The BGe posterior: exact, every DAG enumerated. Equivalent DAGs score the same,
+#    so add up the mass of each equivalence class and show the heaviest classes.
 posterior = graph_posterior(data, score="bge")
 print(posterior)
-for graph, weight in posterior.top(3):
-    print(round(weight, 3), graph)
+classes = {}
+for index, weight in enumerate(posterior.weights):
+    cpdag = cpdag_of_dag(posterior.graph(index))
+    mass, members = classes.get(cpdag, (0.0, 0))
+    classes[cpdag] = (mass + weight, members + 1)
+for cpdag, (mass, members) in sorted(classes.items(), key=lambda item: -item[1][0])[:3]:
+    print(round(mass, 3), members, cpdag)
 
 # 3. The true DAG ties with its Markov-equivalent twin; the class holds most mass.
 result = evaluate_graph(truth, posterior)
@@ -354,16 +360,18 @@ print(approximate.diagnostics["approximate"], approximate.diagnostics["note"])
 
 ```output from="score_posterior.py" tol="0.002"
 GraphSamples(exact, score:bge, 4 variables, enumerated, 543 distinct DAGs)
-0.401 MixedGraph(kind=dag, nodes=4, edges=[w <-- y, w <-- z, x --> y])
-0.401 MixedGraph(kind=dag, nodes=4, edges=[w <-- y, w <-- z, x <-- y])
-0.014 MixedGraph(kind=dag, nodes=4, edges=[w <-- y, w <-- z, x --> y, y --> z])
+0.803 2 MixedGraph(kind=cpdag, nodes=4, edges=[w <-- y, w <-- z, x --- y])
+0.112 8 MixedGraph(kind=cpdag, nodes=4, edges=[w --- y, w --- z, x --- y, y --- z])
+0.033 3 MixedGraph(kind=cpdag, nodes=4, edges=[w <-- y, w <-- z, x --- y, x --- z])
 0.401 0.0
 0.803
 True the score is a penalized likelihood, not a marginal likelihood, so this posterior is an approximation
 ```
 
-- **Step 2.** The two best DAGs differ only in the direction of `x --- y`. They're
-  Markov equivalent, so BGe scores them the same, and the data can't tell them apart.
+- **Step 2.** Markov-equivalent DAGs get the same BGe score, so the data can't tell
+  them apart, and their order among themselves is only rounding. The page adds up each
+  equivalence class instead. The heaviest class, `x --- y --> w <-- z`, has two
+  member DAGs that differ only in the direction of `x --- y`.
 - **Step 3.** Nothing ranks above the true DAG, and its twin ties with it, so its
   credible level is half their mass. With a score that can't tell equivalent DAGs apart,
   read the CPDAG's class probability instead: 0.80 here.
