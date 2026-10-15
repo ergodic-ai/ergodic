@@ -5,8 +5,11 @@ Regress the doubly-robust scores ``Gamma_i`` on an intercept plus the covariates
 
     Gamma_i ~ beta_0 + A_i' beta,
 
-so the intercept estimates the ATE and each slope is the linear association between
-a covariate and the CATE. Inference is heteroskedasticity-robust (HC3, the
+and each slope is the linear association between a covariate and the CATE. The
+covariates enter as they are, not centred, so the intercept is the projected effect
+at covariates all zero; it estimates the ATE only when every covariate has mean
+zero. For the ATE read :meth:`~ergodic.inference.CATEResult.ate` or
+:func:`~ergodic.inference.estimate_effect`. Inference is heteroskedasticity-robust (HC3, the
 jackknife-shortcut White covariance), which is valid because ``Gamma_i`` is an
 orthogonal signal: the second-stage projection is first-order insensitive to the
 cross-fit nuisance error. "Which covariates associate with a bigger effect."
@@ -30,9 +33,10 @@ class BLPResult:
     """The best-linear-projection coefficients with HC3 confidence intervals.
 
     ``names`` are the regressors (``"(intercept)"`` first, then the covariates).
-    ``coef``/``std_error`` are aligned to ``names``; the intercept is the ATE and the
-    slopes are covariate-to-effect associations. :meth:`interval` and :meth:`frame`
-    read them.
+    ``coef``/``std_error`` are aligned to ``names``; the slopes are
+    covariate-to-effect associations, and the intercept is the projected effect at
+    covariates all zero (the ATE only when the covariates are centred).
+    :meth:`interval` and :meth:`frame` read them.
     """
 
     names: tuple[str, ...]

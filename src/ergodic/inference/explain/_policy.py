@@ -21,11 +21,15 @@ exhaustively, which is the globally optimal regime (the Zhou-Athey-Wager guarant
 a deeper tree falls back to a greedy recursive best-split, which is documented and
 is not guaranteed optimal.
 
-The inference discipline is the one the rest of the Tier-B layer follows: the tree
-STRUCTURE is a point estimate (no interval on which split is "the" split), but the
-policy VALUE and the regret against treat-all / treat-none are honest, because they
-are sample means of the per-unit influence terms ``pi(X_i) Gamma_i`` and so
-inherit a root-n central limit theorem from the orthogonal score.
+The tree STRUCTURE is a point estimate (no interval on which split is "the"
+split). The policy VALUE reported on the tree is the sample mean of the per-unit
+terms ``pi(X_i) Gamma_i`` over the same scores the tree was chosen to maximize, so
+it is optimistic: the search picked the rule that looks best on these units, noise
+included, and the standard error and interval do not account for that selection.
+For an honest value, learn the tree on one sample and score it on another with
+:meth:`PolicyTree.evaluate`: there the rule is fixed before the scores are seen,
+so the mean of ``pi(X_i) Gamma_i`` inherits a root-n central limit theorem from the
+orthogonal score.
 """
 
 from __future__ import annotations
@@ -85,6 +89,42 @@ class PolicyNode:
 
 
 @dataclass(frozen=True)
+class PolicyValue:
+    """A fixed policy's value on a set of units, from :meth:`PolicyTree.evaluate`.
+
+    ``value`` is the mean outcome gain over treating no one (outcome units per
+    unit), ``std_error`` its standard error, and ``treat_all_value`` the
+    treat-everyone baseline (the ATE) on the same units.
+    """
+
+    value: float
+    std_error: float
+    treat_all_value: float
+    n: int
+
+    def interval(self, level: float = 0.9) -> tuple[float, float]:
+        """A normal confidence interval for the value at ``level``."""
+        from .._stats import _norm_ppf
+
+        if not 0.0 < level < 1.0:
+            raise ValueError(f"level must be in (0, 1), got {level}")
+        z = _norm_ppf((1.0 + level) / 2.0)
+        return self.value - z * self.std_error, self.value + z * self.std_error
+
+    def regret(self, baseline: str = "treat_all") -> float:
+        """``value`` minus the ``"treat_all"``, ``"treat_none"``, or ``"best_trivial"`` value."""
+        if baseline == "treat_all":
+            return self.value - self.treat_all_value
+        if baseline == "treat_none":
+            return self.value
+        if baseline == "best_trivial":
+            return self.value - max(self.treat_all_value, 0.0)
+        raise ValueError(
+            f"baseline must be 'treat_all', 'treat_none', or 'best_trivial', got {baseline!r}"
+        )
+
+
+@dataclass(frozen=True)
 class PolicyTree:
     """A shallow doubly-robust optimal-policy tree with its value and regret.
 
@@ -95,7 +135,9 @@ class PolicyTree:
     treating no one (the mean outcome gain of following the rule rather than
     treating nobody). On that scale ``treat_none_value`` is 0 and
     ``treat_all_value`` is the doubly-robust ATE, and :meth:`regret` is the value
-    gap against either, also in outcome units per unit. ``depth`` is the requested depth
+    gap against either, also in outcome units per unit. These are measured on the
+    units the tree was learned on, so they are optimistic (see
+    :meth:`evaluate` for the value on held-out units). ``depth`` is the requested depth
     and ``exhaustive`` records whether the globally optimal search was used.
     """
 
@@ -131,7 +173,11 @@ class PolicyTree:
         return self.predict(self._design)
 
     def interval(self, level: float = 0.9) -> tuple[float, float]:
-        """A normal confidence interval for the policy value at ``level``."""
+        """A normal interval for the in-sample policy value at ``level``.
+
+        It ignores that the tree was chosen to maximize this value, so it is
+        optimistic; :meth:`evaluate` gives a valid interval on held-out units.
+        """
         from .._stats import _norm_ppf
 
         if not 0.0 < level < 1.0:
@@ -162,6 +208,39 @@ class PolicyTree:
                 f"baseline must be 'treat_all', 'treat_none', or 'best_trivial', got {baseline!r}"
             )
         return self.value - ref
+
+    def evaluate(self, result_or_scores: CATEResult | DRScores) -> PolicyValue:
+        """The learned rule's value on other units: the honest, out-of-sample value.
+
+        ``result_or_scores`` carries doubly-robust scores for units the tree was not
+        learned on (a :class:`~ergodic.inference.CATEResult` from a held-out sample,
+        or a :class:`~ergodic.inference._scores.DRScores`); its covariates must
+        include the tree's split covariates by name. Returns a :class:`PolicyValue`:
+        the mean of ``pi(X_i) Gamma_i`` there (outcome units, against treating no
+        one), its standard error, and the treat-all baseline on the same units.
+        Because the rule was fixed before these scores were seen, the interval is
+        valid, unlike the in-sample :attr:`value` the search maximized.
+        """
+        scores, design, names, _, _ = _extract(result_or_scores)
+        index = {name: i for i, name in enumerate(names)}
+        missing = [name for name in self.covariates if name not in index]
+        if missing:
+            raise ValueError(
+                f"the evaluation scores lack the tree's split covariates {missing}; "
+                f"they carry {list(names)}"
+            )
+        n = scores.shape[0]
+        if n < 2:
+            raise ValueError(f"evaluate needs at least 2 units, got {n}")
+        x = design[:, [index[name] for name in self.covariates]]
+        actions = self.predict(x).astype(np.float64)
+        influence = actions * scores
+        return PolicyValue(
+            value=float(np.mean(influence)),
+            std_error=float(np.std(influence, ddof=1) / np.sqrt(n)),
+            treat_all_value=float(np.mean(scores)),
+            n=n,
+        )
 
     def leaves(self) -> list[PolicyNode]:
         """The leaf nodes, left to right (each carries its action, count, and value)."""

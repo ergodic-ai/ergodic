@@ -17,7 +17,7 @@ from ._blp import BLPResult
 from ._calibration import CalibrationResult
 from ._clan import CLANResult
 from ._gates import GATESResult
-from ._policy import PolicyNode, PolicyTree, policy_tree
+from ._policy import PolicyNode, PolicyTree, PolicyValue, policy_tree
 from ._rate import RATEResult
 from ._record import Heterogeneity
 
@@ -29,6 +29,7 @@ __all__ = [
     "Heterogeneity",
     "PolicyNode",
     "PolicyTree",
+    "PolicyValue",
     "RATEResult",
     "policy_tree",
 ]

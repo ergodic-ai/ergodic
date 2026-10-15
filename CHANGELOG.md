@@ -126,6 +126,14 @@ To be released together with Welt.
   world stopped at a lower-scoring graph (BIC -127.0 against the truth's -123.2)
   with an extra edge. Moves within a relative 1e-9 are now ties, and a tie keeps
   the first move.
+- The policy tree's docstrings no longer call its `value` and interval honest:
+  they are measured on the scores the tree was chosen to maximize, so they are
+  optimistic and the interval ignores the selection. `PolicyTree.evaluate`
+  (new) scores the fixed rule on held-out doubly-robust scores and returns a
+  `PolicyValue` with a valid interval and regret.
+- The best-linear-projection docstrings no longer say the intercept is the ATE:
+  the covariates enter uncentred, so the intercept is the projected effect at
+  covariates all zero (the ATE only when they are centred). Outputs unchanged.
 
 ## [0.1.1] - 2026-08-30
 
