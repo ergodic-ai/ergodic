@@ -116,11 +116,13 @@ packages = ["src/ergodic"]
 exclude = [
     ".claude",
     ".devcontainer",
+    ".github",
     ".gitignore",
     ".pre-commit-config.yaml",
     ".python-version",
     "CLAUDE.md",
     "Makefile",
+    "RELEASING.md",
     "deploy",
     "mkdocs.yml",
     "plans",

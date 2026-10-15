@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in ergodic gives a wrong result, raises unexpectedly, or doesn't match the docs.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please don't include private or customer data; a small
+        synthetic example is best. Security problems go by email, see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproducing example
+      description: A short, self-contained script with seeded random data, if any.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback or output
+      render: text
+  - type: input
+    id: ergodic-version
+    attributes:
+      label: ergodic version
+      description: python -c "import ergodic; print(ergodic.__version__)"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version and OS
+      placeholder: Python 3.12, macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Relevant optional packages
+      description: Versions of pymc, jax, scikit-learn, pandas or numpy, if the bug involves them.
