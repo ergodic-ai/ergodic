@@ -389,6 +389,7 @@ def _decode_scores(
         samples=config.samples,
         seed=config.seed,
         max_nodes=config.max_nodes,
+        audit=config.audit,
     )
     native_edges = tuple(
         (edge["u"], edge["v"]) if edge["v_mark"] == "arrow" else (edge["v"], edge["u"])
