@@ -114,17 +114,21 @@ outcome. Discovery can't draw an arrow from the outcome or treatment back into a
 covariate, so it can't adjust for something review caused.
 
 !!! caution "Turn the result into a DAG before estimating"
-    The tier knowledge orients edges that discovery alone would leave as an
-    equivalence class, so `discover` returns a mixed graph. Call
+    `discover` returns a mixed graph that stands for a class of DAGs. The tier
+    knowledge orients many of its edges, but the graph keeps that kind. Call
     `graph.as_kind("dag")` before `estimate_effect`. It raises `InvalidGraphError`
     if an edge is still undirected, which can happen between two covariates in the
     same tier. If it does, pass the covariates you need with `covariates=[...]`.
 
 ## Choose when the treatment counts
 
-`when="anytime"` uses only features known at the start of the case, so nothing in
-the table can leak from after the treatment. To ask about treatments that happen
-later, use a landmark:
+`when="anytime"` derives its features from the start of the case. Case-constant
+columns are different: `"auto"` takes all of them and assumes each was known when
+the case started. A column filled in later, such as a resolution code, would be a
+post-treatment covariate and could bias the estimate. Drop such columns, or name
+the covariates you trust with `covariates=[...]`.
+
+To ask about treatments that happen later, use a landmark:
 
 - `when=("after_events", k)` measures each case after its first `k` events.
 - `when=("after_elapsed", x)` measures it `x` seconds after it starts (in the

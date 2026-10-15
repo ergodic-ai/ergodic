@@ -1,7 +1,7 @@
 # Certify and calibrate
 
-Test whether a hidden regime exists at all, measure how often your detector fires on
-series that have none, and compare two models' verdicts. These are three separate
+Test whether two states fit a series better than one, measure how often your
+detector fires on series without a switch, and compare two models' verdicts. These are three separate
 questions, and `recover` answers none of them.
 
 !!! need "You'll need"
@@ -75,25 +75,31 @@ It takes one to two minutes, most of it in step 3.
   the same settings run on the real series and on every control world. The spectral
   model fires `level`. Its `wave_present` gate failed, because no periodic component
   stands above the noise, so it vetoes `freq` and `amp` whatever their intervals say.
-- **Step 3.** `certify` says whether a two-state model beats a one-state model by
-  more than chance. The statistic on the real series is 28.7. On the simulated
-  worlds with no switch, 95% of the values sit below 5.4.
+- **Step 3.** `certify` asks whether two states fit better than the model's own
+  one-state version, by more than chance. The statistic on the real series is 28.7.
+  On the simulated worlds with no switch, 95% of the values sit below 5.4.
 - **Step 4.** On three worlds with no switch, the configured detector never fired.
 - **Step 5.** Both models fire `level` and agree on everything they can both
   express.
 
-## Certify that a regime exists
+## Certify that two states fit better than one
 
 `certify` fits the likelihood's own one-state model to the series, simulates
 `n_null` control worlds from it, and pushes the real series and every world through
 the same short fit. The statistic is twice the log-likelihood gain of two states
 over one.
 
-The p-value is `(1 + #{null ≥ observed}) / (1 + n_null)`. With 9 worlds it can't go
-below 0.1, so the 0.1000 above is the floor, not weak evidence. The default,
-`n_null=99`, can reach 0.01 and costs about 100 short fits. Keep `refit_draws` and
+The p-value is `(1 + #{null ≥ observed}) / (1 + n_null)`. Here the observed
+statistic beat all 9 worlds, and 0.1 is the smallest p-value 9 worlds can give, so
+p = 0.1 is all this run can claim. Run the default, `n_null=99`, to claim p ≤ 0.01.
+It costs about 100 short fits. Keep `refit_draws` and
 `refit_warmup` the same for every comparison you report: the test is honest because
 the real series and the control worlds go through exactly the same procedure.
+
+A small p-value says two states fit better than this one-state model. It doesn't
+prove a switch: a one-state model that misses something else in the series, such as
+a trend, heavy tails or longer memory, can lose to two states too. Look at the
+recovered path and deltas before you call it a regime.
 
 `test.null` holds the simulated statistics, and `test.to_frame()` gives the observed
 and null values in one table, ready for a histogram.
@@ -129,10 +135,10 @@ the models' views of the mechanism differ, so look at both results' deltas there
 <details markdown="1"><summary>What are the limits?</summary>
 
 - `consensus` needs at least two results for the same target.
-- `Consensus.amp_vs_spread()`, a rule to tell a louder wave from a noisier floor,
-  is reserved and raises `NotImplementedError`.
-- `certify` and `calibrate` take the same inputs as `recover`, and refuse the same
-  things.
+- `consensus` can't tell a louder wave from a noisier floor: no built-in model
+  pairs an amplitude verdict with a volatility verdict.
+- `certify` and `calibrate` validate the series the same way `recover` does, and
+  refuse the same inputs.
 - Writing your own likelihood means subclassing `RegimeLikelihood`. It declares its
   blocks as `DeltaBlock`s and its vetoes as `Gate`s, inside the `EmissionSpec` it
   returns, and provides `null_loglik` and `simulate_null` for `certify` and
