@@ -57,8 +57,10 @@ def stable_skeleton(
     permits = _permits_all if knowledge is None else knowledge.permits_edge
     adj: dict[str, set[str]] = {n: set() for n in nodes}
     for x, y in combinations(nodes, 2):
-        if not permits(x, y) and not permits(y, x):
-            continue  # prune: forbidden in both directions, never tested
+        if not permits(x, y) and not permits(y, x) and frozenset((x, y)) not in protected:
+            # prune: forbidden in both directions, never tested. A confounded pair
+            # stays: neither causes the other, but a hidden cause joins them.
+            continue
         adj[x].add(y)
         adj[y].add(x)
     sepsets: dict[frozenset[str], frozenset[str]] = {}

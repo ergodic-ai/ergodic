@@ -26,6 +26,7 @@ import numpy as np
 
 from ..data import Ordinal, PanelData, TimeSeriesData, VariableType, panel
 from ..graph import mixed
+from ..knowledge import _refuse_soft
 from ._discover import discover
 from ._registry import TEMPORAL_METHODS
 
@@ -270,13 +271,15 @@ def bootstrap(
             ``welt:<model>`` methods are refused: each resample would be a paid job.
         n_bootstrap: How many resamples to draw, at least 1.
         seed: Seed for the resampling generator.
-        knowledge: Hard constraints, handed to every replicate.
+        knowledge: Hard constraints, handed to every replicate. Soft statements
+            raise (see :meth:`~ergodic.DomainKnowledge.hard`).
         block_length: Moving-block length for a time series under a temporal
             method; ``None`` picks ``max(ceil(sqrt(T)), 2 * (max_lag + 1))``.
         **kwargs: Passed through to ``discover`` and on to the algorithm.
     """
     if n_bootstrap < 1:
         raise ValueError(f"n_bootstrap must be >= 1, got {n_bootstrap}")
+    _refuse_soft(knowledge, "bootstrap")
     if method.lower().startswith("welt:"):
         raise ValueError(
             f"bootstrap would submit {n_bootstrap} paid Welt jobs for {method!r}, one per "

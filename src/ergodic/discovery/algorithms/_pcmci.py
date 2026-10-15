@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...data import PanelData, TimeSeriesData
 from ...graph import InvalidGraphError, dag, mixed
+from ...knowledge import _refuse_soft
 from .._lagged import lagged_node, lagged_tabular
 from .._registry import resolve_test
 from .._tsresult import TimeSeriesDiscoveryResult
@@ -149,6 +150,7 @@ class PCMCI:
         raises here (a window graph has no bidirected edges), and a
         ``required`` edge that survived at no lag raises after the run.
         """
+        _refuse_soft(knowledge, "PCMCI")
         if not isinstance(data, TimeSeriesData | PanelData):
             raise TypeError(
                 f"PCMCI needs TimeSeriesData or PanelData, got {type(data).__name__}; "

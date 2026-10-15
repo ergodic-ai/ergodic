@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import Edge, GraphKind, InvalidGraphError, Mark, MixedGraph
 from ...graph._meek import meek_closure
+from ...knowledge import _refuse_soft
 from .._registry import resolve_test
 from .._result import DiscoveryResult
 from ._skeleton import _complement, _permits_all, stable_skeleton
@@ -101,6 +102,7 @@ class PC:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run PC-stable and return the discovered graph with its provenance."""
+        _refuse_soft(knowledge, "PC")
         oracle = resolve_test(self.test, data, algorithm=type(self).__name__)
         nodes = sorted(oracle.variables)
         adj, sepsets = stable_skeleton(

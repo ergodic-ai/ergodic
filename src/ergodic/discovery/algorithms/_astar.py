@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 
 from ...graph import dag
+from ...knowledge import _refuse_soft
 from .._registry import resolve_score
 from .._result import DiscoveryResult
 from .._score import Score
@@ -97,6 +98,7 @@ class AStar:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Search for a highest-scoring DAG and return it with its provenance."""
+        _refuse_soft(knowledge, "AStar")
         score = resolve_score(self._score, data, algorithm=type(self).__name__)
         variables = list(score.variables)
         if len(variables) > self._node_limit:

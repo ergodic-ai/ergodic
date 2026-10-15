@@ -25,6 +25,7 @@ from itertools import combinations
 from typing import TYPE_CHECKING, ClassVar
 
 from ...graph import Edge, GraphKind, Mark, MixedGraph
+from ...knowledge import _refuse_soft
 from .._registry import resolve_test
 from .._result import DiscoveryResult
 from ._skeleton import _permits_all, _protected_pairs
@@ -95,6 +96,7 @@ class MMPC:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run MMPC and return the undirected skeleton with its provenance."""
+        _refuse_soft(knowledge, "MMPC")
         oracle = resolve_test(self.test, data, algorithm=type(self).__name__)
         nodes = sorted(oracle.variables)
         node_set = frozenset(nodes)

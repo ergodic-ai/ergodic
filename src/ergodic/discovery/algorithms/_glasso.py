@@ -33,6 +33,7 @@ import numpy as np
 
 from ...data import TabularData
 from ...graph import Edge, GraphKind, Mark, MixedGraph
+from ...knowledge import _refuse_soft
 from .._result import DiscoveryResult
 
 if TYPE_CHECKING:
@@ -420,6 +421,7 @@ class Glasso:
 
     def fit(self, data: TabularData, knowledge: DomainKnowledge | None = None) -> DiscoveryResult:
         """Run the screen and return the undirected skeleton with its provenance."""
+        _refuse_soft(knowledge, "Glasso")
         if not isinstance(data, TabularData):
             raise TypeError(
                 f"glasso reads TabularData, got {type(data).__name__}; the Gaussian model "
