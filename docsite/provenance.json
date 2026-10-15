@@ -106,13 +106,13 @@
       "file": "docs.js",
       "source": "docs/assets/docs.js",
       "source_sha256": "7604310b2328b48374b2f2ab551c43b8b0c7d78cdd10153a657d257b8dc0e9e1",
-      "sha256": "9ae2dfa0cd998a55e81eb82e64c11ccf865d70bc68a64d5b5cc00112539b22f9",
-      "transformation": "Header comment extended; the theme storage key reads <html data-theme-key> and the two search prompts read <body data-search-prompt/data-search-hint>, each falling back to a neutral default. Behaviour is otherwise unchanged."
+      "sha256": "c7203dc9536884716b7b4f3165234fb49cdd2ce27a6ede8d9768e52fe419ebad",
+      "transformation": "Header comment extended; the theme storage key reads <html data-theme-key> (neutral fallback 'docs-theme') and the two search prompts read <body data-search-prompt/data-search-hint>, each with a neutral fallback. Behaviour is otherwise unchanged."
     },
     {
       "file": "site.css",
       "source": null,
-      "transformation": "New (API-143): product switcher, program download link and landing output spacing; tokens only."
+      "transformation": "New (API-143): product switcher, program download link, landing output spacing and a ring on the brand tile in dark mode; tokens only."
     }
   ]
 }

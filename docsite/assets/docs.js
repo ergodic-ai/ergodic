@@ -11,7 +11,7 @@
   const labelTheme = () => theme.setAttribute('aria-label', dark() ? 'Switch to light theme' : 'Switch to dark theme');
   labelTheme();
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', labelTheme);
-  theme.addEventListener('click', () => { root.dataset.theme = dark() ? 'light' : 'dark'; try { localStorage.setItem(root.dataset.themeKey || 'welt-docs-theme', root.dataset.theme); } catch (_) {} labelTheme(); announce(`${root.dataset.theme === 'dark' ? 'Dark' : 'Light'} theme.`); });
+  theme.addEventListener('click', () => { root.dataset.theme = dark() ? 'light' : 'dark'; try { localStorage.setItem(root.dataset.themeKey || 'docs-theme', root.dataset.theme); } catch (_) {} labelTheme(); announce(`${root.dataset.theme === 'dark' ? 'Dark' : 'Light'} theme.`); });
 
   // Copy buttons; a complete program in data-copy wins over the visible code.
   const copyText = async (text, button, label) => {

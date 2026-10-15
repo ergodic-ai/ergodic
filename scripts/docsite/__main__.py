@@ -23,14 +23,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     build.add_argument("--report", type=Path, help="write the docstring coverage report here")
     check = commands.add_parser("check", help="run programs, check excerpts and outputs")
-    check.add_argument("pages", nargs="*", help="page names (default: every page)")
     record = commands.add_parser("record", help="rerun programs and record their output")
-    record.add_argument("pages", nargs="*", help="page names (default: every page)")
+    for command in (check, record):
+        command.add_argument("pages", nargs="*", help="page names (default: every page)")
+        command.add_argument(
+            "--jobs", type=int, default=1, help="programs run at once (default 1; CI may raise it)"
+        )
+        command.add_argument(
+            "--slow",
+            action="store_true",
+            help='also run slow programs (slow="true" or timeout above 60 s); DOCS_SLOW=1 too',
+        )
     links = commands.add_parser("links", help="check internal links of a built site")
     links.add_argument("output", type=Path, nargs="?", default=ROOT / "site")
     notebooks = commands.add_parser("notebooks", help="execute every notebook (release CI)")
     notebooks.add_argument("--timeout", type=int, default=1800)
-    notebooks.add_argument("--workers", type=int, default=2)
+    notebooks.add_argument("--workers", type=int, default=1)
     args = parser.parse_args(argv)
     site = load_site()
     started = time.perf_counter()
@@ -54,11 +62,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command in ("check", "record"):
             from .examples import check as run_check
 
-            report = run_check(site, args.pages or None, record=args.command == "record")
+            report = run_check(
+                site,
+                args.pages or None,
+                record=args.command == "record",
+                jobs=args.jobs,
+                slow=True if args.slow else None,
+            )
             for item in report.runs:
                 status = "ok" if item.returncode == 0 else "FAILED"
                 where = f"{item.program.page.name}: {item.program.name}"
                 print(f"{status:6} {item.seconds:6.1f} s  {where}")
+            for line in report.skipped:
+                print(f"skipped {line} (slow; set DOCS_SLOW=1 or pass --slow)")
             for line in report.recorded:
                 print(f"recorded {line}")
             for problem in report.problems:
