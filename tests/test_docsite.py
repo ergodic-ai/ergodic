@@ -212,8 +212,10 @@ def test_optional_modules_need_their_requirement(monkeypatch: pytest.MonkeyPatch
     optional = dataclasses.replace(
         site,
         reference_modules=site.reference_modules[:-1],
-        reference_optional=site.reference_optional
-        + (("datasets", "Datasets", "no_such_requirement_api143"),),
+        reference_optional=(
+            *site.reference_optional,
+            ("datasets", "Datasets", "no_such_requirement_api143"),
+        ),
     )
     monkeypatch.delenv("DOCS_REQUIRE_OPTIONAL", raising=False)
     assert "datasets" not in {m for m, _ in reference_site(optional).reference_modules}
@@ -221,7 +223,7 @@ def test_optional_modules_need_their_requirement(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(DocsError, match="no_such_requirement_api143"):
         reference_site(optional)
     present = dataclasses.replace(
-        optional, reference_optional=site.reference_optional + (("datasets", "Datasets", "json"),)
+        optional, reference_optional=(*site.reference_optional, ("datasets", "Datasets", "json"))
     )
     assert ("datasets", "Datasets") in reference_site(present).reference_modules
 
