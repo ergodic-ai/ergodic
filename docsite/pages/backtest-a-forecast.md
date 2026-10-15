@@ -69,8 +69,8 @@ Bayesian        5.30   6.00  0.29   3.46      1.00
   error measure. Its 90% bands held all 12 held-out months.
 - **Step 4.** `SeasonalNaive` repeats last year, so it misses a year of trend: its
   bands never contain the actuals.
-- **Step 5.** One divergent transition across both folds' 1,000 draws, and about 26 effective draws
-  per parameter. Raise `draws` and `warmup` for decisions.
+- **Step 5.** One divergent transition across both folds' 1,000 draws, and about 26
+  effective draws per parameter. Raise `draws` and `warmup` for decisions.
 
 ## Read the scores
 
