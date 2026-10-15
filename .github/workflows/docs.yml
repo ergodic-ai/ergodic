@@ -58,7 +58,16 @@ jobs:
       # ergodic.welt imports welt-client, which reaches PyPI with its 0.13 release.
       # Until then the reference skips that module with a warning; once welt-client
       # 0.13 is published, the extra is installed and the build requires the page.
-      - name: Install the Welt bridge once welt-client 0.13 is on PyPI
+      # A release always installs the welt extra and requires the ergodic.welt page, so
+      # it can never publish without it; checks install it once welt-client is published.
+      - name: Install the Welt bridge (required for a release)
+        if: env.RELEASE_TAG != ''
+        run: |
+          uv sync --frozen --extra welt
+          echo "DOCS_REQUIRE_OPTIONAL=1" >> "$GITHUB_ENV"
+          echo "UV_NO_SYNC=1" >> "$GITHUB_ENV"
+      - name: Install the Welt bridge once welt-client 0.13 is on PyPI (checks)
+        if: env.RELEASE_TAG == ''
         run: |
           published=$(curl -fsS https://pypi.org/pypi/welt-client/json | python3 -c 'import json, sys; r = json.load(sys.stdin)["releases"]; print(any(tuple(int(x) for x in v.split(".")[:2]) >= (0, 13) for v in r if all(p.isdigit() for p in v.split("."))))' || echo False)
           if grep -q "^welt = " pyproject.toml && [ "$published" = "True" ]; then
