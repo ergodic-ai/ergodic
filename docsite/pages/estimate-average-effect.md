@@ -10,8 +10,9 @@ does to birthweight.
 
 ## Run the program
 
-The bundled birthweight data (Almond, Chay and Lee, 2005) records 4,642 births: the
-mother's smoking, the baby's weight in grams and 17 background variables.
+The bundled birthweight data is the extract of US natality records used by Cattaneo
+(2010): 4,642 singleton births in Pennsylvania, with the mother's smoking, the baby's
+weight in grams and 17 background variables.
 
 ```python file="average_effect.py"
 from ergodic import dag, estimate_effect
@@ -77,9 +78,8 @@ the mean outcome if everyone were treated minus the mean if no one were.
 
 !!! caution "The estimate is only as good as the graph"
     It assumes no confounder is missing from the list. A variable that affects both
-    smoking and birthweight, but is not in the data, biases the result. For this
-    data, `births.target` records the published value: about −225 g (Almond, Chay
-    and Lee, 2005; Cattaneo, 2010).
+    smoking and birthweight, but is not in the data, biases the result. No
+    check on this page can detect such a variable.
 
 By default the outcome model is ordinary least squares and the propensity model is
 logistic regression. Pass `learner=` (an alias, a learner, or a mapping from slot to
@@ -89,8 +89,8 @@ learner) to use other models.
 
 <div class="cards" markdown="1">
 
-- [Your first causal effect](start.md): learn the graph from data instead of drawing it.
-- [Notebooks](notebooks.md): the learn series covers estimation step by step.
+- [Refute an estimate](refute-an-estimate.md): stress-test this estimate with placebo and subset checks.
+- [Estimate heterogeneous effects](heterogeneous-effects.md): find who gains more or less from the treatment.
 - [Python reference](reference-inference.md): every option of `estimate_effect`.
 
 </div>
