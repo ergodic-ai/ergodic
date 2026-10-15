@@ -27,7 +27,12 @@ Two ideas hold it together. Predictive structure is a plain DAG over lagged node
 names, which is exactly what temporal discovery already returns, so a discovered
 graph feeds a forecast with no translation. And any object that fits a series and
 forecasts a horizon (:class:`ForecastModel`) can be backtested, so a baseline,
-the Bayesian forecaster, and somebody else's model all land in one table.
+the Bayesian forecaster, and somebody else's model all land in one table. A model
+that reads covariates with a known future (:class:`CovariateForecastModel`) gets
+their true values for each held-out window and nothing else, and a quantile
+model's output becomes draws through :func:`quantile_draws`, so Welt's hosted
+Chronos-2 (``ergodic.welt.WeltForecaster``) is backtested and reconciled like
+the rest.
 
 pymc is imported inside the methods that sample, so the bare install never loads
 it; ``pip install 'ergodic[forecast]'`` adds it. Sampling runs through PyMC's JAX
@@ -97,7 +102,8 @@ from ._metrics import (
     rolling_mape_6,
     smape,
 )
-from ._protocol import ForecastModel
+from ._protocol import CovariateForecastModel, ForecastModel
+from ._quantiles import quantile_draws
 from ._reconcile import (
     PROPORTION_RULES,
     RECONCILE_METHODS,
@@ -135,6 +141,7 @@ __all__ = [
     "BacktestReport",
     "Bass",
     "CausalOU",
+    "CovariateForecastModel",
     "Drift",
     "FactorContribution",
     "FitStrategy",
@@ -201,6 +208,7 @@ __all__ = [
     "mint_weights",
     "node_roles",
     "posterior_draws",
+    "quantile_draws",
     "reconcile",
     "regression_keys",
     "resolve_strategy",
