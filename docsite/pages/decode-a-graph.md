@@ -285,6 +285,7 @@ exactly. `knowledge.log_odds(variables)` shows the weights and
 | `knowledge_audit` | One entry per statement: `statement`, `kind`, `confidence` (`None` for hard), `probability`, `min_pair_probability`, `conflict_pairs`, `holds`, `holds_without_knowledge`, `note`. Soft statements are listed as you made them; hard ones one per stored constraint, so hard tiers show as one `order` entry per cross-tier pair. |
 | `knowledge_conflicts` | The entries with at least one conflict pair. |
 | `knowledge_cost` | The knowledge-free decode's score minus this one's. Never negative for `"exact_map"`; the other decoders can come out negative. |
+| `knowledge_violations_without_knowledge` | What `knowledge.violations()` reports on the knowledge-free graph: the hard knowledge as a whole, with order read through chains. `None` with `audit=False`. |
 | `knowledge_audited` | `False` when you passed `audit=False`. |
 
 `probability` is the chance of the whole statement, with each pair taken on its own,
@@ -299,7 +300,10 @@ into `x` above 0.9. A conflict raises one `KnowledgeConflictWarning` (a
 `holds` and `holds_without_knowledge` read what each statement means: "a before b"
 fails when `b` is an ancestor of `a` along any directed path, not only through a
 direct edge. The probabilities read direct edges only (for an order, the chance of no
-direct edge against it), and the entry's `note` says so.
+direct edge against it), and the entry's `note` says so. An order implied only
+through a chain of statements, such as `c` before `a` from `order("a", "b")` and
+`order("b", "c")`, has no entry of its own; `knowledge_violations_without_knowledge`
+reports it.
 
 `holds_without_knowledge` comes from a second decode with the same settings and seed
 but no knowledge, so the audit costs one more decode. That can cost more than the

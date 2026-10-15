@@ -44,6 +44,8 @@ Planned as 0.3.0.
   read through directed paths, in the decoded graph and in a knowledge-free decode
   with the same settings and seed), `knowledge_cost` the score the knowledge cost,
   and `knowledge_conflicts` the statements with a pair the model gives under 0.1.
+  `knowledge_violations_without_knowledge` lists what `violations()` finds on the
+  knowledge-free graph, so an order broken only through the closure shows too.
   `n_hard_statements` and `n_soft_statements` count them. `decode(..., audit=False)`
   and `Decoder(..., audit=False)` skip it.
 - `ergodic.KnowledgeConflictWarning` (a `UserWarning`), raised once by a decode whose
@@ -67,9 +69,15 @@ Planned as 0.3.0.
   adjacency ban rules out a bidirected edge too, while `forbid(a, b)` with
   `forbid(b, a)` no longer does. So `confound(a, b)` with the two directed bans means
   "confounded, and neither causes the other": it is not a conflict, the decoders
-  return `a <-> b`, and FCI and RFCI keep the pair adjacent instead of pruning it.
-  `forbid_adjacency(a, b)` and the two directed bans no longer compare equal. The
-  repr is unchanged.
+  return `a <-> b`, FCI and RFCI keep the pair adjacent instead of pruning it, MMPC
+  keeps it in its skeleton and glasso no longer zeroes it. `forbid_adjacency(a, b)`
+  and the two directed bans no longer compare equal. The repr is unchanged. Every
+  `nonadjacent` pair also forbids both directed edges, however the object is built.
+- A `DomainKnowledge` built directly with both directions of a pair in `forbidden`
+  (the constructor or `dataclasses.replace`) no longer bans a bidirected edge on
+  that pair; use `forbid_adjacency` or `nonadjacent=` for that.
+- `DomainKnowledge.apply_to` keeps a bidirected edge on a pair forbidden in both
+  directions; only an adjacency ban removes every mark.
 - `DomainKnowledge.conflicts()` reports a confounded pair under an adjacency ban.
   `violations()` reads a node in `graph.latent` as a hidden cause: a latent node with
   two or more observed children joins each pair of them as a bidirected edge would
@@ -81,7 +89,9 @@ Planned as 0.3.0.
   is no longer refused before the paid run; knowledge naming unknown variables or
   contradicting itself still is. Without knowledge and without a decoder nothing
   changes.
-- Pickles of `DomainKnowledge` from 0.2.x load, with no soft statements.
+- Pickles of `DomainKnowledge` from 0.2.x load, with no soft statements. A pair the
+  pickle forbids in both directions becomes an adjacency ban (`nonadjacent`), its
+  0.2 meaning, so it still rules out a bidirected edge.
 
 ## [0.2.1] - 2026-10-15
 

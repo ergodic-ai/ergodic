@@ -143,7 +143,10 @@ DomainKnowledge(vars=2, required=1, forbidden=0, precedes=0, roots=0, sinks=0, c
 ```
 
 - **Step 1.** The pair may carry `rain <-> traffic` and nothing else. FCI, RFCI and
-  the decoders return that edge; PC and the other searches can't hold one.
+  the decoders return that edge. MMPC keeps the pair adjacent in its skeleton, and
+  glasso leaves it to the data instead of zeroing it, as for `confound` alone. PC,
+  GES, BOSS, GRaSP, HillClimb, A* and LiNGAM can't hold a bidirected edge, so they
+  raise, as they do for any `confound`.
 - **Step 2.** `forbid_adjacency` is the stronger statement, so the two conflict.
 - **Step 3.** The searches on this page refuse the first object and accept the
   second.
@@ -165,7 +168,8 @@ The methods read knowledge in different ways:
     A CPDAG or a DAG has no bidirected edge. With `confound`, PC, GES, BOSS, GRaSP,
     HillClimb and A* raise a `ValueError` naming the violation, because their graph
     can't satisfy the knowledge.
-    LiNGAM raises too. MMPC and glasso accept it and only keep the pair adjacent. Use
+    LiNGAM raises too. MMPC accepts it and keeps the pair adjacent; glasso accepts it
+    and leaves the pair's adjacency to the data. Use
     `method="fci"`, or decode edge probabilities, which adds `a <-> b` and returns an
     ADMG ([Decode with what you know](decode-a-graph.md#decode-with-what-you-know)).
 
