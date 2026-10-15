@@ -56,10 +56,11 @@ def discover(
     model through :func:`ergodic.welt.discover`, one paid Welt job. It needs
     ``pip install "ergodic[welt]"``, takes no test, score or ``alpha``, and
     passes only ``client``, ``seed``, ``timeout`` and ``decoder`` through the
-    keyword arguments; anything else raises before any request. ``knowledge``
-    is refused unless ``decoder=`` asks for local decoding of the model's edge
-    scores (:func:`ergodic.decode`), which is also what lets a non-DAG model
-    such as ``"welt:avici"`` return a (decoded) DAG.
+    keyword arguments; anything else raises before any request. ``decoder=``
+    asks for local decoding of the model's edge scores (:func:`ergodic.decode`),
+    which is what lets a non-DAG model such as ``"welt:avici"`` return a
+    (decoded) graph; ``knowledge`` applies to that decoding and, without
+    ``decoder=``, implies greedy.
     """
     if method.lower().startswith("welt:"):
         return _welt(

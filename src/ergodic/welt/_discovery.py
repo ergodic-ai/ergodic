@@ -8,10 +8,11 @@ here by default. A model known to return non-DAG graphs is refused before submit
 and a result Welt does not declare a DAG is refused with the native result attached so
 the paid run is not lost.
 
-With an explicit ``decoder=`` the native edge scores become an
-:class:`~ergodic.discovery.EdgeProbabilities` and a named local decoder
-(:func:`ergodic.decode`) turns them into a DAG labelled ``decoded``. That is
-the only path by which a non-DAG model (AVICI, CDFM) reaches an ergodic DAG.
+With an explicit ``decoder=`` (or domain knowledge, which implies greedy) the
+native edge scores become an :class:`~ergodic.discovery.EdgeProbabilities` and a
+named local decoder (:func:`ergodic.decode`) turns them into a graph labelled
+``decoded``. That is the only path by which a non-DAG model (AVICI, CDFM) reaches
+an ergodic graph.
 """
 
 from __future__ import annotations
@@ -193,17 +194,25 @@ def discover(
     are checked before anything is uploaded; if decoding still fails after the paid
     run, :class:`WeltDecodeError` carries the native result and its scores.
 
+    ``knowledge=`` without ``decoder=`` decodes with ``"greedy"`` at the model's
+    native threshold, exactly as ``decoder="greedy"`` would: Welt runs
+    unconstrained, and the knowledge (hard and soft statements, confounders)
+    applies to the local decoding, with its audit in the diagnostics (see
+    :class:`~ergodic.discovery.DecodeResult`). A ``confound`` pair makes the
+    decoded graph an ADMG.
+
     Args:
         data: Observational rows; every variable must be continuous and complete.
         model: The Welt causal discovery model id, for example ``"arrow"``.
         seed: The run's seed, recorded in the result's provenance.
         timeout: Seconds to wait for the job. A timeout leaves the job running in
             Welt; reconnect with ``welt.Client().job(job_id)``.
-        knowledge: Must be ``None`` without a decoder (Welt discovery takes no
-            constraints yet). With a decoder it constrains the local decoding only;
-            Welt still runs unconstrained. It is checked before anything is uploaded.
-        decoder: ``None`` (native DAGs only), a decoder id such as ``"greedy"``, or
-            a :class:`~ergodic.discovery.Decoder` with its settings (a sampler needs
+        knowledge: Domain knowledge for the local decoding (Welt itself takes no
+            constraints); it implies ``decoder="greedy"`` when ``decoder`` is
+            ``None``. It is checked before anything is uploaded.
+        decoder: ``None`` (native DAGs only, or greedy when ``knowledge`` is
+            given), a decoder id such as ``"greedy"``, or a
+            :class:`~ergodic.discovery.Decoder` with its settings (a sampler needs
             ``Decoder("pair_sampler", samples=..., seed=...)``).
         client: A ``welt.Client`` to use as is; ``None`` opens a short-lived one.
 
@@ -215,9 +224,10 @@ def discover(
         ``welt_model_version``, ``welt_configuration_version``, ``welt_decoder``,
         ``welt_seed`` and ``welt_scores`` (the native edge scores as a dataframe,
         rows the source and columns the target; not calibrated confidence).
-        With a decoder it is a :class:`~ergodic.discovery.DecodeResult` (still a
-        ``DiscoveryResult``, ``method`` ``"welt:<model>"``) whose ``graph`` is the
-        decoded DAG; ``diagnostics`` add the decode labels (``decoded`` ``True``,
+        With a decoder (or knowledge) it is a
+        :class:`~ergodic.discovery.DecodeResult` (still a ``DiscoveryResult``,
+        ``method`` ``"welt:<model>"``) whose ``graph`` is the decoded DAG (an ADMG
+        with confounders); ``diagnostics`` add the decode labels (``decoded`` ``True``,
         ``native`` ``False``, ``decoder``, ``parameters``, ``threshold_source``,
         ``rejected_cycles``, ``note``, ...), ``welt_native_graph_type``,
         ``welt_native_edges`` (the native directed edges as pairs) and
@@ -227,10 +237,10 @@ def discover(
         TypeError: ``data`` is not tabular.
         WeltDecodeError: Decoding failed after the paid run; the error carries the
             result and its scores.
-        ValueError: ``knowledge`` was given without a decoder (or names unknown
-            variables or a confounded pair), the decoder settings are invalid or
-            its ``max_nodes`` is below the variable count, or a variable is not
-            continuous or has missing values. Nothing is uploaded.
+        ValueError: ``knowledge`` names unknown variables or contradicts itself,
+            the decoder settings are invalid or its ``max_nodes`` is below the
+            variable count, or a variable is not continuous or has missing values.
+            Nothing is uploaded.
         WeltGraphNotDAGError: The model's native graph is not a declared DAG, either
             known before submitting (nothing is paid) or found in the result.
     """
@@ -239,11 +249,9 @@ def discover(
         raise ValueError("model must be a Welt model id such as 'arrow'")
     config = _decoder_config(decoder)
     if knowledge is not None and config is None:
-        raise ValueError(
-            "Welt discovery takes no domain knowledge yet; discover without it, then "
-            "check the graph against your knowledge (or pass decoder= to apply it "
-            "while decoding the edge scores locally)"
-        )
+        # Welt takes no constraints, so knowledge applies to a local decode: greedy
+        # at the model's native threshold, as decoder="greedy" would.
+        config = Decoder("greedy")
     variables = list(data.variables)
     if config is not None:
         check_size(config.method, len(variables), config.max_nodes)
