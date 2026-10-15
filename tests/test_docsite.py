@@ -137,6 +137,15 @@ def test_numbers_vary_compares_text_only() -> None:
     assert not examples.same("min_ess=25.8", "min_ess=5.4")
 
 
+def test_sampler_stack_check_reads_the_installed_pymc(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.metadata
+
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "5.28.5")
+    assert not examples.sampler_reproduces_recordings()
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "6.0.1")
+    assert examples.sampler_reproduces_recordings()
+
+
 def test_vary_lines_scope_the_looser_rule() -> None:
     expected = "coverage 1.00\nmin_ess 25.8\n"
     assert examples.same(expected, "coverage 1.00\nmin_ess 5.4\n", vary_lines={2})

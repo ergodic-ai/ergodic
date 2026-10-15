@@ -18,6 +18,8 @@ The rules (the Welt next-pass rules in welt-api ``docs/sdk-docs-handoff.md``):
   effective sample sizes, which move between the recording Mac and Linux CI): on
   those lines the text and the count of numbers must match, but the values are not
   compared. Every other line keeps the panel's exact or ``tol``/``rtol`` check.
+  Under PyMC 5 every line of a sampling panel (one with ``tol``, ``rtol`` or ``vary``)
+  gets that looser rule, because the recordings come from PyMC 6.
 """
 
 from __future__ import annotations
@@ -208,6 +210,21 @@ def run_all(programs: list[Program], workers: int = 1) -> list[Run]:
         return list(pool.map(run, programs))
 
 
+def sampler_reproduces_recordings() -> bool:
+    """Whether the installed PyMC is the stack the sampling outputs were recorded on.
+
+    Recordings come from PyMC 6, which reproduces them exactly on macOS and Linux.
+    PyMC 5 (what Python 3.11 resolves) samples differently, so on it a sampling panel
+    checks its text and number count only.
+    """
+    import importlib.metadata
+
+    try:
+        return int(importlib.metadata.version("pymc").split(".")[0]) >= 6
+    except importlib.metadata.PackageNotFoundError:
+        return True
+
+
 def slow_enabled() -> bool:
     return os.environ.get("DOCS_SLOW") == "1"
 
@@ -332,6 +349,7 @@ def check(
                 f"{item.program.page.name}: {item.program.name} failed "
                 f"(exit {item.returncode}):\n{tail}"
             )
+    reproduces = sampler_reproduces_recordings()
     recorded: list[str] = []
     for path in paths:
         text = path.read_text()
@@ -349,9 +367,14 @@ def check(
             tol = float(fence.attributes.get("tol", 0))
             rtol = float(fence.attributes.get("rtol", 0))
             spec = fence.attributes.get("vary")
-            vary = line_numbers(spec, fence.code.count("\n") or 1) if spec else set()
+            count = fence.code.count("\n") or 1
+            vary = line_numbers(spec, count) if spec else set()
+            if (tol or rtol or spec) and not reproduces:
+                vary = set(range(1, count + 1))
             if not same(fence.code, actual, tol, rtol, vary_lines=vary):
                 rule = f"tol={tol}, rtol={rtol}" + (f", vary={spec}" if spec else "")
+                if (tol or rtol or spec) and not reproduces:
+                    rule = "PyMC 5: text and number count only"
                 problems.append(
                     f"{path.name}: output of {source} changed "
                     f"({rule}); run `make docs-record` after review\n"
