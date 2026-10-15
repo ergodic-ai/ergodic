@@ -65,6 +65,16 @@ To be released together with Welt.
   `nie / total`. The `Design.estimand` no longer repeats the `NDE =`/`NIE =`
   prefix, and a treatment with more than two levels is told to recode to two
   levels instead of being pointed at `treated=` (which needs two levels too).
+- `CATEResult.ate()` no longer treats per-unit analytic standard errors as
+  independent (`sqrt(sum se^2) / n`); the units share one fitted model, so that
+  was about `sqrt(n)` too narrow (0.0009 against a sampling spread of 0.038 on a
+  4,000-row world). It now reports the AIPW average off the result's cached
+  cross-fit scores (standard error `std(scores) / sqrt(n)`, 0.039 there, the
+  same as `estimate_effect(strategy="aipw")`), the result's own standard error
+  for a homogeneous result such as `DML.cate()`, and otherwise the mean as a
+  point with no standard error. For the DR-learner's linear final stage the point
+  is unchanged; for the causal forest it is the score average, which can differ
+  slightly from the plain mean of the per-unit effects.
 
 ## [0.1.1] - 2026-08-30
 
