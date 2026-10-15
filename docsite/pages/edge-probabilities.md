@@ -137,6 +137,6 @@ refused.
 
 - [Decode a DAG from edge probabilities](decode-a-graph.md): turn the matrix into a DAG.
 - [Check stability with the bootstrap](bootstrap-stability.md): where frequencies come from.
-- [Run Welt models](welt.md): AVICI and CDFM edge probabilities from Welt.
+- [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm): edge probabilities from Welt.
 
 </div>

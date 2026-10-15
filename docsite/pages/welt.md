@@ -88,7 +88,8 @@ print(result.diagnostics["welt_model_version"])
 
 `welt_scores` is Arrow's native edge-score matrix as a dataframe, with rows for the
 source and columns for the target. The scores are not calibrated confidence, and
-ergodic never thresholds or reorients the graph with them.
+ergodic never thresholds or reorients the graph with them unless you pass `decoder=`.
+Then they're read as independent marginals, as for AVICI and CDFM below.
 `ergodic.discover(data, method="welt:arrow")` runs the same job.
 
 ## Count what you pay for
@@ -133,13 +134,72 @@ WeltLearner(task="classification")}` to `learner=`.
     Arrow learns the graph from 400 rows. Check it against what you know before you
     trust an effect estimated on it.
 
+## Decode AVICI and CDFM
+
+AVICI and CDFM score every directed edge on its own and return a directed graph that
+may hold cycles and two-way pairs. ergodic never turns that into a DAG silently, so by
+default `discover` refuses them before anything is paid for. Pass `decoder=` to decode
+their scores into a DAG yourself.
+
+```python file="welt_decode.py" requires="a Welt API key"
+from ergodic import decode
+from ergodic.datasets import load_birthweight
+from ergodic.welt import discover
+
+# 1. The same 400 births and five continuous columns.
+births = load_birthweight()
+columns = ["mage", "medu", "nprenatal", "bweight", "fage"]
+data = births.data.select(columns).take(range(400))
+
+# 2. Run CDFM once and decode its edge scores with greedy pair-MAP.
+result = discover(data, model="cdfm", decoder="greedy", seed=0)
+for edge in sorted(edge.glyph() for edge in result.graph.edges):
+    print(edge)
+print(result.diagnostics["decoded"], result.diagnostics["threshold_source"])
+print(result.diagnostics["parameters"]["threshold"], result.diagnostics["rejected_cycles"])
+
+# 3. The edges CDFM drew itself, cycles and two-way pairs included.
+print(sorted(result.diagnostics["welt_native_edges"]))
+
+# 4. Decode the same scores another way, locally: no new run.
+probabilities = result.diagnostics["edge_probabilities"]
+print(probabilities)
+print(decode(probabilities, "expected_count").graph)
+```
+
+This program needs your Welt key too, so it shows no recorded output:
+
+- **Step 2.** CDFM runs once, a paid discovery job. `result.graph` is the DAG the
+  decoder chose, not CDFM's own graph, and `diagnostics["decoded"]` is `True`. Greedy
+  keeps an edge when its score is above the model's native threshold: 0.5 for AVICI,
+  and for CDFM the adaptive threshold Welt records, so `threshold_source` is
+  `welt_native`. `rejected_cycles` counts the edges it skipped for closing a cycle.
+- **Step 3.** CDFM's native edges stay in `welt_native_edges`, as source and target
+  pairs.
+- **Step 4.** The scores are an `EdgeProbabilities` of kind `independent`, with the
+  Welt ids, versions and native decoder in its `provenance`. Decoding them again with
+  `ergodic.decode` costs nothing.
+
+Pass `decoder=Decoder("greedy", threshold=0.4)` (from `ergodic.discovery`) to choose
+another threshold, or another decoder such as `"exact_map"` or
+`Decoder("pair_sampler", samples=100, seed=0)`. With `decoder=`, `knowledge=`
+constrains the decoding; Welt itself still runs without constraints, and knowledge that
+names an unknown variable or a `confound` pair raises before anything is uploaded.
+`ergodic.discover(data, method="welt:cdfm", decoder="greedy")` does the same.
+
+!!! caution "The decoded graph is your choice"
+    The scores are uncalibrated and are not a posterior over graphs. A decoder picks
+    one DAG from them, and nothing certifies its orientations. See
+    [Decode a DAG from edge probabilities](decode-a-graph.md).
+
 ## Limits
 
 - Welt discovery reads only continuous variables with no missing values, and takes
-  no domain knowledge. `bootstrap` refuses `welt:` methods, since each resample
-  would be a paid job.
-- `cdfm` and `avici` are refused before paying in ergodic 0.2.0: `discover` raises
-  `WeltGraphNotDAGError` before it uploads anything.
+  no domain knowledge (with `decoder=`, knowledge constrains the local decoding
+  only). `bootstrap` refuses `welt:` methods, since each resample would be a paid job.
+- `cdfm` and `avici` return directed graphs that may hold cycles, so without
+  `decoder=` `discover` raises `WeltGraphNotDAGError` before it uploads anything. See
+  [Decode AVICI and CDFM](#decode-avici-and-cdfm).
 - `WeltLearner.fit` refuses `sample_weight`, because Welt fits take no row weights.
 - On Python 3.14 the extra installs nothing, and `import ergodic.welt` raises an
   `ImportError` that names it. The rest of ergodic never imports Welt.

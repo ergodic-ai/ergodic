@@ -134,8 +134,11 @@ same candidates, and neither the input nor numpy's global random state changes.
 
 - **Forbidden edges, tiers, roots, sinks and `restrict_to`** remove directed edges before
   decoding.
-- **Order** (`order`, tiers) holds on ancestry: no later variable becomes an ancestor of
-  an earlier one.
+- **Order** (`order`, tiers) is enforced as an ordering: the decoded DAG has one
+  topological order that puts every "before" variable first. For tiers that's exactly
+  "no later variable is an ancestor of an earlier one". For separate `order()` pairs
+  it's a little stricter: a DAG that keeps each pair's ancestry right but has no single
+  order satisfying all the pairs is ruled out.
 - **Required edges** go in first, whatever their probability. A required set with a
   cycle raises.
 - **`confound`** raises: a DAG can't hold a latent confounder.
@@ -151,7 +154,12 @@ opt in: `discover(data, "cdfm", decoder="greedy")` runs the model once, reads it
 scores as independent edge probabilities and decodes them. Greedy then uses the model's
 own threshold (0.5 for AVICI, CDFM's adaptive one). The result keeps the scores in
 `diagnostics["edge_probabilities"]`, so you can try another decoder locally without a
-new run. See [Run Welt models](welt.md).
+new run. See [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm).
+
+Arrow returns a DAG of its own, so ergodic uses that by default. Its scores are decoded
+only if you ask, with `decoder=`, and are then read as independent marginals, like
+AVICI's and CDFM's. That's a modelling choice: Welt doesn't state that Arrow's scores
+are marginals.
 
 ## Next steps
 

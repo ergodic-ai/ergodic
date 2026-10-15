@@ -77,12 +77,15 @@ edge directions. It never projects, thresholds or relabels a graph into a DAG.
 | Welt model | Native graph | In ergodic 0.2.0 |
 | --- | --- | --- |
 | `arrow` | DAG | Converts. `ergodic.welt.discover` returns it as a `DiscoveryResult`. |
-| `cdfm` | Directed, may hold cycles | Refused before paying. |
-| `avici` | Directed, may hold cycles | Refused before paying. |
+| `cdfm` | Directed, may hold cycles | Refused before paying by default. With an explicit `decoder=`, its scores are decoded locally into a DAG labelled decoded. |
+| `avici` | Directed, may hold cycles | Refused before paying by default. With an explicit `decoder=`, its scores are decoded locally into a DAG labelled decoded. |
 
-For `cdfm` and `avici`, `ergodic.welt.discover` raises `WeltGraphNotDAGError`
-before it uploads anything. A model the catalogue marks as returning another graph
-type is refused the same way. A model with no known graph type runs, and if its
+By default, for `cdfm` and `avici`, `ergodic.welt.discover` raises
+`WeltGraphNotDAGError` before it uploads anything. A model the catalogue marks as
+returning another graph type is refused the same way. Pass `decoder=` (for example
+`decoder="greedy"`) to run the model and decode its edge scores with
+`ergodic.decode`: the graph is then the decoder's choice, not the model's, and the
+result says so. See [Decode AVICI and CDFM](welt.md#decode-avici-and-cdfm). A model with no known graph type runs, and if its
 result is not a declared DAG, the error carries the paid result in `.result` and
 its edge scores in `.scores`.
 

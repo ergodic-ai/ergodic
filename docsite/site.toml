@@ -103,6 +103,8 @@ pages = [
     ["Add domain knowledge", "domain-knowledge"],
     ["Choose a method and test", "choose-a-method"],
     ["Check stability with the bootstrap", "bootstrap-stability"],
+    ["Work with edge probabilities", "edge-probabilities"],
+    ["Decode a DAG from edge probabilities", "decode-a-graph"],
     ["Discover from time series", "time-series-discovery"],
 ]
 

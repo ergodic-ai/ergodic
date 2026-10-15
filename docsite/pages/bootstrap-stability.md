@@ -129,6 +129,7 @@ threshold. Each run costs one full search.
 
 - [Add domain knowledge](domain-knowledge.md): pin down what resampling can't.
 - [Discover from time series](time-series-discovery.md): the block bootstrap with PCMCI.
+- [Work with edge probabilities](edge-probabilities.md): turn these frequencies into a DAG with a decoder.
 - [Python reference](reference-discovery.md): `bootstrap` and `BootstrapResult`.
 
 </div>
