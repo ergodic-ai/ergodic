@@ -70,6 +70,7 @@ class Site:
     theme_key: str
     footer: str
     cta: tuple[str, str]
+    switcher_label: str
     search_prompt: str
     search_hint: str
     related_llms: tuple[Link, ...]
@@ -83,6 +84,9 @@ class Site:
     tasks: tuple[Task, ...]
     reference_group: str
     reference_modules: tuple[tuple[str, str], ...]
+    # (module, label, import name): documented only when that import is available.
+    reference_optional: tuple[tuple[str, str, str], ...]
+    reference_exclude: tuple[tuple[str, str], ...]  # (module, reason)
     notebooks_page: str
     notebooks_title: str
     notebooks_lead: str
@@ -157,6 +161,7 @@ def load_site(path: Path = CONFIG, root: Path = ROOT) -> Site:
         theme_key=_require(site, "theme_key", "site"),
         footer=_require(site, "footer", "site"),
         cta=(cta["label"], cta["page"]),
+        switcher_label=site.get("switcher_label", "Products"),
         search_prompt=site.get("search_prompt", "Search this version."),
         search_hint=site.get("search_hint", "No matches. Try a shorter query."),
         related_llms=tuple(Link(label, url) for label, url in site.get("related_llms", [])),
@@ -170,6 +175,10 @@ def load_site(path: Path = CONFIG, root: Path = ROOT) -> Site:
         tasks=tasks,
         reference_group=reference.get("group", "Reference"),
         reference_modules=tuple((m, label) for m, label in reference["modules"]),
+        reference_optional=tuple(
+            (m, label, req) for m, label, req in reference.get("optional", [])
+        ),
+        reference_exclude=tuple((m, reason) for m, reason in reference.get("exclude", [])),
         notebooks_page=notebooks.get("page", "notebooks"),
         notebooks_title=notebooks.get("title", "Notebooks"),
         notebooks_lead=notebooks.get("lead", ""),

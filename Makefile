@@ -29,7 +29,7 @@ check: lint format-check typecheck test docs-check ## Lint + format check + type
 docs: ## Build the Graphite docs site into site/ (v<version>/ plus the current root)
 	uv run python -m scripts.docsite build
 
-docs-check: ## Run every page program; check excerpts, recorded outputs and links
+docs-check: ## Run page programs one at a time (slow ones with DOCS_SLOW=1); check excerpts, outputs, links
 	uv run python -m scripts.docsite check
 	uv run python -m scripts.docsite build --output build/docs-check
 	uv run python -m scripts.docsite links build/docs-check
