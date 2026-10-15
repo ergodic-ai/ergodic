@@ -15,19 +15,28 @@ matched exact MAP on 238 of 240 graphs. Each id carries a version, and a decoded
 graph always says it was decoded, by which decoder, with which parameters and
 seed. It is never a graph posterior, and its orientations are not certified by
 anything.
+
+Domain knowledge enters in three ways. Hard constraints remove or force edges.
+Soft statements reweigh the pair states (:meth:`~ergodic.DomainKnowledge.log_odds`)
+before any decoder reads them, so every decoder runs unchanged on the weighted
+states. A confounder (``confound``) adds a bidirected edge after the directed part
+is decoded, which makes the result an ADMG. A decode with knowledge also audits
+each statement against the model.
 """
 
 from __future__ import annotations
 
 import heapq
 import math
+import warnings
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
-from ..graph import dag
+from ..graph import Mark, admg, dag
+from ..knowledge import _pair_rules
 from ._probabilities import EdgeProbabilities
 from ._result import DiscoveryResult
 
@@ -37,7 +46,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
     from ..graph import MixedGraph
-    from ..knowledge import DomainKnowledge
+    from ..knowledge import DomainKnowledge, KnowledgeStatement
 
     FloatArray = npt.NDArray[np.float64]
     BoolArray = npt.NDArray[np.bool_]
@@ -45,6 +54,8 @@ if TYPE_CHECKING:
 PROBABILITY_FLOOR: Final = 1e-12
 DECODED_NOTE: Final = "not a graph posterior; orientation not certified"
 DEFAULT_MAX_NODES: Final = 20
+CONFLICT_PROBABILITY: Final = 0.1
+"""A statement the model gives less than this probability is a strong conflict."""
 
 
 @dataclass(frozen=True)
@@ -117,12 +128,17 @@ def resolve_decoder(method: str) -> str:
 
 @dataclass(frozen=True)
 class DecodeResult(DiscoveryResult):
-    """A DAG decoded from edge probabilities, with how it was decoded.
+    """A DAG (or ADMG) decoded from edge probabilities, with how it was decoded.
 
-    A :class:`DiscoveryResult` whose ``graph`` is the decoded DAG (``kind``
-    ``dag``): the single decoded graph for a deterministic decoder, the consensus
-    (medoid) of the candidates for a sampler. ``method`` is
-    ``"decode:<decoder id>"`` (a Welt run decoded locally keeps ``"welt:<model>"``).
+    A :class:`DiscoveryResult` whose ``graph`` is the decoded graph: the single
+    decoded graph for a deterministic decoder, the consensus (medoid) of the
+    candidates for a sampler. ``method`` is ``"decode:<decoder id>"`` (a Welt run
+    decoded locally keeps ``"welt:<model>"``). Its ``kind`` is ``dag``, or
+    ``admg`` when the knowledge holds ``confound`` pairs: each such pair gets
+    ``a <-> b`` on top of the decoded directed edges. When the decoder also chose
+    a directed edge on that pair (a bow), the confounder is written as an explicit
+    latent node ``L__a__b`` (in ``graph.latent``, with an edge into each end), since
+    a graph holds one edge per pair; identification reads both forms alike.
 
     ``diagnostics`` always labels the graph: ``decoded`` is ``True``, ``native`` is
     ``False``, and it records ``decoder``, ``parameters``, ``seed``,
@@ -130,13 +146,38 @@ class DecodeResult(DiscoveryResult):
     close a directed cycle), ``order_skipped`` (skipped only because they would
     break the order knowledge) and ``search_expansions`` (each one per
     candidate), ``threshold_source``, ``edge_budget``, ``objective`` (the
-    factorized pair log score of ``graph``), ``n_edges``, ``source_kind``,
-    ``source_provenance``, ``knowledge_applied`` and ``note`` ("not a graph
+    factorized pair log score of ``graph``'s directed edges on the input's pair
+    states), ``knowledge_objective`` (the same score on the knowledge-weighted
+    pair states the decoder read; equal to ``objective`` without soft
+    statements), ``n_edges`` (directed edges), ``graph_kind``,
+    ``confounded_pairs``, ``latent_confounders`` (latent node to pair, bows
+    only), ``source_kind``, ``source_provenance``, ``knowledge_applied``,
+    ``n_hard_statements``, ``n_soft_statements`` and ``note`` ("not a graph
     posterior; orientation not certified").
+
+    With knowledge it also holds the audit:
+
+    - ``knowledge_audit``: one entry per statement as stated
+      (:meth:`~ergodic.DomainKnowledge.statements`), a dict with ``statement``
+      (readable text), ``kind``, ``confidence`` (``None`` for hard),
+      ``probability`` (the model's chance the statement holds, from the input's
+      pair states with pairs taken as independent; ``None`` for a confounder,
+      which no edge state expresses, with the reason in ``note``), ``holds`` (in
+      ``graph``) and ``holds_without_knowledge`` (in a decode with the same
+      settings and seed but no knowledge). Statements are read pair by pair, as
+      the decoders weigh them: an order or tier holds when no direct edge runs
+      against it.
+    - ``knowledge_cost``: the knowledge-free decode's ``objective`` minus this
+      one's. Non-negative for ``exact_map``; the other decoders are not exact on
+      the score, so it can be negative.
+    - ``knowledge_conflicts``: the audit entries the model gives a probability
+      below 0.1. Any such entry also raises one ``UserWarning``.
+
+    Without knowledge these are ``()``, ``None`` and ``()``.
 
     Attributes:
         decoder: The versioned decoder id, for example ``"greedy_v1"``.
-        candidates: Every decoded DAG; one for a deterministic decoder, one per
+        candidates: Every decoded graph; one for a deterministic decoder, one per
             sample (in sample order) for a sampler. Candidates, not posterior draws.
         probabilities: The edge probabilities that were decoded, as given.
     """
@@ -285,23 +326,42 @@ def decode(
     inputs (and seed). The input is never changed and the global numpy random
     state is never touched.
 
-    Knowledge constrains the decode. Forbidden edges, tiers, roots, sinks and a
-    skeleton restriction remove directed edges (their weight becomes minus
-    infinity). Order (``order``, tiers) is enforced as one time order: the
+    Knowledge constrains the decode. Hard forbidden edges, tiers, roots, sinks
+    and a skeleton restriction remove directed edges (their weight becomes minus
+    infinity). Hard order (``order``, tiers) is enforced as one time order: the
     decoded graph has a topological order consistent with every order statement
     and every edge at once. That is exactly the tier reading, and stricter than
     :meth:`~ergodic.DomainKnowledge.violations` for separate ``order`` pairs (it
     only asks that no later variable be an ancestor of an earlier one), so a DAG
     that satisfies each pair alone but no single order is ruled out. Required
-    edges go in first, whatever their weight, and must not form a cycle.
-    ``confound`` is refused: a DAG cannot hold a latent confounder. The decoded
-    graph is checked against the knowledge afterwards.
+    edges go in first, whatever their weight, and must not form a cycle. The
+    decoded graph is checked against the hard knowledge afterwards.
+
+    Soft statements (any builder's ``confidence=`` below 1) are weighed, not
+    enforced. After the input is read as pair states, each pair's directed
+    states are multiplied by ``exp(knowledge.log_odds(variables))`` and the pair
+    is renormalized; every decoder then runs unchanged on those states, so
+    ``exact_map`` is exact on the combined score (pair score plus
+    :meth:`~ergodic.DomainKnowledge.log_prior`). Greedy with ``threshold=t``
+    multiplies the input value's odds by the same ratio before comparing it with
+    ``t``. A soft statement on a pair a hard one already settles changes nothing.
+
+    ``confound(a, b)`` adds ``a <-> b`` after the directed part is decoded, so
+    the graph and every candidate is an ADMG (see :class:`DecodeResult` for a
+    pair the decoder also joined with a directed edge).
+
+    With knowledge, the decode runs a second time without it (same settings and
+    seed) and ``diagnostics`` records the audit: per statement, the model's
+    probability that it holds and whether it holds with and without the
+    knowledge, the score the knowledge cost, and the strong conflicts (model
+    probability below 0.1), which also raise one ``UserWarning``.
 
     Args:
         probabilities: The edge probabilities to decode.
         method: A decoder id, with or without its ``_v1`` version.
         threshold: Greedy only; see above. ``None`` keeps the ``w > 0`` rule.
-        knowledge: Hard constraints, all naming variables of ``probabilities``.
+        knowledge: Hard and soft statements, all naming variables of
+            ``probabilities``.
         samples: How many candidates a sampler draws; 1 for the others.
         seed: The sampler's seed (required); deterministic decoders refuse one.
         max_nodes: The variable cap for the decoders that search orders exactly
@@ -309,14 +369,15 @@ def decode(
             with the variable count, so above the cap they raise.
 
     Returns:
-        A :class:`DecodeResult`: ``graph`` a DAG over every variable, with the
-        decoder, its parameters and the diagnostics recorded.
+        A :class:`DecodeResult`: ``graph`` a DAG over every variable (an ADMG
+        with confounders), with the decoder, its parameters and the diagnostics
+        recorded.
 
     Raises:
         TypeError: ``probabilities`` is not an :class:`EdgeProbabilities`.
         ValueError: An unknown decoder, a setting that does not apply, too many
             variables for an exact search, knowledge naming unknown variables,
-            confounded pairs, inconsistent knowledge or a cyclic required set.
+            inconsistent knowledge or a cyclic required set.
     """
     if not isinstance(probabilities, EdgeProbabilities):
         raise TypeError(
@@ -329,14 +390,130 @@ def decode(
     names = probabilities.variables
     check_size(decoder, len(names), max_nodes)
     constraints = _Constraints.build(names, knowledge)
-    pair = probabilities.to_pair_states().values
+    source = probabilities.to_pair_states().values
+    run = _run(probabilities, source, decoder, threshold, constraints, samples, seed, max_nodes)
+    confounded = tuple((names[i], names[j]) for i, j in constraints.confounded)
+    candidates = tuple(_to_graph(names, g, confounded) for g in run.graphs)
+    result_graph = candidates[run.chosen]
+    objective = _pair_log_score(run.graphs[run.chosen], source, PROBABILITY_FLOOR)
+    audit: tuple[dict[str, Any], ...] = ()
+    conflicts: tuple[dict[str, Any], ...] = ()
+    cost: float | None = None
+    statements = knowledge.statements() if knowledge is not None else ()
+    if knowledge is not None:
+        broken = knowledge.violations(result_graph)
+        if broken:  # pragma: no cover - the decoders enforce every constraint they accept
+            raise RuntimeError(f"decoded graph breaks the knowledge: {broken}")
+        free = _run(
+            probabilities,
+            source,
+            decoder,
+            threshold,
+            _Constraints.build(names, None),
+            samples,
+            seed,
+            max_nodes,
+        )
+        free_graph = free.graphs[free.chosen]
+        cost = _pair_log_score(free_graph, source, PROBABILITY_FLOOR) - objective
+        audit = _audit(statements, names, source, run.graphs[run.chosen], free_graph)
+        conflicts = tuple(
+            entry
+            for entry in audit
+            if entry["probability"] is not None and entry["probability"] < CONFLICT_PROBABILITY
+        )
+        if conflicts:
+            listed = "; ".join(
+                f"{entry['statement']} ({entry['probability']:.3g})" for entry in conflicts
+            )
+            warnings.warn(
+                f"{len(conflicts)} knowledge statement(s) get a model probability below "
+                f"{CONFLICT_PROBABILITY:g}: {listed}. See diagnostics['knowledge_audit']",
+                UserWarning,
+                stacklevel=2,
+            )
+    latent = {
+        node: pair
+        for node in sorted(result_graph.latent)
+        for pair in confounded
+        if result_graph.children(node) == frozenset(pair)
+    }
+    diagnostics: dict[str, Any] = {
+        "decoded": True,
+        "native": False,
+        "decoder": decoder,
+        "decoder_port_of": spec.port_of,
+        "parameters": run.parameters,
+        "threshold_source": "decoder" if threshold is not None else None,
+        "seed": seed,
+        "samples": samples,
+        "rejected_cycles": run.rejections,
+        "order_skipped": run.order_skips,
+        "search_expansions": run.expansions,
+        "edge_budget": run.edge_budget,
+        "objective": objective,
+        "knowledge_objective": _pair_log_score(run.graphs[run.chosen], run.pair, PROBABILITY_FLOOR),
+        "n_edges": int(run.graphs[run.chosen].sum()),
+        "graph_kind": result_graph.kind.value,
+        "confounded_pairs": confounded,
+        "latent_confounders": latent,
+        "source_kind": probabilities.kind,
+        "source_calibrated": probabilities.calibrated,
+        "source_provenance": probabilities.provenance,
+        "knowledge_applied": knowledge is not None,
+        "n_hard_statements": sum(not statement.is_soft for statement in statements),
+        "n_soft_statements": sum(statement.is_soft for statement in statements),
+        "knowledge_audit": audit,
+        "knowledge_cost": cost,
+        "knowledge_conflicts": conflicts,
+        "note": DECODED_NOTE,
+    }
+    return DecodeResult(
+        graph=result_graph,
+        method=f"decode:{decoder}",
+        diagnostics=diagnostics,
+        decoder=decoder,
+        candidates=candidates,
+        probabilities=probabilities,
+    )
+
+
+@dataclass(frozen=True)
+class _Run:
+    """One decode's raw output: candidate adjacency matrices and their counters."""
+
+    graphs: tuple[BoolArray, ...]
+    chosen: int
+    rejections: tuple[int, ...]
+    order_skips: tuple[int, ...]
+    expansions: tuple[int, ...]
+    edge_budget: int | None
+    parameters: dict[str, Any]
+    pair: FloatArray  # the pair states the decoder read, knowledge-weighted
+
+
+def _run(
+    probabilities: EdgeProbabilities,
+    source: FloatArray,
+    decoder: str,
+    threshold: float | None,
+    constraints: _Constraints,
+    samples: int,
+    seed: int | None,
+    max_nodes: int,
+) -> _Run:
+    odds = constraints.log_odds
+    pair = source if odds is None else _weighted_pair_states(source, odds)
+    values = probabilities.values
+    if odds is not None and threshold is not None:
+        values = _weighted_values(values, odds)
     weights = _relative_log_weights(pair, PROBABILITY_FLOOR)
     weights[~constraints.permitted] = -np.inf
     parameters: dict[str, Any] = {"probability_floor": PROBABILITY_FLOOR}
     edge_budget: int | None = None
     if decoder == "greedy_v1":
         parameters["threshold"] = threshold
-        graph, rejected, skipped = _greedy(weights, probabilities.values, threshold, constraints)
+        graph, rejected, skipped = _greedy(weights, values, threshold, constraints)
         graphs, rejections, order_skips, expansions = [graph], [rejected], [skipped], [0]
     elif decoder == "pair_sampler_v1":
         graphs, rejections, order_skips = _pair_sampler(pair, samples, seed or 0, constraints)
@@ -359,41 +536,15 @@ def decode(
             parameters["edge_budget_rule"] = rule
             graph = _cardinality_graph(weights, order, edge_budget, constraints)
         graphs, rejections, order_skips, expansions = [graph], [0], [0], [expanded]
-    chosen = graphs[_medoid(graphs)] if len(graphs) > 1 else graphs[0]
-    candidates = tuple(_to_dag(names, g) for g in graphs)
-    result_graph = _to_dag(names, chosen)
-    if knowledge is not None:
-        broken = knowledge.violations(result_graph)
-        if broken:  # pragma: no cover - the decoders enforce every constraint they accept
-            raise RuntimeError(f"decoded graph breaks the knowledge: {broken}")
-    diagnostics: dict[str, Any] = {
-        "decoded": True,
-        "native": False,
-        "decoder": decoder,
-        "decoder_port_of": spec.port_of,
-        "parameters": parameters,
-        "threshold_source": "decoder" if threshold is not None else None,
-        "seed": seed,
-        "samples": samples,
-        "rejected_cycles": tuple(rejections),
-        "order_skipped": tuple(order_skips),
-        "search_expansions": tuple(expansions),
-        "edge_budget": edge_budget,
-        "objective": _pair_log_score(chosen, pair, PROBABILITY_FLOOR),
-        "n_edges": int(chosen.sum()),
-        "source_kind": probabilities.kind,
-        "source_calibrated": probabilities.calibrated,
-        "source_provenance": probabilities.provenance,
-        "knowledge_applied": knowledge is not None,
-        "note": DECODED_NOTE,
-    }
-    return DecodeResult(
-        graph=result_graph,
-        method=f"decode:{decoder}",
-        diagnostics=diagnostics,
-        decoder=decoder,
-        candidates=candidates,
-        probabilities=probabilities,
+    return _Run(
+        graphs=tuple(graphs),
+        chosen=_medoid(graphs) if len(graphs) > 1 else 0,
+        rejections=tuple(rejections),
+        order_skips=tuple(order_skips),
+        expansions=tuple(expansions),
+        edge_budget=edge_budget,
+        parameters=parameters,
+        pair=pair,
     )
 
 
@@ -410,12 +561,18 @@ def check_knowledge(names: Sequence[str], knowledge: DomainKnowledge) -> None:
 
 @dataclass(frozen=True)
 class _Constraints:
-    """Knowledge as index arrays: permitted cells, required edges, precedence."""
+    """Knowledge as index arrays: permitted cells, required edges, precedence.
+
+    Also the confounded pairs (added after decoding) and the soft statements'
+    log likelihood ratios (``None`` when they change nothing).
+    """
 
     permitted: BoolArray
     required: tuple[tuple[int, int], ...]
     precedence: tuple[tuple[int, int], ...]
     must_precede: tuple[int, ...]  # bitmask of nodes that must come earlier in the order
+    confounded: tuple[tuple[int, int], ...] = ()
+    log_odds: FloatArray | None = None
 
     @property
     def required_pairs(self) -> frozenset[frozenset[int]]:
@@ -430,11 +587,6 @@ class _Constraints:
         unknown = sorted(knowledge.variables - set(names))
         if unknown:
             raise ValueError(f"knowledge names variables the probabilities lack: {unknown}")
-        if knowledge.confounded:
-            raise ValueError(
-                "decoding returns a DAG, which cannot hold a latent confounder; "
-                "drop the confound() constraints to decode"
-            )
         knowledge.validate()
         mask, _ = knowledge.edge_mask(list(names))
         index = {name: i for i, name in enumerate(names)}
@@ -445,7 +597,21 @@ class _Constraints:
         must = [0] * size
         for source, target in (*required, *precedence):
             must[target] |= 1 << source
-        constraints = cls(np.asarray(mask, dtype=bool), required, precedence, tuple(must))
+        confounded = tuple(
+            sorted(
+                (min(index[a], index[b]), max(index[a], index[b]))
+                for a, b in (sorted(pair) for pair in knowledge.confounded)
+            )
+        )
+        odds = knowledge.log_odds(list(names)) if knowledge.soft else None
+        constraints = cls(
+            np.asarray(mask, dtype=bool),
+            required,
+            precedence,
+            tuple(must),
+            confounded,
+            odds if odds is not None and odds.any() else None,
+        )
         base = constraints.base_graph(size)
         if not _is_acyclic(base):
             raise ValueError(
@@ -460,6 +626,143 @@ class _Constraints:
         for source, target in (*self.required, *self.precedence):
             graph[source, target] = True
         return graph
+
+
+# -- soft knowledge and confounders --------------------------------------------------------
+
+
+def _weighted_pair_states(pair: FloatArray, odds: FloatArray) -> FloatArray:
+    """Multiply each pair's directed states by ``exp(odds)`` and renormalize the pair.
+
+    Pairs with no soft weight keep their numbers exactly. Computed in log space,
+    so large confidences neither overflow nor lose the smaller states.
+    """
+    result = pair.copy()
+    size = pair.shape[0]
+    for low in range(size):
+        for high in range(low + 1, size):
+            if odds[low, high] == 0.0 and odds[high, low] == 0.0:
+                continue
+            forward, reverse = float(pair[low, high]), float(pair[high, low])
+            terms = (
+                _log(max(0.0, 1.0 - forward - reverse)),
+                _log(forward) + float(odds[low, high]),
+                _log(reverse) + float(odds[high, low]),
+            )
+            top = max(terms)
+            if top == -math.inf:  # pragma: no cover - the three states sum to one
+                continue
+            masses = [math.exp(term - top) for term in terms]
+            total = sum(masses)
+            result[low, high] = masses[1] / total
+            result[high, low] = masses[2] / total
+    return result
+
+
+def _weighted_values(values: FloatArray, odds: FloatArray) -> FloatArray:
+    """Input values with their odds multiplied by ``exp(odds)``: the threshold path."""
+    result = values.copy()
+    for source, target in zip(*np.nonzero(odds), strict=True):
+        value = float(values[source, target])
+        if 0.0 < value < 1.0:
+            logit = math.log(value) - math.log1p(-value) + float(odds[source, target])
+            result[source, target] = 1.0 / (1.0 + math.exp(-logit)) if logit > -700 else 0.0
+    return result
+
+
+def _log(value: float) -> float:
+    return math.log(value) if value > 0.0 else -math.inf
+
+
+def _latent_name(a: str, b: str, taken: set[str]) -> str:
+    first, second = sorted((a, b))
+    name = f"L__{first}__{second}"
+    while name in taken:
+        name = "_" + name
+    return name
+
+
+def _to_graph(
+    names: Sequence[str], graph: BoolArray, confounded: Sequence[tuple[str, str]]
+) -> MixedGraph:
+    """The decoded DAG, or the ADMG it becomes with the confounded pairs added."""
+    sources, targets = np.nonzero(graph)
+    edges: list[Any] = [
+        (names[int(s)], names[int(t)]) for s, t in zip(sources, targets, strict=True)
+    ]
+    if not confounded:
+        return dag(edges, nodes=names)
+    index = {name: i for i, name in enumerate(names)}
+    taken = set(names)
+    latent: list[str] = []
+    for a, b in confounded:
+        if graph[index[a], index[b]] or graph[index[b], index[a]]:
+            # A bow: the pair already holds a directed edge, and a graph holds one
+            # edge per pair, so the confounder becomes an explicit latent node.
+            node = _latent_name(a, b, taken)
+            taken.add(node)
+            latent.append(node)
+            edges += [(node, a), (node, b)]
+        else:
+            edges.append((a, Mark.ARROW, b, Mark.ARROW))
+    return admg(edges, nodes=(*names, *latent), latent=latent)
+
+
+def _pair_state(graph: BoolArray, i: int, j: int) -> int:
+    return 1 if graph[i, j] else 2 if graph[j, i] else 0
+
+
+def _audit(
+    statements: Sequence[KnowledgeStatement],
+    names: Sequence[str],
+    source: FloatArray,
+    decoded: BoolArray,
+    free: BoolArray,
+) -> tuple[dict[str, Any], ...]:
+    """One entry per statement: the model's probability and where it holds."""
+    index = {name: i for i, name in enumerate(names)}
+    entries: list[dict[str, Any]] = []
+    for statement in statements:
+        entry: dict[str, Any] = {
+            "statement": str(statement),
+            "kind": statement.kind,
+            "confidence": statement.confidence,
+        }
+        if statement.kind == "confound":
+            entry.update(
+                probability=None,
+                holds=True,
+                holds_without_knowledge=False,
+                note="a hidden common cause is not an edge state, so the edge "
+                "probabilities cannot price it",
+            )
+            entries.append(entry)
+            continue
+        satisfied: dict[tuple[int, int], list[bool]] = {}
+        holds = holds_free = True
+        for a, b, rule in _pair_rules(statement, names):
+            i, j = index[a], index[b]
+            holds = holds and rule[_pair_state(decoded, i, j)]
+            holds_free = holds_free and rule[_pair_state(free, i, j)]
+            low, high = min(i, j), max(i, j)
+            # The rule's states, re-read from (low, high): state 1 is low -> high.
+            states = rule if (low, high) == (i, j) else (rule[0], rule[2], rule[1])
+            current = satisfied.setdefault((low, high), [True, True, True])
+            for state in range(3):
+                current[state] = current[state] and states[state]
+        probability = 1.0
+        for (low, high), mask in sorted(satisfied.items()):
+            forward, reverse = float(source[low, high]), float(source[high, low])
+            masses = (max(0.0, 1.0 - forward - reverse), forward, reverse)
+            probability *= min(1.0, sum(m for m, keep in zip(masses, mask, strict=True) if keep))
+        entry.update(
+            probability=probability,
+            holds=bool(holds),
+            holds_without_knowledge=bool(holds_free),
+            note=None,
+        )
+        entries.append(entry)
+    return tuple(entries)
 
 
 # -- shared arithmetic ------------------------------------------------------------------
@@ -518,12 +821,6 @@ def _is_acyclic(graph: BoolArray) -> bool:
             if indegree[child] == 0:
                 ready.append(int(child))
     return bool(seen == graph.shape[0])
-
-
-def _to_dag(names: Sequence[str], graph: BoolArray) -> MixedGraph:
-    sources, targets = np.nonzero(graph)
-    edges = [(names[int(s)], names[int(t)]) for s, t in zip(sources, targets, strict=True)]
-    return dag(edges, nodes=names)
 
 
 def _pair_states(graph: BoolArray) -> npt.NDArray[np.uint8]:

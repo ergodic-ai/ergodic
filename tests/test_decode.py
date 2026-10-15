@@ -509,8 +509,8 @@ def test_exact_map_under_knowledge_is_the_constrained_optimum() -> None:
 
 def test_knowledge_refusals() -> None:
     probs = pair_state()
-    with pytest.raises(ValueError, match="cannot hold a latent confounder"):
-        decode(probs, knowledge=DomainKnowledge().confound("A", "B"))
+    with pytest.raises(ValueError, match="banned from being adjacent"):
+        decode(probs, knowledge=DomainKnowledge().confound("A", "B").forbid_adjacency("A", "B"))
     with pytest.raises(ValueError, match="lack"):
         decode(probs, knowledge=DomainKnowledge().require("A", "Z"))
     cyclic = DomainKnowledge().require("A", "B").require("B", "C").require("C", "A")
