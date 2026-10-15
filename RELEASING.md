@@ -28,18 +28,37 @@ API tokens anywhere.
 2. `src/ergodic/__init__.py` has `__version__ = "0.2.0"` and `CHANGELOG.md` has a
    `## [0.2.0]` section.
 3. CI is green on `main` (`gh run list -R ergodic-ai/ergodic --branch main --workflow ci.yml`).
-4. Re-run the history scan on the final refs and confirm it is clean:
+4. Re-run the history scan on everything GitHub will serve and confirm it is clean.
+   That includes the pull-request refs (`refs/pull/*/head`), which a normal clone or
+   `git fetch` leaves out but which become public with the repository. Scan from a
+   mirror:
 
    ```bash
-   git fetch origin --tags --prune
-   gitleaks git --log-opts="--all" --redact .
-   trufflehog git "file://$PWD" --no-verification --no-update
+   git clone --mirror https://github.com/ergodic-ai/ergodic.git ergodic-mirror.git
+   git -C ergodic-mirror.git fetch origin '+refs/pull/*:refs/pull/*'   # explicit; a mirror normally has them
+   git -C ergodic-mirror.git for-each-ref --format='%(refname)' | sed 's|/[^/]*$||' | sort | uniq -c
+   gitleaks git --log-opts="--all" --redact ergodic-mirror.git
+
+   # trufflehog wants a non-bare repository: copy every head, tag and PR ref in as branches.
+   git init -q -b scan-unused scan-tree
+   git -C scan-tree fetch -q ../ergodic-mirror.git '+refs/heads/*:refs/heads/*' \
+     '+refs/tags/*:refs/tags/*' '+refs/pull/*/head:refs/heads/pull/*'
+   git -C scan-tree checkout -q main   # trufflehog needs an index
+   trufflehog git "file://$PWD/scan-tree" --no-verification --no-update \
+     --results=verified,unknown,unverified
    ```
+
+   Expected: gitleaks reports no leaks; trufflehog reports only the known "Box" false
+   positive inside the Illustrator data of the dark logo SVG.
 
 5. Owner decisions recorded: which stale remote branches to delete before going
    public (`codex/latent-productization`, `forecast-s5`, `scm-mvp`, `docs-redesign`,
    `metalearners-phase2`), and whether `deploy/` and the Illustrator data in the logo
-   SVGs stay (see the API-146 scan report).
+   SVGs stay (see the API-146 scan report). Deleting a branch does **not** hide its
+   content: the pull-request refs keep those commits reachable on GitHub (`pull/2` is
+   `scm-mvp`, `pull/5` is `metalearners-phase2`; `pull/1` and `pull/3` hold 17
+   pre-squash commits no branch reaches), and only GitHub support can remove PR refs.
+   The API-146 scan and its independent review scanned all of them: clean.
 
 ## 1. Make the repository public **[owner go]**
 
@@ -108,8 +127,13 @@ the project.
 `workflow_dispatch` needs `release.yml` on the default branch.
 
 ```bash
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 gh workflow run release.yml -R ergodic-ai/ergodic --ref main -f testpypi=true
-gh run watch -R ergodic-ai/ergodic "$(gh run list -R ergodic-ai/ergodic --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+# Wait for this run to register, so the lookup can't pick up an older one.
+until RUN=$(gh run list -R ergodic-ai/ergodic --workflow release.yml --event workflow_dispatch \
+    --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"$since\")][0].databaseId // empty") \
+    && [ -n "$RUN" ]; do sleep 5; done
+gh run watch -R ergodic-ai/ergodic "$RUN"
 # Approve the testpypi deployment when asked (Actions tab, "Review deployments").
 
 uv venv /tmp/ergodic-testpypi
@@ -125,7 +149,48 @@ once; a second dry run of the same version fails at upload, which is expected.
 The wheel's metadata is version 2.5 (current hatchling). The dry run is also the
 check that the publish action and PyPI accept it.
 
-## 5. Delete the inherited empty 1.0.0 **[owner go]**
+## 5. Prepare GitHub Pages before the tag **[owner go]**
+
+The docs workflow (`.github/workflows/docs.yml`, from the docs builder) deploys to the
+`github-pages` environment. Set Pages and that environment up **before** any `v*` tag
+is pushed. Otherwise the docs deployment either fails (Pages not enabled, or the
+environment only allows the default branch: "Tag v0.2.0 is not allowed to deploy to
+github-pages due to environment protection rules") or goes live with no separate go.
+
+1. **Verify the domain for the organization** (stops anyone else's Pages site
+   claiming it): GitHub → ergodic-ai organization → Settings → Pages → Add a domain →
+   `ergodic.dev`. GitHub shows a TXT record named
+   `_github-pages-challenge-ergodic-ai.ergodic.dev`; add it in Cloudflare (see the DNS
+   notes below), then click Verify. This TXT record changes nothing that is served.
+2. **Enable Pages with the Actions source:**
+   `gh api -X POST repos/ergodic-ai/ergodic/pages -f build_type=workflow`
+   Until the custom domain is set in step 8, the site would serve at
+   `https://ergodic-ai.github.io/ergodic/`.
+3. **Gate the `github-pages` environment and allow release tags.** Same calls as
+   step 2 (`$REVIEWER_ID` from there):
+
+   ```bash
+   gh api -X PUT repos/ergodic-ai/ergodic/environments/github-pages --input - <<EOF
+   {"reviewers":[{"type":"User","id":$REVIEWER_ID}],
+    "deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
+   EOF
+   gh api -X POST repos/ergodic-ai/ergodic/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag
+   gh api -X POST repos/ergodic-ai/ergodic/environments/github-pages/deployment-branch-policies -f name=main -f type=branch
+   gh api repos/ergodic-ai/ergodic/environments/github-pages/deployment-branch-policies --jq '.branch_policies[] | .type + " " + .name'
+   ```
+
+   The reviewer makes the docs go-live its own approval, whatever triggers the
+   workflow.
+
+**Expected docs trigger.** `docs.yml` should publish on `release: published` (the
+GitHub release created in step 7 after the PyPI upload is verified), or in a job that
+runs only after `release.yml`'s `publish-pypi` succeeded, so the docs never describe
+a version that isn't on PyPI. Pull requests and tag pushes may still build and check
+the site; only the deploy job moves. At the time of writing `docs.yml` deploys on every
+`v*` tag push; the docs builder owner is changing that. Whichever trigger ships, the
+`github-pages` reviewer gate above holds the deployment until step 8.
+
+## 6. Delete the inherited empty 1.0.0 **[owner go]**
 
 PyPI lists a file-less 1.0.0 ("A simple printer of nested lists") as the latest
 release. Delete it just before tagging 0.2.0, so the project page shows 0.2.0 as
@@ -139,10 +204,11 @@ latest from the moment it appears.
 
 Deletion is permanent. Never reuse 1.0.0 for a real release.
 
-## 6. Tag and publish ergodic 0.2.0 **[owner go]**
+## 7. Tag and publish ergodic 0.2.0 **[owner go]**
 
-Order for the joint release (API-147): repository public (step 1), **ergodic 0.2.0 to
-PyPI**, then **welt-client to PyPI**, then both doc sites, then the console agent docs.
+Order for the joint release (API-147): repository public (step 1), Pages prepared
+(step 5), **ergodic 0.2.0 to PyPI**, then **welt-client to PyPI**, then both doc sites
+(step 8 here), then the console agent docs.
 ergodic goes first because `welt-client[ergodic]` requires `ergodic>=0.2,<0.3`. Until
 the new welt-client is out, `pip install "ergodic[welt]"` can't resolve its welt-client
 floor, so publish welt-client straight after.
@@ -152,8 +218,13 @@ git switch main && git pull --ff-only
 uv run python -c "import ergodic; print(ergodic.__version__)"   # expect 0.2.0
 git tag -a v0.2.0 -m "ergodic 0.2.0"
 git push origin v0.2.0
-gh run watch -R ergodic-ai/ergodic "$(gh run list -R ergodic-ai/ergodic --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+until RUN=$(gh run list -R ergodic-ai/ergodic --workflow release.yml --event push --branch v0.2.0 \
+    --json databaseId --jq '.[0].databaseId // empty') && [ -n "$RUN" ]; do sleep 5; done
+gh run watch -R ergodic-ai/ergodic "$RUN"
 # Approve the pypi deployment when the check and build jobs are green.
+# If docs.yml still deploys on tag pushes, its github-pages deployment now waits for
+# approval: leave it waiting until step 8. (If it gets rejected, rerun it then with
+# `gh workflow run docs.yml -R ergodic-ai/ergodic --ref v0.2.0`.)
 ```
 
 Verify from PyPI in a clean environment:
@@ -163,17 +234,15 @@ uv venv /tmp/ergodic-pypi && uv pip install --python /tmp/ergodic-pypi "ergodic=
 /tmp/ergodic-pypi/bin/python -c "import ergodic; print(ergodic.__version__)"
 ```
 
-Then create the GitHub release from the changelog section:
+Create the GitHub release from the changelog section when step 8 (docs live) has its
+go, because with the expected trigger it starts the docs deployment:
 
 ```bash
 gh release create v0.2.0 -R ergodic-ai/ergodic --verify-tag --title "ergodic 0.2.0" \
   --notes-file <(awk '/^## \[0.2.0\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md)
 ```
 
-If the docs workflow publishes on `release: published`, creating the release also
-publishes the docs, so do it only when the docs step is approved too.
-
-## 7. Docs on GitHub Pages at ergodic.dev **[owner go]**
+## 8. Docs live at ergodic.dev **[owner go]**
 
 ### What ergodic.dev looks like today (checked 2026-10-14, read-only)
 
@@ -192,13 +261,13 @@ and the TXT records verify Resend and Google.
 
 ### Steps
 
-1. **Verify the domain for the organization first** (stops anyone else's Pages site
-   claiming it): GitHub → ergodic-ai organization → Settings → Pages → Add a domain →
-   `ergodic.dev`. GitHub shows a TXT record named
-   `_github-pages-challenge-ergodic-ai.ergodic.dev`; add it in Cloudflare, then click
-   Verify.
-2. **Enable Pages with the Actions source:**
-   `gh api -X POST repos/ergodic-ai/ergodic/pages -f build_type=workflow`
+1. **Start the deployment.** Create the GitHub release (end of step 7). With the
+   expected trigger this runs `docs.yml`; approve its `github-pages` deployment in the
+   Actions tab. If `docs.yml` still deploys on tag pushes, approve the deployment that
+   has been waiting since step 7 instead.
+2. **Set the custom domain:**
+   `gh api -X PUT repos/ergodic-ai/ergodic/pages -f cname=ergodic.dev`
+   (an Actions-deployed site ignores a `CNAME` file; the setting is what counts).
 3. **Add the apex records in Cloudflare, proxy off ("DNS only", grey cloud)** so
    GitHub can issue the certificate:
 
@@ -215,13 +284,11 @@ and the TXT records verify Resend and Google.
    | CNAME | `www` | `ergodic-ai.github.io` (replaces the current broken proxied record, DNS only) |
 
    If the owner prefers a subdomain instead of the apex, add only
-   `CNAME docs → ergodic-ai.github.io` (DNS only) and use `docs.ergodic.dev` below.
-4. **Set the custom domain** after the first Pages deployment has run:
-   `gh api -X PUT repos/ergodic-ai/ergodic/pages -f cname=ergodic.dev`
-5. **Wait for the certificate, then enforce HTTPS:**
+   `CNAME docs → ergodic-ai.github.io` (DNS only) and use `docs.ergodic.dev` in step 2.
+4. **Wait for the certificate, then enforce HTTPS:**
    `gh api repos/ergodic-ai/ergodic/pages --jq '.https_certificate.state'` until
    `approved`, then `gh api -X PUT repos/ergodic-ai/ergodic/pages -F https_enforced=true`.
-6. **Check:**
+5. **Check:**
 
    ```bash
    dig +short ergodic.dev A     # the four 185.199.x.153 addresses
@@ -229,14 +296,10 @@ and the TXT records verify Resend and Google.
    curl -sI https://ergodic.dev | head -3   # HTTP/2 200 from GitHub
    ```
 
-7. Once the new site is live, the MkDocs site on Cloud Run (`ergodic-docs`, project
+6. Once the new site is live, the MkDocs site on Cloud Run (`ergodic-docs`, project
    `ergodic`) retires (DEC-078). Deleting that service is a separate owner go.
 
-The docs publish workflow itself comes with the docs builder (API-143). It should
-deploy with `actions/deploy-pages` to the `github-pages` environment, triggered by
-release tags.
-
-## 8. Rollback
+## 9. Rollback
 
 - **A broken release on PyPI:** yank it, don't delete it. Open
   <https://pypi.org/manage/project/ergodic/release/0.2.0/>, Options → Yank, and give a
@@ -249,7 +312,7 @@ release tags.
 - **The tag was pushed but nothing was uploaded** (a check or build failed): fix on
   `main`, then move the tag: `git tag -d v0.2.0 && git push origin :refs/tags/v0.2.0`,
   re-tag and push. If anything reached PyPI, never move the tag; bump the version.
-- **DNS or Pages misbehaves:** delete the A/AAAA/CNAME records added in step 7 (MX
+- **DNS or Pages misbehaves:** delete the A/AAAA/CNAME records added in step 8 (MX
   and TXT untouched), or unpublish with
   `gh api -X DELETE repos/ergodic-ai/ergodic/pages`.
 - **Visibility:** `gh repo edit ergodic-ai/ergodic --visibility private
@@ -259,5 +322,5 @@ release tags.
 ## Later releases
 
 Bump `__version__` in `src/ergodic/__init__.py`, move the `[Unreleased]` changelog
-entries under the new version, merge to `main`, then run steps 6 and 8 as needed.
-Steps 1 to 5 and 7 are one-time.
+entries under the new version, merge to `main`, then run step 7 and approve the docs deployment (step 8.1). Use
+step 9 if something goes wrong. Steps 1 to 6 and the rest of step 8 are one-time.

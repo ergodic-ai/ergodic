@@ -23,8 +23,12 @@ minor versions don't receive backports; upgrade to the latest release to get a f
 
 ## Scope
 
-ergodic is a local library: its core makes no network calls and stores nothing. The
-reports that matter most are code paths that execute or deserialize untrusted input
-unsafely, and dependency or packaging problems in the published distributions.
+ergodic's core is a local library: it makes no network calls and stores nothing. The
+optional `ergodic.welt` module (`pip install "ergodic[welt]"`) is the exception: when
+you use it, it sends your data and your Welt API key to the Welt service
+(welt.ergodic.dev). How that module handles the key and the data it uploads is in
+scope. Beyond that, the reports that matter most are code paths that execute or
+deserialize untrusted input unsafely, and dependency or packaging problems in the
+published distributions.
 Vulnerabilities in third-party dependencies are best reported to those projects
 directly; tell us too if ergodic's use of them makes the problem worse.

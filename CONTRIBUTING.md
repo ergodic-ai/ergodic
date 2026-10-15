@@ -5,8 +5,8 @@ and how commits and pull requests are shaped here.
 
 ## Set up
 
-Everything runs through [uv](https://docs.astral.sh/uv/). Use uv 0.12.8 or newer: the
-lockfile format needs it, and CI pins that version.
+Everything runs through [uv](https://docs.astral.sh/uv/). CI pins uv 0.12.8; a recent
+uv works locally (very old releases can't read `uv.lock`).
 
 ```bash
 git clone https://github.com/ergodic-ai/ergodic.git
@@ -34,14 +34,21 @@ The suite includes PyMC tests. The first run compiles PyTensor's C code into
 
 ## Build the docs
 
+The documentation site at [ergodic.dev](https://ergodic.dev) is built from
+`docsite/` by the builder in `scripts/docsite`.
+
 ```bash
-make docs        # strict build into site/
-make docs-serve  # live preview at http://127.0.0.1:8000
+make docs            # build the site into site/
+make docs-check      # run every page program; check excerpts, recorded outputs and links
+make docs-record     # rerun the page programs and rewrite their output panels
+make docs-notebooks  # execute every learn and case-study notebook (slow; release CI runs it)
 ```
 
-The build executes the learn notebooks in `docs/learn/`, so a cell that raises fails
-it. If you change a simulation those notebooks call, rebuild and check that every
-number quoted in the prose still matches the seeded output.
+If you change behaviour a page program shows, run `make docs-record` and review the
+diff of the recorded outputs. If you change a simulation the notebooks call, run
+`make docs-notebooks` and check that every number quoted in the prose still matches
+the seeded output. The legacy MkDocs site builds with `make docs-mkdocs` until it
+retires.
 
 ## What a good change looks like
 

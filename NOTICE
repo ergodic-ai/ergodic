@@ -6,8 +6,8 @@ This product includes software developed at Ergodic (https://ergodic.ai).
 Bundled datasets (ergodic.datasets)
 -----------------------------------
 
-The package ships a small set of teaching datasets. Their values are public
-domain or permissively licensed, and we credit the sources here.
+The package ships a small set of teaching datasets. We credit each source here
+and state the terms it is published under.
 
 - birthweight: maternal smoking and infant birthweight. From US natality records
   (public domain, National Center for Health Statistics), as used by Almond,
@@ -20,15 +20,17 @@ domain or permissively licensed, and we credit the sources here.
   Chernozhukov, Chetverikov, Demirer, Duflo, Hansen, Newey and Robins,
   "Double/Debiased Machine Learning", Econometrics Journal (2018).
 
-- smoking: California Proposition 99 and per-capita cigarette sales. Public-domain
-  replication data from Abadie, Diamond and Hainmueller, "Synthetic Control
-  Methods for Comparative Case Studies", Journal of the American Statistical
-  Association (2010).
+- smoking: California Proposition 99 and per-capita cigarette sales. Replication
+  data published by the authors of Abadie, Diamond and Hainmueller, "Synthetic
+  Control Methods for Comparative Case Studies", Journal of the American
+  Statistical Association (2010), and widely redistributed with synthetic control
+  software. The authors publish it without an explicit licence.
 
-- germany: German reunification and GDP per capita. Public-domain replication
-  data from Abadie, Diamond and Hainmueller, "Comparative Politics and the
-  Synthetic Control Method", American Journal of Political Science (2015),
-  redistributed via the MIT-licensed pysyncon package.
+- germany: German reunification and GDP per capita. Replication data published
+  by the authors of Abadie, Diamond and Hainmueller, "Comparative Politics and
+  the Synthetic Control Method", American Journal of Political Science (2015),
+  taken from the copy redistributed in the MIT-licensed pysyncon package. The
+  authors publish it without an explicit licence.
 
 - berkeley: UC Berkeley graduate admissions, 1973. The published aggregate table
   from Bickel, Hammel and O'Connell, "Sex Bias in Graduate Admissions: Data from
