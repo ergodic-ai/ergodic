@@ -111,9 +111,18 @@ def resolve_test(spec: CITest | str, data: TabularData | None) -> CITest:
     if isinstance(spec, CITest):
         if spec.is_bound:
             if data is not None and data is not spec.data:
+                name = type(spec).__name__
+                if spec.data is None:
+                    raise ValueError(
+                        f"{name} is already bound and answers without data; call fit() with no data"
+                    )
                 raise ValueError(
-                    f"{type(spec).__name__} is already bound to its own data; "
-                    "omit data at fit, or pass an unbound test to bind here"
+                    f"{name} is already bound to its own data, so it takes no data "
+                    "here; give the data in one place only: keep the bound test "
+                    f"and call fit() with no data, e.g. PC(test={name}(data, ...)).fit(), "
+                    "or build the test unbound and pass the data to fit or discover, "
+                    f"e.g. PC(test={name}(...)).fit(data) or "
+                    f"discover(data, method='pc', test={name}(...))"
                 )
             return spec
         if data is None:
