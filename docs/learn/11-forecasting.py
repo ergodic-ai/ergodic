@@ -407,9 +407,13 @@ driven.explain(windows=[Window("next half year", 0, HOLDOUT)], method="loo")[
 #
 # ## Where this goes next
 #
-# Every number in this guide came out of one object. The forecast, the levels agreeing, the
-# honest score against a naive baseline, and the account of what is driving it are the same
-# fitted model read four ways, which is the argument for building a forecast out of parts
-# instead of out of a black box. The [forecasting guide](../forecast.md) has the rest of the
-# surface: the mechanism zoo, the reconciliation menu in full, and the staged-versus-joint
-# story.
+# Every number in this guide came out of one object. The forecast, the levels agreeing, the honest
+# score against a naive baseline, and the account of what is driving it are the same fitted model
+# read four ways, which is the argument for building a forecast out of parts instead of out of a
+# black box. The forecasting guides have the rest of the surface: the mechanisms and the
+# staged-versus-joint story in
+# [forecasting with drivers](../../docsite/pages/forecast-with-drivers.md), and the reconciliation
+# menu in full in [reconciling a hierarchy](../../docsite/pages/reconcile-a-hierarchy.md).
+#
+# The [next guide](12-structural-causal-models.py) fits one model that answers
+# interventions and individual counterfactuals, and says so when the data can't.

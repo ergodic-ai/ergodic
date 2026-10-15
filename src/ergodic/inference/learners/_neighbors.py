@@ -63,9 +63,11 @@ class _KNNBase:
         self._y = np.asarray(y, dtype=np.float64).reshape(-1)
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return the constructor parameter ``k``."""
         return {"k": self.k}
 
     def set_params(self, **params: Any) -> _KNNBase:
+        """Set parameters by name and return the learner itself."""
         for key, value in params.items():
             setattr(self, key, value)
         return self
@@ -80,10 +82,18 @@ class KNNRegressor(_KNNBase):
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
     ) -> KNNRegressor:
+        """Store the standardized training rows and their targets.
+
+        ``sample_weight`` is accepted for the learner surface and ignored.
+
+        Returns:
+            The fitted learner itself.
+        """
         self._fit_xy(X, y)
         return self
 
     def predict(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return the mean target of the ``k`` nearest training rows, per row of ``X``."""
         return np.asarray(np.mean(self._neighbor_targets(X), axis=1), dtype=np.float64)
 
 
@@ -96,12 +106,24 @@ class KNNClassifier(_KNNBase):
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
     ) -> KNNClassifier:
+        """Store the standardized training rows and their 0/1 labels.
+
+        ``sample_weight`` is accepted for the learner surface and ignored.
+
+        Returns:
+            The fitted learner itself.
+        """
         self._fit_xy(X, y)
         return self
 
     def predict_proba(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return class probabilities as an ``(n, 2)`` array.
+
+        Column 1 is the share of 1s among the ``k`` nearest training rows.
+        """
         prob = np.mean(self._neighbor_targets(X), axis=1)
         return np.asarray(np.column_stack([1.0 - prob, prob]), dtype=np.float64)
 
     def predict(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return the 0/1 label, 1 where the neighbor share of 1s is at least 0.5."""
         return np.asarray(self.predict_proba(X)[:, 1] >= 0.5, dtype=np.float64)

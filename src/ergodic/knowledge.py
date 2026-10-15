@@ -51,6 +51,11 @@ class DomainKnowledge:
     # -- builders ------------------------------------------------------------
 
     def with_variables(self, *names: str) -> DomainKnowledge:
+        """Return knowledge that also lists ``names`` in :attr:`variables`.
+
+        Every builder records the names it mentions there; this adds names without
+        adding a constraint.
+        """
         return replace(self, variables=self.variables | frozenset(names))
 
     def require(self, cause: str, effect: str) -> DomainKnowledge:
@@ -293,6 +298,10 @@ class DomainKnowledge:
         return self._permits(cause, effect, self._precedence_closure())
 
     def requires_edge(self, cause: str, effect: str) -> bool:
+        """Return ``True`` if ``cause -> effect`` was required with :meth:`require`.
+
+        Only the stated pair counts; nothing is inferred from tiers or other constraints.
+        """
         return (cause, effect) in self.required
 
     def precedence(self) -> frozenset[tuple[str, str]]:

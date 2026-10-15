@@ -44,18 +44,22 @@ class EventLog(Dataset):
 
     @property
     def cases(self) -> tuple[Any, ...]:
+        """The distinct case identifiers, sorted."""
         return tuple(sorted(set(self._store[self.case].tolist())))
 
     @property
     def n_cases(self) -> int:
+        """The number of distinct cases."""
         return len(set(self._store[self.case].tolist()))
 
     @property
     def activities(self) -> tuple[str, ...]:
+        """The distinct activity names, sorted."""
         return tuple(sorted(set(self._store[self.activity].tolist())))
 
     @property
     def n_activities(self) -> int:
+        """The number of distinct activities."""
         return len(set(self._store[self.activity].tolist()))
 
     def traces(self) -> dict[Any, tuple[str, ...]]:

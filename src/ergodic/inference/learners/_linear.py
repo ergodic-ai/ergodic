@@ -44,6 +44,18 @@ class OLS:
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
     ) -> OLS:
+        """Fit the coefficients by (weighted, optionally ridge-penalized) least squares.
+
+        The intercept is never penalized.
+
+        Args:
+            X: A 2-D feature matrix (a 1-D array is read as one feature).
+            y: The target, one value per row.
+            sample_weight: Optional per-row weights.
+
+        Returns:
+            The fitted learner itself.
+        """
         design = _design(X, self.fit_intercept)
         target = np.asarray(y, dtype=np.float64).reshape(-1)
         n, k = design.shape
@@ -66,14 +78,21 @@ class OLS:
         return self
 
     def predict(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return the fitted linear prediction for the rows of ``X``.
+
+        Raises:
+            RuntimeError: The learner has not been fitted.
+        """
         if self._coef is None:
             raise RuntimeError("OLS.predict called before fit")
         return np.asarray(_design(X, self.fit_intercept) @ self._coef, dtype=np.float64)
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return the constructor parameters, ``fit_intercept`` and ``ridge``."""
         return {"fit_intercept": self.fit_intercept, "ridge": self.ridge}
 
     def set_params(self, **params: Any) -> OLS:
+        """Set parameters by name and return the learner itself."""
         for key, value in params.items():
             setattr(self, key, value)
         return self
@@ -102,6 +121,19 @@ class LogisticRegression:
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
     ) -> LogisticRegression:
+        """Fit the coefficients by Newton-Raphson with an L2 ridge on the slopes.
+
+        Iteration stops when the largest step falls under ``tol`` or after ``max_iter``
+        steps, with no warning when it stops on ``max_iter``.
+
+        Args:
+            X: A 2-D feature matrix (a 1-D array is read as one feature).
+            y: A 0/1 label, one value per row.
+            sample_weight: Optional per-row weights.
+
+        Returns:
+            The fitted learner itself.
+        """
         design = _design(X, self.fit_intercept)
         label = np.asarray(y, dtype=np.float64).reshape(-1)
         n, k = design.shape
@@ -130,15 +162,22 @@ class LogisticRegression:
         return self
 
     def predict_proba(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return class probabilities as an ``(n, 2)`` array: column 1 is P(y = 1).
+
+        Raises:
+            RuntimeError: The learner has not been fitted.
+        """
         if self._coef is None:
             raise RuntimeError("LogisticRegression.predict_proba called before fit")
         prob = _sigmoid(_design(X, self.fit_intercept) @ self._coef)
         return np.asarray(np.column_stack([1.0 - prob, prob]), dtype=np.float64)
 
     def predict(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Return the 0/1 label, 1 where P(y = 1) is at least 0.5."""
         return np.asarray(self.predict_proba(X)[:, 1] >= 0.5, dtype=np.float64)
 
     def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return the constructor parameters: ``fit_intercept``, ``l2``, ``max_iter``, ``tol``."""
         return {
             "fit_intercept": self.fit_intercept,
             "l2": self.l2,
@@ -147,6 +186,7 @@ class LogisticRegression:
         }
 
     def set_params(self, **params: Any) -> LogisticRegression:
+        """Set parameters by name and return the learner itself."""
         for key, value in params.items():
             setattr(self, key, value)
         return self

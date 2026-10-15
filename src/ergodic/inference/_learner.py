@@ -33,9 +33,17 @@ class Learner(Protocol):
         X: npt.NDArray[np.float64],
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Fit the learner to features ``X`` and target ``y``.
 
-    def predict(self, X: npt.NDArray[np.float64]) -> Any: ...
+        Args:
+            X: A 2-D feature matrix.
+            y: The target, one value per row.
+            sample_weight: Optional per-row weights.
+        """
+
+    def predict(self, X: npt.NDArray[np.float64]) -> Any:
+        """Return predictions for the rows of ``X``."""
 
 
 @runtime_checkable
@@ -58,11 +66,20 @@ class BayesianLearner(Protocol):
         X: npt.NDArray[np.float64],
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Fit the learner to features ``X`` and target ``y``.
 
-    def predict(self, X: npt.NDArray[np.float64]) -> Any: ...
+        Args:
+            X: A 2-D feature matrix.
+            y: The target, one value per row.
+            sample_weight: Optional per-row weights.
+        """
 
-    def predict_draws(self, X: npt.NDArray[np.float64]) -> Any: ...
+    def predict(self, X: npt.NDArray[np.float64]) -> Any:
+        """Return the posterior predictive mean for the rows of ``X``."""
+
+    def predict_draws(self, X: npt.NDArray[np.float64]) -> Any:
+        """Return ``(S, n)`` posterior draws of the mean function at the rows of ``X``."""
 
 
 _ALIASES: dict[str, type] = {

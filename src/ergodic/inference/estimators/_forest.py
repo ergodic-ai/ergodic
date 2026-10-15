@@ -341,6 +341,7 @@ class VariableImportance:
         return pairs if k is None else pairs[:k]
 
     def to_dict(self) -> dict[str, float]:
+        """Return ``{covariate: importance}`` for every covariate, in the stored order."""
         return {name: float(value) for name, value in zip(self.names, self.values, strict=True)}
 
 
