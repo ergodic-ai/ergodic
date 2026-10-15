@@ -64,10 +64,16 @@ class Task(Enum):
 
 @dataclass(frozen=True)
 class Slot:
-    """A named nuisance position with the learning task it requires."""
+    """A named nuisance position with the learning task it requires.
+
+    ``weighted`` marks a slot whose learner is fit with ``sample_weight``. A learner
+    that declares ``supports_sample_weight = False`` (a remote learner whose fits
+    take no row weights) is refused there when the slots resolve, before any fit.
+    """
 
     name: str
     task: Task
+    weighted: bool = False
 
 
 @dataclass
@@ -85,7 +91,7 @@ class _FitState:
 
 def _single(names: frozenset[str], role: str) -> str:
     if len(names) != 1:
-        raise NotImplementedError(f"E1 supports a single {role}; got {sorted(names)}")
+        raise NotImplementedError(f"these estimators support a single {role}; got {sorted(names)}")
     return next(iter(names))
 
 
@@ -105,8 +111,9 @@ def _binary_vector(data: TabularData, name: str, role: str) -> npt.NDArray[np.fl
         if set(np.unique(values).tolist()) <= {0.0, 1.0}:
             return values
     raise NotImplementedError(
-        f"E1 estimators need a binary {role}; {name!r} is not binary "
-        "(continuous treatment and multi-level effects come later)"
+        f"this estimator needs a binary {role}; {name!r} is not binary. For a "
+        "continuous treatment use strategy='dml' or 'pliv'; a multi-level "
+        "treatment is not supported, so recode it to two levels"
     )
 
 
@@ -116,7 +123,9 @@ def _numeric_vector(data: TabularData, name: str, role: str) -> npt.NDArray[np.f
         return np.asarray(data.column(name), dtype=np.float64)
     if col.is_discrete and col.cardinality == 2:
         return data.codes(name).astype(np.float64)
-    raise NotImplementedError(f"E1 needs a continuous or binary {role}; {name!r} is {col.kind}")
+    raise NotImplementedError(
+        f"this estimator needs a continuous or binary {role}; {name!r} is {col.kind.value}"
+    )
 
 
 def _coded_treatment(data: TabularData, name: str, treated: Any) -> npt.NDArray[np.float64]:
@@ -147,7 +156,9 @@ def _outcome_vector(data: TabularData, name: str) -> tuple[npt.NDArray[np.float6
         return data.codes(name).astype(np.float64), True
     if col.is_continuous:
         return np.asarray(data.column(name), dtype=np.float64), False
-    raise NotImplementedError(f"E1 supports a continuous or binary outcome; {name!r} is {col.kind}")
+    raise NotImplementedError(
+        f"the estimators support a continuous or binary outcome; {name!r} is {col.kind.value}"
+    )
 
 
 def _covariate_matrix(
@@ -173,6 +184,38 @@ def _covariate_matrix(
     if not blocks:
         return np.empty((data.n_rows, 0), dtype=np.float64)
     return np.asarray(np.hstack(blocks), dtype=np.float64)
+
+
+def _covariate_columns(
+    data: TabularData, names: frozenset[str] | list[str] | tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Name every column :func:`_covariate_matrix` builds, and the variable it encodes.
+
+    A continuous column, or a discrete one that encodes to a single indicator (two
+    levels), keeps its variable name. A discrete covariate with ``k >= 3`` levels
+    encodes to ``k - 1`` indicators (the first level dropped), named ``"C==level"``.
+    Returns ``(column_names, column_variables)``, aligned to the design's columns.
+    """
+    columns: list[str] = []
+    variables: list[str] = []
+    for name in sorted(names):
+        col = data.schema[name]
+        if col.is_continuous or col.is_datetime:
+            columns.append(name)
+            variables.append(name)
+        elif col.is_discrete:
+            width = col.cardinality or 0
+            if width <= 1:
+                continue
+            if width == 2:
+                columns.append(name)
+                variables.append(name)
+                continue
+            categories = col.categories or tuple(range(width))
+            for level in categories[1:width]:
+                columns.append(f"{name}=={level}")
+                variables.append(name)
+    return tuple(columns), tuple(variables)
 
 
 def _dirichlet_weights(n: int, rng: np.random.Generator) -> npt.NDArray[np.float64]:
@@ -257,6 +300,11 @@ class CausalEstimator(ABC):
                 raise TypeError(
                     f"slot {slot.name!r} needs a classifier with predict_proba; "
                     f"got {type(learner).__name__}"
+                )
+            if slot.weighted and getattr(learner, "supports_sample_weight", True) is False:
+                raise TypeError(
+                    f"slot {slot.name!r} needs a learner whose fit accepts sample_weight; "
+                    f"{type(learner).__name__} declares it does not, so nothing was fit"
                 )
             make[slot.name] = partial(_fresh, learner)
             names[slot.name] = type(learner).__name__
@@ -506,6 +554,7 @@ class _AdjustmentBase(CausalEstimator):
         covariates = identification.adjustment_set or frozenset()
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
+        self._covariate_columns, self._covariate_variables = _covariate_columns(data, covariates)
         self._treatment_name = treatment
         self._outcome_name = outcome
         a = self._treatment_vector(data, treatment)
@@ -713,7 +762,8 @@ class _MetaLearnerBase(_AdjustmentBase):
             covariates=z,
             treatment=a,
             outcome=y,
-            covariate_names=self._covariates,
+            covariate_names=self._covariate_columns,
+            covariate_variables=self._covariate_variables,
             tau_hat=tau_hat,
         )
 

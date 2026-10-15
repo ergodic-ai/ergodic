@@ -1,0 +1,58 @@
+# Runs `make check` (ruff lint, ruff format check, mypy strict, pytest) on every
+# supported Python. The release workflow calls this same file before it builds.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: make check (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    # The full suite takes 40-60 minutes on a hosted runner with a cold pytensor cache.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    env:
+      # Fail rather than silently re-resolve when uv.lock is stale.
+      UV_LOCKED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # Keep in step with the uv that writes uv.lock (see CONTRIBUTING.md).
+          version: "0.12.8"
+          # Sets UV_PYTHON, which overrides .python-version for every `uv run`.
+          python-version: ${{ matrix.python }}
+          cache-dependency-glob: uv.lock
+
+      # PyTensor compiles C code for the PyMC tests on first use; reusing its
+      # compile directory keeps the suite cheap on later runs.
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.pytensor
+          key: pytensor-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}
+          restore-keys: pytensor-${{ runner.os }}-py${{ matrix.python }}-
+
+      # The welt extra (welt-client) runs the ergodic.welt bridge tests against the
+      # released client; it is empty on Python 3.14 (DEC-078).
+      - name: Install the locked dev environment
+        run: uv sync --locked --extra welt
+
+      - name: make check
+        run: make check

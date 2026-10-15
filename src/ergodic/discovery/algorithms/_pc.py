@@ -101,7 +101,7 @@ class PC:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run PC-stable and return the discovered graph with its provenance."""
-        oracle = resolve_test(self.test, data)
+        oracle = resolve_test(self.test, data, algorithm=type(self).__name__)
         nodes = sorted(oracle.variables)
         adj, sepsets = stable_skeleton(
             oracle, nodes, knowledge, alpha=self.alpha, max_cond_size=self.max_cond_size

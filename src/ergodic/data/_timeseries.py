@@ -5,8 +5,8 @@ Build it with :func:`timeseries`, naming the time column. Rows come back sorted
 by that column, since the temporal methods that follow read them in order. The
 time column is an index, so it is not one of the modeled variables.
 
-The temporal algorithms (lagged independence tests, summary graphs over
-``(variable, lag)``) land later. This is the container they read.
+The temporal algorithms (PCMCI, Granger, interrupted time series, forecasting)
+live in their pillars. This is the container they read.
 """
 
 from __future__ import annotations

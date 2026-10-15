@@ -164,8 +164,25 @@ class PerUnitEffect:
 
         The bridge back to the scalar family. With draws, the per-unit draws average
         to a draw vector of the mean effect (so the population interval reflects the
-        joint uncertainty). With per-unit analytic SEs, the point is the mean and the
-        standard error combines them assuming independence. With neither, a point.
+        joint uncertainty). With neither draws nor standard errors, a point.
+
+        Per-unit analytic standard errors cannot be combined into the mean's
+        standard error: the units share one fitted model, so their errors are
+        correlated, and treating them as independent understates the uncertainty
+        by about a factor of ``sqrt(n)``. So, with analytic standard errors:
+
+        - a homogeneous result (one effect and one standard error repeated over
+          the units, as ``DML.cate()`` returns) reports that effect and its
+          standard error;
+        - a result carrying its cross-fit doubly-robust scores reports the AIPW
+          average off them: the mean score with standard error
+          ``std(scores) / sqrt(n)`` (the same scores :meth:`CATEResult.explain`
+          reads). For the DR-learner's linear final stage the point equals the
+          mean per-unit effect; for a non-linear final stage such as the causal
+          forest it can differ slightly from the plain mean of the per-unit
+          effects (``diagnostics["ate_from_dr_scores"]`` marks this path);
+        - otherwise it reports the mean with no standard error (``kind="point"``).
+          For an interval, use :func:`~ergodic.inference.estimate_effect`.
         """
         target = EffectTarget.CATE if self.estimand == "cate" else EffectTarget.ITE
         learners: dict[str, str] = {}
@@ -180,20 +197,35 @@ class PerUnitEffect:
                 diagnostics=dict(self.diagnostics),
                 _draws=mean_draws,
             )
-        point = float(np.mean(self.values))
+        values = self.values
+        point = float(np.mean(values))
         if self._std_error is not None:
             se = np.asarray(self._std_error, dtype=np.float64)
-            combined = float(np.sqrt(np.sum(se * se)) / se.shape[0])
-            return EffectEstimate(
-                target=target,
-                estimator=self.source,
-                learners=learners,
-                n=self.n,
-                kind="analytic",
-                diagnostics=dict(self.diagnostics),
-                _point=point,
-                _std_error=combined,
-            )
+            if values.size and np.ptp(values) == 0.0 and np.ptp(se) == 0.0:
+                # one shared estimate repeated over the units: its own standard error
+                return EffectEstimate(
+                    target=target,
+                    estimator=self.source,
+                    learners=learners,
+                    n=self.n,
+                    kind="analytic",
+                    diagnostics=dict(self.diagnostics),
+                    _point=float(values[0]),
+                    _std_error=float(se[0]),
+                )
+            scores = self._ate_scores()
+            if scores is not None:
+                k = scores.shape[0]
+                return EffectEstimate(
+                    target=target,
+                    estimator=self.source,
+                    learners=learners,
+                    n=self.n,
+                    kind="analytic",
+                    diagnostics={**dict(self.diagnostics), "ate_from_dr_scores": 1.0},
+                    _point=float(np.mean(scores)),
+                    _std_error=float(np.std(scores, ddof=1) / np.sqrt(k)),
+                )
         return EffectEstimate(
             target=target,
             estimator=self.source,
@@ -203,6 +235,10 @@ class PerUnitEffect:
             diagnostics=dict(self.diagnostics),
             _point=point,
         )
+
+    def _ate_scores(self) -> npt.NDArray[np.float64] | None:
+        """Per-unit doubly-robust scores over these same units, when carried."""
+        return None
 
     def to_frame(self) -> pd.DataFrame:
         """A per-unit table (index, effect, and lo/hi/se when available). Pandas only here."""
@@ -235,7 +271,7 @@ class PerUnitEffect:
         return f"{name}({self.source or head}, {self.kind}: {body}, n={self.n})"
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class CATEResult(PerUnitEffect):
     """Conditional average treatment effects, with an explainability hook.
 
@@ -249,6 +285,15 @@ class CATEResult(PerUnitEffect):
     estimand: str = "cate"
     identification: Identification | None = None
     _scores: DRScores | None = field(default=None, repr=False)
+
+    def _ate_scores(self) -> npt.NDArray[np.float64] | None:
+        """The cached AIPW scores, when they cover exactly the result's units."""
+        if self._scores is None:
+            return None
+        scores = np.asarray(self._scores.scores, dtype=np.float64)
+        if scores.shape[0] != self.n or scores.shape[0] < 2:
+            return None
+        return scores
 
     def explain(self) -> Heterogeneity:
         """Tier-B characterization of the heterogeneity, on the doubly-robust scores.
@@ -278,7 +323,7 @@ class CATEResult(PerUnitEffect):
         )
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class ITEResult(PerUnitEffect):
     """Individual treatment effects from a structural model (the twin network).
 
@@ -286,9 +331,10 @@ class ITEResult(PerUnitEffect):
     conditional average. Carries the factual outcome column, the contrast framing
     (``levels=`` or ``shift=``), and a structural provenance note.
 
-    :meth:`explain` is deferred: the Tier-B machinery is defined over the CATE's
-    doubly-robust scores, and the inference-valid descriptive regression of abducted
-    ITEs is a later phase, so it raises with a pointer rather than faking inference.
+    :meth:`explain` is not available: the Tier-B machinery is defined over the
+    CATE's doubly-robust scores, and there is no inference-valid descriptive
+    regression of abducted ITEs, so it raises with a pointer rather than faking
+    inference.
     """
 
     estimand: str = "ite"
@@ -304,10 +350,10 @@ class ITEResult(PerUnitEffect):
         return np.asarray(self._factual, dtype=np.float64)
 
     def explain(self) -> Heterogeneity:
-        """Deferred in phase 1: the Tier-B tools need the CATE's doubly-robust scores."""
+        """Not available: the Tier-B tools need the CATE's doubly-robust scores."""
         raise NotImplementedError(
-            "ITEResult.explain is not available yet: the Tier-B characterization "
-            "(BLP, GATES, RATE) is defined over the doubly-robust CATE scores, and the "
-            "descriptive regression of structural ITEs is a later phase. Use a CATE "
-            "meta-learner (cate(...)) for inference-valid heterogeneity characterization"
+            "ITEResult.explain is not available: the Tier-B characterization "
+            "(BLP, GATES, RATE) is defined over the doubly-robust CATE scores, which "
+            "structural ITEs do not have. Use a CATE meta-learner (cate(...)) for "
+            "inference-valid heterogeneity characterization"
         )

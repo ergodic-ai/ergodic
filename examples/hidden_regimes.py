@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # %% [markdown]
 # # Hidden regimes: a tour of the latent pillar
 #
@@ -247,5 +248,5 @@ print(report.to_frame())
 # `chain=MarkovChain(...)`. Raise the budgets for real runs. Compare two
 # likelihoods on one trace with `consensus()`; its cross-model amplitude rule is
 # an explicitly empty seam awaiting the volatility-switching likelihood. The
-# guide (`docs/latent.md`) carries the measured findings behind each of these
-# sentences.
+# hidden-regime guides (https://docs.ergodic.dev/recover-hidden-regimes.html and
+# https://docs.ergodic.dev/certify-and-calibrate.html) document this surface.

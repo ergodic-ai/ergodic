@@ -20,6 +20,7 @@ marked and skips when pymc is missing, the ``test_scm_pymc.py`` precedent.
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,21 @@ requires_pymc = pytest.mark.skipif(
     importlib.util.find_spec("pymc") is None, reason="pymc is not installed"
 )
 
+
+def _golden_rel(tight: float, pymc5: float) -> float:
+    """Tolerance for a pinned sampler value.
+
+    PyMC 6 reproduces these draws exactly on macOS and Linux CI, so the pin stays
+    tight. PyMC 5 (what Python 3.11 resolves) samples differently and not
+    identically across platforms, so there the pin only bounds the drift.
+    """
+    try:
+        major = int(importlib.metadata.version("pymc").split(".")[0])
+    except importlib.metadata.PackageNotFoundError:
+        return tight
+    return tight if major >= 6 else pymc5
+
+
 WORLD_SEED = 20260805
 LEAVES = ("leaf_a", "leaf_b", "leaf_c", "leaf_d")
 #: total -> four leaves, the shape most of the criteria run on.
@@ -71,14 +87,28 @@ WARMUP = 300
 # Seeded goldens, measured at implementation time and recorded in the close-out.
 # They are pinned loosely (2 to 5 percent) so another machine's floating point
 # does not fail the suite; the strict inequalities beside them are the criteria.
+#
+# Two goldens need more room than that (API-149). A 400-draw NUTS run is
+# deterministic on one machine but chaotic in the last bit, so a different BLAS
+# or XLA build behaves like a different seed. The MinT total move and the
+# forecast-proportion MAE vary across sampler seeds by more than 5 and 2 percent:
+# sampler seeds 11-15 on Apple arm64 (the locked stack, jax 0.11, pymc 6.0.1)
+# gave total moves 6.65, 8.11, 6.25, 8.26, 8.44 (trusted 0.95, 0.94, 0.78, 0.92,
+# 1.12) and forecast MAEs 6.81, 6.55, 6.79, 6.40, 6.88. Those three goldens are
+# the seed means, each with a tolerance of three seed standard deviations (review
+# F4): total move 7.54 +/- 3.05, trusted 0.944 +/- 0.367, forecast MAE 6.69 +/- 0.61.
+# The CRPS and historical-MAE goldens stay tight.
+GOLDEN_SEED_SPREAD_TOTAL_MOVE = 0.404
+GOLDEN_SEED_SPREAD_TOTAL_MOVE_TRUSTED = 0.388
+GOLDEN_SEED_SPREAD_DRIFT_MAE = 0.092
 GOLDEN_H1_TD_CRPS = 3.7034
 GOLDEN_H1_BU_CRPS = 4.1912
 GOLDEN_H1_WIDTH_RATIO = 2.0512
-GOLDEN_H1_TOTAL_MOVE = 8.2473
-GOLDEN_H1_TOTAL_MOVE_TRUSTED = 0.9921
+GOLDEN_H1_TOTAL_MOVE = 7.5412
+GOLDEN_H1_TOTAL_MOVE_TRUSTED = 0.9443
 GOLDEN_H2_BU_CRPS = 3.8954
 GOLDEN_H2_OWN_CRPS = 6.7761
-GOLDEN_DRIFT_FORECAST_MAE = 6.5948
+GOLDEN_DRIFT_FORECAST_MAE = 6.6865
 GOLDEN_DRIFT_HISTORICAL_MAE = 28.2888
 GOLDEN_SWEEP_MINT = 2.3312
 GOLDEN_SWEEP_BEST = 2.5614
@@ -758,9 +788,11 @@ def test_trust_moves_a_node_less(h1: World) -> None:
     siblings = tuple(leaf for leaf in LEAVES if leaf != "leaf_a")
     assert _moved(trust_leaf, h1.result, siblings) > _moved(plain, h1.result, siblings)
 
-    assert _moved(plain, h1.result, ("total",)) == pytest.approx(GOLDEN_H1_TOTAL_MOVE, rel=0.05)
+    assert _moved(plain, h1.result, ("total",)) == pytest.approx(
+        GOLDEN_H1_TOTAL_MOVE, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE
+    )
     assert _moved(trust_total, h1.result, ("total",)) == pytest.approx(
-        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=0.05
+        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE_TRUSTED
     )
 
 
@@ -810,8 +842,9 @@ def test_bottom_up_wins_where_the_leaves_are_the_signal(h2: World) -> None:
     summed = float(crps(actual, bottom_up.draws("total")))
     direct = float(crps(actual, own.draws("total")))
     assert summed < direct
-    assert summed == pytest.approx(GOLDEN_H2_BU_CRPS, rel=0.02)
-    assert direct == pytest.approx(GOLDEN_H2_OWN_CRPS, rel=0.02)
+    # PyMC 5 measured 3.61/7.68 (Linux) and 3.70/7.77 (macOS) against these pins.
+    assert summed == pytest.approx(GOLDEN_H2_BU_CRPS, rel=_golden_rel(0.02, 0.15))
+    assert direct == pytest.approx(GOLDEN_H2_OWN_CRPS, rel=_golden_rel(0.02, 0.25))
 
 
 # -- criterion 7: the share-drift world ---------------------------------------
@@ -833,7 +866,7 @@ def test_forecast_proportions_follow_a_moving_share(drifting: World) -> None:
     lagged = float(mae(actual, historical.draws("leaf_a")))
     following = float(mae(actual, per_draw.draws("leaf_a")))
     assert following < lagged
-    assert following == pytest.approx(GOLDEN_DRIFT_FORECAST_MAE, rel=0.02)
+    assert following == pytest.approx(GOLDEN_DRIFT_FORECAST_MAE, rel=GOLDEN_SEED_SPREAD_DRIFT_MAE)
     assert lagged == pytest.approx(GOLDEN_DRIFT_HISTORICAL_MAE, rel=0.02)
 
 

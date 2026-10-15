@@ -387,4 +387,4 @@ draw_map(pm_review, POSITIONS)
 # That guide carries logs like this one into case tables and KPI panels;
 # [guide ten](10-decision-points.py) mines the process model itself and prices a routing
 # decision. The full descriptive surface, including the four filters this guide didn't
-# touch, is in the [process guide](../process.md).
+# touch, is in the [process mapping guide](../../docsite/pages/map-a-process.md).

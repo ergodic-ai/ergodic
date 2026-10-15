@@ -360,9 +360,10 @@ draw_event_study(es.by_event_time)
 # parallel trends is a claim about a world nobody observed, and flat leads support it
 # without proving it.
 #
-# There's more process surface than one guide can walk: filters that slice a log while
-# saying what they dropped, performance views, the landmark modes of `case_table` that
-# ask the treatment question at a fixed point in each case's life, and, further out,
-# conformance against the process you think you run. The [process guide](../process.md)
-# is the reference for all of it, and the [panel guide](../panel.md) covers the designs
-# the second bridge feeds.
+# There's more process surface than one guide can walk: filters that slice a log while saying what
+# they dropped, performance views, the landmark modes of `case_table` that ask the treatment
+# question at a fixed point in each case's life, and, further out, conformance against the process
+# you think you run. The [process mapping guide](../../docsite/pages/map-a-process.md) and the
+# [conformance guide](../../docsite/pages/conformance-and-decisions.md) cover all of it, and the
+# [difference-in-differences guide](../../docsite/pages/difference-in-differences.md) covers the
+# designs the second bridge feeds.

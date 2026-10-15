@@ -3,8 +3,9 @@
 
 The naive difference in means overstates the effect, because smoking mothers
 differ in ways that also affect birthweight. Adjusting for those confounders with
-a doubly-robust estimator moves the number toward the literature figure of about
--203 grams.
+a doubly-robust estimator moves the number toward the published figure of about
+-231 grams (the AIPW estimate on this extract in the Stata treatment-effects
+manual).
 
 Run with: uv run python examples/adjustment_birthweight.py
 """

@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a method, an estimator, a data shape or an API improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that ergodic doesn't support, or makes awkward?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: The API you have in mind, with a short usage sketch if you can.
+      render: python
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Papers or existing implementations of the method, with their licences if you know them.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

@@ -79,18 +79,22 @@ class Edge:
 
     @property
     def is_directed(self) -> bool:
+        """Whether the edge is ``->``: a tail at one end and an arrowhead at the other."""
         return {self.u_mark, self.v_mark} == {Mark.TAIL, Mark.ARROW}
 
     @property
     def is_bidirected(self) -> bool:
+        """Whether the edge is ``<->``: an arrowhead at both ends."""
         return self.u_mark is Mark.ARROW and self.v_mark is Mark.ARROW
 
     @property
     def is_undirected(self) -> bool:
+        """Whether the edge is ``--``: a tail at both ends."""
         return self.u_mark is Mark.TAIL and self.v_mark is Mark.TAIL
 
     @property
     def has_circle(self) -> bool:
+        """Whether either end carries a circle mark (a PAG edge such as ``o->``)."""
         return Mark.CIRCLE in (self.u_mark, self.v_mark)
 
     def directed_pair(self) -> tuple[str, str] | None:
@@ -202,15 +206,26 @@ class MixedGraph:
         return len(self.nodes)
 
     def node_list(self) -> list[str]:
+        """Return the node names, sorted."""
         return sorted(self.nodes)
 
     def edge_list(self) -> list[Edge]:
+        """Return the edges, sorted by their stored ``(u, v)`` endpoints."""
         return sorted(self.edges, key=lambda e: (e.u, e.v))
 
     def has_edge(self, a: str, b: str) -> bool:
+        """Return ``True`` if any edge joins ``a`` and ``b``, whatever its marks.
+
+        The order of ``a`` and ``b`` does not matter.
+        """
         return self.get_edge(a, b) is not None
 
     def get_edge(self, a: str, b: str) -> Edge | None:
+        """Return the edge between ``a`` and ``b``, or ``None`` when they are not adjacent.
+
+        The order of ``a`` and ``b`` does not matter. The edge keeps its stored
+        orientation, so read its marks with :meth:`Edge.mark_at`.
+        """
         pair = frozenset((a, b))
         for edge in self.edges:
             if frozenset((edge.u, edge.v)) == pair:
@@ -218,18 +233,47 @@ class MixedGraph:
         return None
 
     def mark_at(self, a: str, b: str, node: str) -> Mark | None:
+        """Return the mark at ``node`` on the edge between ``a`` and ``b``.
+
+        Args:
+            a: One endpoint of the edge.
+            b: The other endpoint.
+            node: The endpoint whose mark you want; it must be ``a`` or ``b``.
+
+        Returns:
+            The :class:`Mark` at ``node``, or ``None`` when ``a`` and ``b`` are not adjacent.
+
+        Raises:
+            KeyError: ``node`` is not an endpoint of the edge.
+        """
         edge = self.get_edge(a, b)
         return None if edge is None else edge.mark_at(node)
 
     # -- neighbourhoods ------------------------------------------------------
 
+    def _require_node(self, x: str) -> None:
+        """Refuse a name that is not a node, as identification and separation do."""
+        if x not in self.nodes:
+            shown = sorted(self.nodes)
+            listed = ", ".join(shown[:10]) + (", ..." if len(shown) > 10 else "")
+            raise ValueError(f"unknown node {x!r}; the graph's nodes are {listed}")
+
     def _incident(self, node: str) -> Iterator[Edge]:
+        self._require_node(node)
         return (e for e in self.edges if node in (e.u, e.v))
 
     def neighbors(self, x: str) -> frozenset[str]:
+        """Return every node that shares an edge with ``x``, whatever the marks.
+
+        Raises ``ValueError`` when ``x`` is not a node.
+        """
         return frozenset(e.other(x) for e in self._incident(x))
 
     def parents(self, x: str) -> frozenset[str]:
+        """Return the nodes with a directed edge into ``x`` (``p -> x``).
+
+        Raises ``ValueError`` when ``x`` is not a node.
+        """
         out: set[str] = set()
         for e in self._incident(x):
             pair = e.directed_pair()
@@ -238,6 +282,10 @@ class MixedGraph:
         return frozenset(out)
 
     def children(self, x: str) -> frozenset[str]:
+        """Return the nodes ``x`` points to with a directed edge (``x -> c``).
+
+        Raises ``ValueError`` when ``x`` is not a node.
+        """
         out: set[str] = set()
         for e in self._incident(x):
             pair = e.directed_pair()
@@ -246,9 +294,19 @@ class MixedGraph:
         return frozenset(out)
 
     def spouses(self, x: str) -> frozenset[str]:
+        """Return the nodes joined to ``x`` by a bidirected edge (``x <-> s``).
+
+        Raises ``ValueError`` when ``x`` is not a node.
+        """
         return frozenset(e.other(x) for e in self._incident(x) if e.is_bidirected)
 
     def ancestors(self, x: str) -> frozenset[str]:
+        """Return the nodes with a directed path into ``x``, excluding ``x`` itself.
+
+        Only directed edges count; undirected, bidirected and circle edges are not
+        followed. Raises ``ValueError`` when ``x`` is not a node.
+        """
+        self._require_node(x)
         reverse: dict[str, set[str]] = {n: set() for n in self.nodes}
         for e in self.edges:
             pair = e.directed_pair()
@@ -257,6 +315,12 @@ class MixedGraph:
         return self._reach(x, reverse)
 
     def descendants(self, x: str) -> frozenset[str]:
+        """Return the nodes reachable from ``x`` along directed edges, excluding ``x``.
+
+        Only directed edges count; undirected, bidirected and circle edges are not
+        followed. Raises ``ValueError`` when ``x`` is not a node.
+        """
+        self._require_node(x)
         forward: dict[str, set[str]] = {n: set() for n in self.nodes}
         for e in self.edges:
             pair = e.directed_pair()
@@ -281,6 +345,7 @@ class MixedGraph:
         """Parents, children, and the other parents of children (DAG only)."""
         if not self.is_dag():
             raise NotImplementedError("markov_blanket is implemented for DAGs only")
+        self._require_node(x)
         blanket: set[str] = set(self.parents(x)) | set(self.children(x))
         for child in self.children(x):
             blanket |= self.parents(child)
@@ -290,6 +355,7 @@ class MixedGraph:
     # -- immutable edits -----------------------------------------------------
 
     def add_nodes(self, *names: str) -> MixedGraph:
+        """Return a graph with ``names`` added as isolated nodes; existing names are kept."""
         return replace(self, nodes=self.nodes | frozenset(names))
 
     def add_edge(self, spec: EdgeSpec) -> MixedGraph:
@@ -315,6 +381,11 @@ class MixedGraph:
         )
 
     def remove_edge(self, a: str, b: str) -> MixedGraph:
+        """Return a graph without the edge between ``a`` and ``b``.
+
+        Both nodes stay in the graph and the graph's kind is unchanged. When the two
+        nodes are not adjacent, the graph comes back as it is.
+        """
         edge = self.get_edge(a, b)
         if edge is None:
             return self
@@ -488,11 +559,37 @@ class MixedGraph:
     # -- algorithms (delegated, kept out of this class) ----------------------
 
     def m_separated(self, x: Any, y: Any, given: Any = frozenset()) -> bool:
+        """Return ``True`` if ``x`` and ``y`` are m-separated given ``given``.
+
+        Each argument is a node name or an iterable of names. On a graph with circle
+        marks (a PAG) the check reads definite-status paths, so on a complete PAG the
+        answer holds in every member of the class. A CPDAG-kind graph gets the same
+        class reading, with its undirected edges read as circles.
+
+        Args:
+            x: The first node or set of nodes.
+            y: The second node or set of nodes.
+            given: The conditioning set. Defaults to empty.
+
+        Returns:
+            ``True`` when no active path joins ``x`` and ``y`` given ``given``.
+
+        Raises:
+            ValueError: A name is not in the graph, or ``x``, ``y`` and ``given`` overlap.
+        """
         from ._separation import m_separated
 
         return m_separated(self, x, y, given)
 
     def d_separated(self, x: Any, y: Any, given: Any = frozenset()) -> bool:
+        """Return ``True`` if ``x`` and ``y`` are d-separated given ``given``.
+
+        The DAG case of :meth:`m_separated`, with the same arguments.
+
+        Raises:
+            ValueError: The graph is not a DAG (use :meth:`m_separated`), a name is not
+                in the graph, or the node sets overlap.
+        """
         from ._separation import d_separated
 
         return d_separated(self, x, y, given)
@@ -504,11 +601,20 @@ class MixedGraph:
         return intervene(self, targets)
 
     def induced_subgraph(self, nodes: Any) -> MixedGraph:
+        """Return the subgraph on ``nodes`` and the edges among them.
+
+        Names not in the graph are ignored. Latent and selection flags carry over for
+        the nodes that stay.
+        """
         from ._surgery import induced_subgraph
 
         return induced_subgraph(self, nodes)
 
     def ancestral_subgraph(self, nodes: Any) -> MixedGraph:
+        """Return the subgraph on ``nodes`` plus all their ancestors, with the edges among them.
+
+        Ancestry follows directed edges only. Names not in the graph are ignored.
+        """
         from ._surgery import ancestral_subgraph
 
         return ancestral_subgraph(self, nodes)
@@ -516,31 +622,92 @@ class MixedGraph:
     # -- interop -------------------------------------------------------------
 
     def to_networkx(self) -> Any:
+        """Return a ``networkx.MultiDiGraph`` that :meth:`from_networkx` reads back.
+
+        Each edge becomes one ``u -> v`` arc with ``u_mark`` and ``v_mark`` data, and
+        each node carries boolean ``latent`` and ``selection`` data. Needs networkx.
+
+        Raises:
+            ValueError: A node pair carries two edges (a projected bow), which the
+                format cannot hold.
+        """
         from ._io import to_networkx
 
         return to_networkx(self)
 
     def to_adjacency(self, order: list[str] | None = None) -> tuple[np.ndarray, list[str]]:
+        """Return the directed adjacency matrix and its node order.
+
+        ``matrix[i, j] == 1`` when there is a directed edge from node ``i`` to node
+        ``j``. Bidirected, undirected and circle edges do not appear.
+
+        Args:
+            order: The node order for rows and columns. Defaults to :meth:`node_list`.
+                Nodes left out of ``order`` are dropped.
+
+        Returns:
+            A ``(matrix, order)`` pair; ``matrix`` is an integer array.
+
+        Raises:
+            ValueError: A node pair carries two edges (a projected bow).
+        """
         from ._io import to_adjacency
 
         return to_adjacency(self, order)
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-ready dict that :meth:`from_dict` reads back.
+
+        The dict holds ``format`` (``"ergodic.graph/1"``), ``kind``, ``nodes``,
+        ``edges`` (each with ``u``, ``v``, ``u_mark`` and ``v_mark``), ``latent`` and
+        ``selection``.
+
+        Raises:
+            ValueError: A node pair carries two edges (a projected bow).
+        """
         from ._io import to_dict
 
         return to_dict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MixedGraph:
+        """Rebuild a graph from :meth:`to_dict` output and validate it.
+
+        A missing ``format`` field reads as ``"ergodic.graph/1"``. ``kind`` defaults to
+        ``"mixed"``, and ``latent`` and ``selection`` default to empty.
+
+        Args:
+            data: The dict to read.
+
+        Returns:
+            The graph, checked against the rules of its kind.
+
+        Raises:
+            ValueError: The format is not ``"ergodic.graph/1"``, or two entries
+                disagree about one node pair.
+            InvalidGraphError: The graph breaks the rules of its declared kind.
+        """
         from ._io import from_dict
 
         return from_dict(data)
 
     @classmethod
-    def from_networkx(cls, graph: Any) -> MixedGraph:
+    def from_networkx(cls, graph: Any, *, kind: GraphKind | str | None = None) -> MixedGraph:
+        """Build a graph from a networkx graph.
+
+        Edges with ``u_mark`` and ``v_mark`` data keep those marks; a plain edge reads
+        as ``u -> v``. Node ``latent`` and ``selection`` flags carry over. With
+        ``kind`` (a :class:`GraphKind` or its name) the result is re-tagged after
+        checking it fits; without it, the result is tagged DAG when every edge is
+        directed and acyclic, otherwise mixed.
+
+        Raises:
+            ValueError: Two arcs disagree about one node pair, such as ``X -> Y`` and
+                ``Y -> X``, or the graph does not fit ``kind``.
+        """
         from ._io import from_networkx
 
-        return from_networkx(graph)
+        return from_networkx(graph, kind=kind)
 
     def __repr__(self) -> str:
         glyphs = ", ".join(e.glyph() for e in self.edge_list())

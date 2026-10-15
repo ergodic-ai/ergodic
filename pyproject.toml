@@ -53,6 +53,11 @@ forecast = ["pymc>=5"]
 # through PyMC's JAX backend when jax and numpyro are present, same measured
 # speedup as the forecast pillar, so installing them alongside is worth it.
 latent = ["pymc>=5"]
+# Welt's hosted foundation models (ergodic.welt): Welt causal discovery, the
+# WeltLearner and the data bridge. Only ergodic.welt imports welt-client; the bare
+# install never does. welt-client supports Python 3.11 to 3.13, so the extra is
+# empty on 3.14 until it adds support (DEC-078).
+welt = ["welt-client>=0.13; python_version < '3.14'"]
 # Neural CATE learners (TARNet / DragonNet / CFR). A reserved seam: phase 1 ships
 # no module that imports torch; the registry points here when one is selected.
 neural = ["torch>=2.2"]
@@ -61,8 +66,10 @@ neural = ["torch>=2.2"]
 foundation = ["torch>=2.2"]
 
 [project.urls]
-Homepage = "https://ergodic.ai"
-Documentation = "https://ergodic.ai"
+Homepage = "https://docs.ergodic.dev"
+Documentation = "https://docs.ergodic.dev"
+Source = "https://github.com/ergodic-ai/ergodic"
+Changelog = "https://docs.ergodic.dev/changelog.html"
 
 [dependency-groups]
 dev = [
@@ -79,15 +86,15 @@ dev = [
     # the model the forecaster fits.
     "jax>=0.4",
     "numpyro>=0.15",
+    # The documentation builder (scripts/docsite) renders with Python-Markdown; the
+    # docs tests in `make check` import it.
+    "markdown>=3.6",
 ]
 docs = [
-    "mkdocs>=1.6,<2",
-    "mkdocs-material>=9.5",
-    "mkdocstrings[python]>=0.26",
-    # The learn series: py:percent notebooks executed at build time.
-    "mkdocs-jupyter>=0.25",
-    "ipykernel>=6.29",
+    # The learn and case-study notebooks draw with matplotlib (make docs-notebooks).
     "matplotlib>=3.8",
+    # The Graphite documentation builder (scripts/docsite).
+    "markdown>=3.6",
 ]
 
 [build-system]
@@ -106,13 +113,13 @@ packages = ["src/ergodic"]
 exclude = [
     ".claude",
     ".devcontainer",
+    ".github",
     ".gitignore",
     ".pre-commit-config.yaml",
     ".python-version",
     "CLAUDE.md",
     "Makefile",
-    "deploy",
-    "mkdocs.yml",
+    "RELEASING.md",
     "plans",
     "uv.lock",
 ]
@@ -145,10 +152,12 @@ select = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 mypy_path = "src"
 explicit_package_bases = true
 namespace_packages = true
+# arviz 0.23 (locked for Python 3.11) ships no annotations; 1.x does.
+untyped_calls_exclude = ["arviz"]
 
 [[tool.mypy.overrides]]
 module = ["networkx.*"]
@@ -160,13 +169,25 @@ module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "numpyro.*", "scipy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = ["markdown.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["sklearn.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# welt-client ships no type information; it is only imported by ergodic.welt and
+# its tests, and httpx only by those tests (both absent without the welt extra).
+module = ["welt.*", "httpx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra --import-mode=importlib"
 testpaths = ["tests"]
+# The documentation builder (scripts/docsite) is tested from tests/test_docsite.py.
+pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["ergodic"]

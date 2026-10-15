@@ -82,6 +82,25 @@ def test_interventional_variance_matches_closed_form(
     assert float(np.var(draws)) == pytest.approx(4.25, abs=0.5)
 
 
+def test_interventional_and_sample_are_labelled_predictive(
+    fork: tuple[SCM, dict[str, np.ndarray]],
+) -> None:
+    """Regression (API-149): the predictive spread of Y was printed as a 95% CrI.
+
+    The interventional draws are one unit's outcome each, so their sd is the
+    structural spread (~2.06 here), far wider than the uncertainty in the mean.
+    """
+    scm, _ = fork
+    res = scm.interventional("Y", {"X": 1.0}, n=2000)
+    assert isinstance(res, SCMResult)
+    assert res.kind == "predictive"
+    assert "predictive interval" in repr(res) and "CrI" not in repr(res)
+    assert res.std_error is not None and res.std_error > 1.5
+    sample = scm.marginal("Y", n=500)
+    assert isinstance(sample, SCMResult) and sample.kind == "predictive"
+    assert scm.cores == 1
+
+
 # -- ANCHOR: counterfactual exactness (invertible) ---------------------------
 
 
@@ -546,7 +565,7 @@ def test_generative_rv_names_match_the_merged_posterior_golden() -> None:
     mechs = _resolved_mechanisms(scm.mechanisms, scm._fits)
     model = _build_generative(scm._order, mechs, n)
     idata = _merged_idata(scm._fits)
-    posterior_names = set(idata.posterior.data_vars)
+    posterior_names = set(idata.data_vars)
     free_rv_names = {rv.name for rv in model.free_RVs}
     # every free PARAMETER RV (not a node RV) must be in the merged posterior. The
     # node RVs themselves (Z, C, Y) are the likelihood vars, not parameters.
@@ -1014,41 +1033,37 @@ def test_latent_gauge_is_reproducible_and_pins_the_sign(
 # -- ANCHOR: IV and general-ID keep raising (verify-then-widen, decision 3) ----
 
 
-def test_iv_latent_fit_does_not_impose_exclusion_so_ate_raises() -> None:
-    """IV stays raising: the latent-fit do-contrast misses a valid IV effect, but 2SLS
-    nails it -- so ate() points at estimate_effect rather than return the ridge value.
+def test_iv_identified_effect_makes_ate_raise_with_a_pointer() -> None:
+    """IV stays raising: an instrument identifies the effect only parametrically.
 
-    Z -> X -> Y with U -> X, U -> Y (U latent) and a WEAK instrument against HEAVY
-    confounding. The latent {X, Y} district fit does not impose Z's exclusion
-    restriction, so X's structural coefficient drifts onto the non-identification
-    ridge (latent-fit b_hat ~1.2 against the true 0.7), while estimate_effect's 2SLS
-    recovers 0.7. This is exactly why ate() keeps raising for the iv strategy.
+    Z -> X -> Y with U -> X, U -> Y (U latent): the effect is identified through the
+    instrument Z, which needs a linear, homogeneous effect. The SCM's do-contrast
+    claims no such assumption, so ``ate()`` points at ``estimate_effect`` (2SLS)
+    instead of returning the latent fit's value. The decision is made before any
+    sampling. (Review F2, API-149: an earlier version also asserted that the latent
+    fit misses the truth, but its posterior covers it; the 2SLS standard error here
+    is about 0.16, so a single seed's distance from 0.7 tests noise.)
     """
-    b_true = 0.7
     rng = np.random.default_rng(7)
     n = 4000
     u = rng.normal(0, 1, n)
     z = rng.normal(0, 1, n)
     x = 0.2 * z + 2.0 * u + rng.normal(0, 0.6, n)  # weak Z, heavy confounding
-    y = b_true * x + 2.0 * u + rng.normal(0, 0.5, n)
+    y = 0.7 * x + 2.0 * u + rng.normal(0, 0.5, n)
     data = tabular({"Z": z, "X": x, "Y": y})
     graph = dag(["Z -> X", "X -> Y", "U -> X", "U -> Y"], latent=["U"])
 
-    # ate() raises with the pointer (decidable pre-MCMC on the iv strategy).
     scm = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=7)
     scm._fits = dict.fromkeys(scm.mechanisms)  # type: ignore[assignment]
     with pytest.raises(NotImplementedError) as exc:
         scm.ate("X", "Y")
-    assert "iv" in str(exc.value) and "estimate_effect" in str(exc.value)
-
-    # and the reason it must: the latent fit's coefficient misses the truth here,
-    # while 2SLS recovers it -- the exclusion restriction the latent fit cannot see.
-    fitted = SCM(graph, data, draws=DRAWS, tune=TUNE, chains=CHAINS, random_state=7).fit()
-    parents = fitted.mechanisms["Y"].parents
-    b_hat = float(fitted._fits["Y"].param_means["Y__coef"][list(parents).index("X")])
-    iv_est = estimate_effect(graph, data, "X", "Y")
-    assert iv_est.value == pytest.approx(b_true, abs=0.06)  # 2SLS nails the truth
-    assert abs(b_hat - b_true) > 0.2  # the latent fit does not -- so ate() rightly raises
+    message = str(exc.value)
+    assert "iv" in message and "estimate_effect" in message
+    assert "engine='dml'" not in message  # no pointer at a path that does not exist
+    # estimate_effect takes the instrument route on the same graph
+    iv = estimate_effect(graph, data, "X", "Y")
+    lo, hi = iv.interval(0.95)
+    assert lo < 0.7 < hi
 
 
 def test_general_id_strategy_keeps_raising_with_pointer() -> None:

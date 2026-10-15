@@ -11,7 +11,7 @@ methods also hand back their separating sets.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -25,7 +25,9 @@ class DiscoveryResult:
 
     ``graph`` is the headline. ``test`` or ``score`` names the ingredient the
     algorithm consumed (one of them is ``None``). ``diagnostics`` carries the
-    run counters (tests by conditioning size, cache hits, score evaluations).
+    run counters (tests by conditioning size, cache hits, score evaluations);
+    a ``welt:<model>`` run carries its Welt provenance there instead (ids,
+    versions and the native edge-score dataframe, see :func:`ergodic.welt.discover`).
     ``sepsets`` maps an unordered removed pair to the set that separated it,
     when a constraint method produced one.
     """
@@ -36,12 +38,12 @@ class DiscoveryResult:
     score: str | None = None
     alpha: float | None = None
     n: int = 0
-    diagnostics: Mapping[str, float] = field(default_factory=dict)
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
     sepsets: Mapping[frozenset[str], frozenset[str]] | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:
         ingredient = self.test if self.test is not None else self.score
-        body = f"{self.method}/{ingredient}: {self.graph.kind}"
+        body = f"{self.method}/{ingredient}: {self.graph.kind.value}"
         body += f", {len(self.graph.nodes)} nodes, {len(self.graph.edges)} edges"
         if self.alpha is not None:
             body += f", alpha={self.alpha:g}"

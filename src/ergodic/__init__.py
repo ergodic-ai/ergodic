@@ -31,7 +31,7 @@ from .data import (
     tabular,
     timeseries,
 )
-from .discovery import discover, granger
+from .discovery import DecodeResult, EdgeProbabilities, decode, discover, granger
 
 # `forecast` names both the pillar and its facade, and the function is what the
 # top level exports: `from ergodic import forecast` gives the callable, while
@@ -39,6 +39,7 @@ from .discovery import discover, granger
 # function last so the binding is the deliberate one.
 from .forecast import backtest, forecast
 from .graph import (
+    GRAPH_FORMAT,
     Edge,
     GraphKind,
     InvalidGraphError,
@@ -131,9 +132,10 @@ from .scm import (
     Sensitivity,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
+    "GRAPH_FORMAT",
     "IDA",
     "SCM",
     "BinaryGumbelMax",
@@ -144,8 +146,10 @@ __all__ = [
     "CertifyResult",
     "Consensus",
     "Dataset",
+    "DecodeResult",
     "DomainKnowledge",
     "Edge",
+    "EdgeProbabilities",
     "EffectEstimate",
     "EffectTarget",
     "EventLog",
@@ -201,6 +205,7 @@ __all__ = [
     "datasets",
     "decision_points",
     "decision_table",
+    "decode",
     "did",
     "discover",
     "discover_model",

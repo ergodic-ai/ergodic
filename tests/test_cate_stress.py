@@ -430,9 +430,16 @@ def test_ate_bridge_consistency() -> None:
     assert eff.std_error is not None and eff.std_error > 0.0
 
 
-def test_analytic_ate_combines_per_unit_ses() -> None:
-    """With per-unit analytic SEs, ``.ate()`` SE is ``sqrt(sum se^2)/n``."""
+def test_analytic_ate_without_scores_refuses_a_standard_error() -> None:
+    """Per-unit analytic SEs are correlated, so they never combine as independent.
+
+    Regression (API-149): ``.ate()`` used to report ``sqrt(sum se^2)/n``, which
+    treats the units' errors as independent although they share one fitted model
+    (about ``sqrt(n)`` too narrow). With no scores to read, the mean comes back as a
+    point and the interval refuses.
+    """
     se = np.abs(np.random.default_rng(2).normal(size=12)) + 0.5
+    values = np.random.default_rng(3).normal(size=12)
     res = CATEResult(
         treatment="A",
         outcome="Y",
@@ -440,11 +447,52 @@ def test_analytic_ate_combines_per_unit_ses() -> None:
         n=12,
         kind="analytic",
         source="dr",
-        _values=np.random.default_rng(3).normal(size=12),
+        _values=values,
         _std_error=se,
     )
-    expected = float(np.sqrt(np.sum(se * se)) / 12)
-    assert res.ate().std_error == pytest.approx(expected)
+    eff = res.ate()
+    assert eff.value == pytest.approx(float(np.mean(values)))
+    assert eff.std_error is None
+    assert eff.kind == "point"
+    with pytest.raises(ValueError, match="no uncertainty"):
+        eff.interval()
+
+
+def test_analytic_ate_of_a_homogeneous_result_keeps_its_standard_error() -> None:
+    """One effect and one SE repeated over the units (``DML.cate()``) is one estimate."""
+    res = CATEResult(
+        treatment="A",
+        outcome="Y",
+        covariates=("Z",),
+        n=50,
+        kind="analytic",
+        source="dml",
+        _values=np.full(50, 0.7),
+        _std_error=np.full(50, 0.05),
+    )
+    eff = res.ate()
+    assert eff.value == pytest.approx(0.7)
+    assert eff.std_error == pytest.approx(0.05)
+
+
+def test_analytic_ate_reads_the_dr_scores_and_matches_sampling_spread() -> None:
+    """The DR-learner's ``.ate()`` SE is the AIPW score SE, not the independent sum.
+
+    Regression (API-149): on this world the old SE was about 0.0009 while the
+    estimator's spread across replications is about 0.04; the AIPW score SE is
+    0.039 and agrees with ``estimate_effect(strategy="aipw")``.
+    """
+    data, graph, _ = _world(seed=0, slope=4.2)
+    res = cate(graph, data, "A", "Y", method="dr_learner", random_state=0)
+    assert res.kind == "analytic"
+    eff = res.ate()
+    # the linear final stage: the AIPW mean is the mean per-unit effect
+    assert eff.value == pytest.approx(float(np.mean(res.values)), abs=1e-8)
+    assert eff.std_error is not None
+    assert 0.025 < eff.std_error < 0.06
+    aipw = estimate_effect(graph, data, "A", "Y", strategy="aipw", random_state=0)
+    assert aipw.std_error is not None
+    assert eff.std_error == pytest.approx(aipw.std_error, rel=0.2)
 
 
 def test_index_alignment_and_to_frame_roundtrip() -> None:

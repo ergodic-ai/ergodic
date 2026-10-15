@@ -7,11 +7,305 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - Unreleased
+
+To be released together with welt-client 0.13.
+
 ### Added
-- Initial project scaffolding: the `ergodic` package with `discovery`, `inference`,
-  and `process` subpackages (placeholders).
-- Tooling: uv project layout, ruff (lint + format), mypy (strict), pytest.
-- MkDocs Material documentation skeleton, pre-commit hooks, and a Makefile.
+- A versioned graph format. `MixedGraph.to_dict()` writes
+  `"format": "ergodic.graph/1"`, and `ergodic.GRAPH_FORMAT` (also
+  `ergodic.graph.GRAPH_FORMAT`) names the format this version reads.
+  `MixedGraph.from_dict()` reads a dict without the field as version 1, so older
+  output and hand-written payloads (`kind`, `nodes`, and edges of
+  `{u, v, u_mark, v_mark}`) still load, and it raises `ValueError` naming the
+  supported format on any other value. The rest of the `to_dict()` output is
+  unchanged. Round trips are tested for every graph kind, latent and selection
+  nodes included.
+- `ergodic.welt`, an optional Welt integration installed with
+  `pip install "ergodic[welt]"` (welt-client>=0.13, Python 3.11 to 3.13; the
+  rest of ergodic never imports it, enforced by a test). `ergodic.welt.discover`
+  and `discover(data, method="welt:<model>")` run a Welt causal discovery model
+  and return a `DiscoveryResult` with the native DAG and Welt provenance in
+  `diagnostics` (ids, model and configuration versions, the edge-score
+  dataframe). A model known to return non-DAG graphs (`cdfm`, `avici`, or any the
+  catalogue marks so) raises `WeltGraphNotDAGError` before anything is uploaded or
+  paid for, and a result Welt does not declare a DAG raises it with the result
+  attached; nothing is projected. `WeltLearner` puts any Welt classification or
+  regression model in a nuisance slot, refuses `sample_weight`, and shares one
+  client and a `max_fits` budget (default 10) with its clones.
+  `upload_dataset` and `load_research_dataset` move tabular data between ergodic
+  and Welt. `bootstrap` refuses `welt:` methods (each resample would be a paid
+  job).
+- `ergodic.EdgeProbabilities` (also `ergodic.discovery.EdgeProbabilities`): an
+  immutable matrix of directed-edge probabilities over named variables, source rows
+  and target columns, with a zero diagonal and a read-only copy of the values. `kind`
+  is `"independent"` (per-edge marginals, as AVICI and CDFM return), `"pair_state"`
+  (three exclusive states per pair, `P[i, j] + P[j, i] <= 1` enforced) or
+  `"frequency"` (bootstrap shares); `calibrated` defaults to `False` and `provenance`
+  is a read-only mapping. `to_pair_states()` conditions independent marginals on "not
+  both directions", `existence()` gives skeleton probabilities, `threshold(t)` a
+  diagnostic `mixed` graph that may be cyclic, `to_frame()`/`from_frame()` a
+  dataframe round trip, and `from_bootstrap()` reads a `BootstrapResult`. It is not
+  a graph posterior.
+- `ergodic.decode(probabilities, method="greedy", *, threshold=None, knowledge=None,
+  samples=1, seed=None, max_nodes=20)`: explicit, versioned decoders from edge
+  probabilities to a DAG, ported from Ergodic's research library: `greedy_v1`
+  (default; optional strict `threshold`), `exact_map_v1` (A*, capped at `max_nodes`),
+  `expected_count_v1`, `soft_f1_v1`, and the seeded samplers `pair_sampler_v1` and
+  `perturb_and_map_v1` (candidate DAGs plus a medoid consensus; a seed is required).
+  It returns a `DecodeResult` (a `DiscoveryResult`, `method="decode:<id>"`) labelled
+  `decoded` with the decoder, parameters, seed, rejected cycles, objective and source
+  provenance, and the note "not a graph posterior; orientation not certified".
+  `DomainKnowledge` constrains decoding (forbidden edges, tiers, roots, sinks,
+  `restrict_to`, required edges first); order statements and tiers are enforced as
+  one time order consistent with every order statement and every edge, which is
+  stricter than `DomainKnowledge.violations` for separate `order()` pairs.
+  `confound` is refused.
+  `ergodic.discovery.Decoder` holds a decoder and its settings.
+- `ergodic.welt.discover(..., decoder=...)` and
+  `discover(data, method="welt:<model>", decoder=...)`: opt-in local decoding. The
+  run then accepts `avici` and `cdfm`, reads the native scores as
+  `EdgeProbabilities(kind="independent")` with the Welt provenance, and returns a
+  `DecodeResult` whose graph is the decoded DAG, with `edge_probabilities`,
+  `welt_native_edges` and the decode labels in `diagnostics`. Greedy defaults to the
+  model's native threshold (0.5 for AVICI, the recorded adaptive threshold for CDFM).
+  With a decoder, `knowledge=` constrains the local decoding; it and every decoder
+  setting, `max_nodes` against the variable count included, are checked before
+  anything is uploaded. Any failure after the paid run raises `WeltDecodeError`
+  with the result and its scores attached. Without `decoder=` nothing changes:
+  non-DAG models are still refused before paying.
+- A new documentation site at https://docs.ergodic.dev, one page per task. Each guide
+  runs one complete program on bundled data and shows its recorded output; the
+  docs check reruns every program and compares, and a program that needs a Welt
+  key is tested against a fake Welt service. The site is versioned, searchable,
+  and publishes each page as Markdown and an `llms.txt` index.
+- Three learn notebooks: structural causal models (interventions,
+  counterfactuals and sensitivity), hidden regimes (recover, certify and
+  calibrate), and causal forests with policy trees.
+- Every public function, class and member has a docstring, and the reference
+  build fails when one is missing.
+- `PolicyTree.evaluate(held_out)` scores a learned rule on doubly robust scores
+  from units it was not learned on and returns a `PolicyValue` (`value`,
+  `std_error`, `interval()`, `treat_all_value`, `regret()` and `regret_std_error`),
+  the honest out-of-sample value; the tree's own `value` is measured on the scores
+  it was chosen to maximize, so it is optimistic and its docstrings now say so.
+- `SCM(cores=)` and `PyMCLearner(cores=)` (default 1) cap the processes PyMC may
+  use for the chains; every SCM fit (singleton, latent district, sensitivity
+  refit, process-pool worker) honours it. PyMC otherwise ran up to four chains in
+  parallel processes. The draws do not depend on it.
+- `MediationEstimate.mediated_interaction`, `total - nde - nie`.
+- `LatentResult.rhat_max_unaligned`, the raw split R-hat (see Changed).
+- `ergodic.inference.learners.ConvergenceWarning`, which `LogisticRegression` emits
+  when it stops at `max_iter` before converging. It is ergodic's own class, so a
+  filter on scikit-learn's `ConvergenceWarning` does not catch it.
+- `MixedGraph.from_networkx(graph, kind=...)`, like the module-level function.
+- `SCMResult.kind="predictive"` for posterior-predictive draws, and
+  `CausalForest.cate()` records `diagnostics["ij_zero_se_share"]` (see Fixed).
+
+### Changed
+- `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can
+  carry its provenance. Learner cloning honors a learner's own
+  `__sklearn_clone__` override; scikit-learn estimators keep the `get_params`
+  path.
+- A weighted nuisance slot (the R-learner's `final`) refuses, before any fit, a
+  learner that declares `supports_sample_weight = False`, as `WeltLearner` does.
+  `discover(..., method="welt:<model>")` refuses `alpha` and local-only keyword
+  arguments before any request.
+- Identification's refusal of a `mixed` graph now says how to fix it, reading
+  the graph's marks. A fully directed acyclic graph gets two readings with their
+  conditions: `graph.as_kind("dag")` for a search that assumes no hidden
+  confounding (PC or GES with knowledge orienting every edge), and
+  `graph.as_kind("mag")` for an FCI or RFCI result, whose directed edges mean
+  ancestry and can hide confounding. A directed-plus-bidirected graph gets the
+  same pair with `"admg"`. A partially directed graph lists the options (orient
+  the rest with more knowledge, take one member with `consistent_extension`, or
+  rediscover without the orienting knowledge); a graph that fits the CPDAG, MAG,
+  or PAG rules names that face; a graph that fits none names seeded domain
+  knowledge as the likely cause. Which graphs identification accepts is
+  unchanged, and `estimate_effect` and `cate` raise the same message.
+- A bound conditional-independence test or score handed data it was not bound
+  to (for example `FCI(test=GCM(data)).fit(data)`) still raises, and the message
+  now names the algorithm and both correct usages: fit the algorithm with no
+  data, or build the test or score unbound and pass the data to `fit` or
+  `discover`. A `DSeparationOracle` handed data says it takes none. The
+  `discover` docstring now says it binds an unbound test.
+- Install hints in error messages and module docs quote their extras
+  (`pip install 'ergodic[scm]'`), which zsh would otherwise read as a glob.
+- `LatentResult.rhat_max` is now the split R-hat after label alignment, over the
+  sign-corrected delta draws grouped by chain, and the R-hat warning reads it. It
+  was the raw R-hat, so chains sitting in mirror modes of a good fit reported 1.83
+  (the spread arm of the golden worlds; aligned, 1.01); that number is now
+  `rhat_max_unaligned`.
+- `MixedGraph` neighbourhood lookups (`parents`, `children`, `neighbors`,
+  `spouses`, `ancestors`, `descendants`, `markov_blanket`) and `Hierarchy` lookups
+  (`children_of`, `parent_of`, `is_leaf`, `leaf_descendants`) raise `ValueError` on
+  a name that is not a node instead of answering with an empty set (or, for
+  `is_leaf`, `True`), as identification and separation already did.
+  `get_edge`/`has_edge` still answer `None`/`False` for an absent edge, and
+  `HierarchicalTSData.aggregate` on an unknown node raises this `ValueError` rather
+  than a `KeyError`. KNN used before `fit` raises `RuntimeError`, and `set_params`
+  on the native KNN, OLS and logistic learners refuses unknown names, as sklearn
+  does.
+- The documentation moved to https://docs.ergodic.dev (Graphite builder); the MkDocs
+  site is retired.
+
+### Fixed
+- `SCM.sample`, `SCM.interventional` and `SCM.ate` read the fitted posterior on
+  every supported stack. With PyMC 5 and arviz 0.x (the
+  versions Python 3.11 resolves), 0.1.0 handed `sample_posterior_predictive` a
+  posterior it could not read, so every SCM parameter was silently drawn from its
+  prior. The merged posterior is now a plain `xarray.Dataset`, which PyMC 5 and 6
+  read the same way. If you used `ergodic.scm` on Python 3.11 (or with arviz below
+  1.0), rerun those results.
+- `estimate_mediation`: the total effect is now computed directly as
+  `E[Y(1, M(1))] - E[Y(0, M(0))]`. It used to be the pure NDE plus the pure NIE,
+  which drops the mediated interaction whenever the treatment interacts with the
+  mediator (always possible, since the outcome model is saturated in treatment and
+  mediator). On `load_berkeley` (gender, department, admission) the total was
+  -0.072 with a proportion mediated of 1.99; it is now the -0.142 raw gap and the
+  proportion 1.01. `nde` and `nie` are unchanged (the pure effects), so under an
+  interaction they no longer sum to the total; `proportion_mediated` stays
+  `nie / total`, Pearl's share explained by mediation, and the docs now name the
+  other convention, `1 - nde / total` (VanderWeele's total NIE over TE, as CMAverse
+  reports; 1.50 on Berkeley). The `Design.estimand` no longer repeats the `NDE =`/`NIE =`
+  prefix, and a treatment with more than two levels is told to recode to two
+  levels instead of being pointed at `treated=` (which needs two levels too).
+- `CATEResult.ate()` no longer treats per-unit analytic standard errors as
+  independent (`sqrt(sum se^2) / n`); the units share one fitted model, so that
+  was about `sqrt(n)` too narrow (0.0009 against a sampling spread of 0.038 on a
+  4,000-row world). It now reports the AIPW average off the result's cached
+  cross-fit scores (standard error `std(scores) / sqrt(n)`, 0.039 there, the
+  same as `estimate_effect(strategy="aipw")`), the result's own standard error
+  for a homogeneous result such as `DML.cate()`, and otherwise the mean as a
+  point with no standard error. For the DR-learner's linear final stage the point
+  is unchanged; for the causal forest it is the score average, which can differ
+  slightly from the plain mean of the per-unit effects.
+- `PolicyTree.value` is now the policy's mean outcome gain over treating no one,
+  `mean[pi(X) * Gamma]`, in outcome units, as the docstrings described. It was
+  `mean[(2 pi(X) - 1) * Gamma]`, so `regret()` and the gap to `treat_all_value`
+  came out twice the outcome gain (example 11 priced its rule at ~$324k on a
+  200k book; the true figure is ~$162k, value 0.82 against an oracle 0.80).
+  `treat_none_value` is now 0 and `treat_all_value` (the ATE) is unchanged;
+  `std_error` and `interval()` are on the new scale. The learned rule is the same
+  (the two objectives share their argmax).
+- Identification on a DAG or ADMG with `selection=` nodes now raises, as the
+  class faces already did. It used to ignore the selection mark, so a selected
+  collider `X -> S <- Y` identified as plain `P(Y | X)` although selecting on `S`
+  makes the two dependent in the sample. This covers `identify_effect`,
+  `identify_distribution`, `identify_mediation`, the adjustment, front-door and
+  instrument helpers, and so `estimate_effect` and `cate`.
+- `AStar` raises `ValueError` naming the violations when its searched DAG cannot
+  satisfy the domain knowledge (for example a confounded pair), instead of an
+  `AssertionError` (which `python -O` would also have skipped).
+- Error messages and docstrings state limits plainly instead of internal planning
+  words ("reserved seam", "not built yet", "phase 1", "MVP", "post-MVP", "when the
+  causal layer lands", "E1", "v1", "lands in D2", "in this phase", "Phase-2",
+  "Track-D", "deferred"): the neural and foundation CATE method names, `ITEResult.explain`,
+  multi-unit synthetic control, a continuous mediator, per-member ID on a PAG,
+  count and categorical forecast columns, scenario pins on endogenous nodes, the
+  SCM's custom-mechanism and `engine="dml"` refusals, soft knowledge, and the
+  `ergodic.latent` refusals. The neural and foundation names no longer suggest
+  installing `ergodic[neural]`/`ergodic[foundation]`, which do not provide those
+  learners in this version. A test reads
+  every string constant in the package and refuses those words.
+- `load_birthweight`: the `target` said -225 g with a tolerance of 90 g, the
+  description and the case study said about -203 g, and neither figure traced to
+  a published estimate on this extract. The target is now -231 g (tolerance
+  30 g, naive -275.3 g), the AIPW estimate on this same 4,642-row Cattaneo (2010)
+  extract in the Stata treatment-effects manual, and the description, the case
+  study, and the example quote it with that source. The `ergodic.datasets`
+  docstrings no longer call every bundled file public-domain or permissively
+  licensed; they say which files derive from public-domain US government data
+  and which are authors' replication data without an explicit licence, as the
+  NOTICE does.
+- Reprs: `CATEResult`, `ITEResult`, `DiDEffect`, `SyntheticControlEffect`, and
+  `ITSEffect` print the short one-line summary again (with their own class name)
+  instead of a field-by-field dump of every array, and `DiscoveryResult` prints
+  the graph kind as `cpdag` rather than `GraphKind.CPDAG`.
+- `SyntheticControlEffect.kind` is `"placebo"` instead of `"analytic"`: there is
+  no standard error, and the interval is a placebo band.
+- `HillClimb` breaks ties between score-equivalent moves by its documented
+  enumeration order instead of by floating-point rounding. Adding `x -> y` and
+  `y -> x` (or reversing a covered edge) score the same, but the computed deltas
+  differ in the last bits depending on the BLAS build, so the climb took
+  machine-dependent paths; on Apple Accelerate the default run on a five-node
+  world stopped at a lower-scoring graph (BIC -127.0 against the truth's -123.2)
+  with an extra edge. Moves within a relative 1e-9 are now ties, and a tie keeps
+  the first move.
+- The best-linear-projection docstrings no longer say the intercept is the ATE:
+  the covariates enter uncentred, so the intercept is the projected effect at
+  covariates all zero (the ATE only when they are centred). Outputs unchanged.
+- `KNNRegressor` and `KNNClassifier` honour `sample_weight` (a weighted mean
+  over the neighbours). They accepted it and dropped it, so the R-learner's
+  weighted final stage ran unweighted with a KNN learner. `PyMCLearner` now
+  declares `supports_sample_weight = False`, so the R-learner refuses it before
+  any fit, and its `fit` raises on weights instead of ignoring them.
+- `SCM` refuses a graph that is not a DAG or an ADMG. A MAG passed the
+  acyclic-directed-plus-bidirected check and was fitted as an ADMG, reading
+  ancestral edges as direct mechanisms; it now raises with the alternatives
+  (pick a member, or re-face a graph you read as one world with `as_kind`).
+- `SCM.interventional`, `sample`, and `marginal` return posterior-predictive
+  draws of the outcome, not a posterior of `E[Y | do(X)]`: the mean estimates the
+  expectation, but `std_error` and `interval()` are the outcome's spread (sd 1.4
+  in the guide's example, where the effect's own posterior sd is 0.023). The docstrings
+  and the guide said otherwise, and the repr printed a "95% CrI". These results
+  now carry `kind="predictive"` and print "95% predictive interval"; `ate` and
+  `counterfactual` keep `kind="posterior"` and the credible interval.
+- Process trees splice a nested sequence into its parent, so
+  `seq(a, seq(b, c))` is `seq(a, b, c)`. `discover_model(noise=...)` could return
+  an unflattened `seq(..., seq(xor(TAU, 'standard'), xor(TAU, 'expedite')), ...)`
+  that did not compare equal to the same model written by hand, although the
+  tree docstring promised a canonical form. Nested `xor` and `par` nodes are
+  kept as built (`decision_points` reads each `xor` as its own decision).
+
+- `CausalForest.cate()` records the share of per-unit standard errors clipped to
+  zero (`diagnostics["ij_zero_se_share"]`) and warns when it exceeds 5%. With too
+  few trees for the rows, the infinitesimal-jackknife Monte-Carlo correction
+  exceeds the raw variance and the band has zero width; on a 4,000-row world 400
+  trees gave 25% zero-width bands and 68% coverage of a nominal 90%, 1,600 trees
+  1% and 87%. The estimator is unchanged; its docstring states these
+  measurements, names the variance correctly (the infinitesimal jackknife with the
+  Wager-Hastie-Efron Monte-Carlo correction, not a bootstrap of little bags) and
+  recommends at least as many trees as rows.
+- The heterogeneity layer (`explain()`: BLP, CLAN; `policy_tree`;
+  `PolicyTree.evaluate`) named the doubly robust design by variable while a
+  categorical covariate with three or more levels has one column per non-first
+  level, so names and columns drifted apart: a split reported on `Z` was really an
+  indicator of the categorical, and BLP returned four coefficients for three names.
+  The scores now name every column (`"C==level"` for such a categorical; a
+  continuous or two-level covariate keeps its name), `policy_tree(result, "C")`
+  selects the categorical's whole block, `DRScores` refuses a design whose width
+  does not match its names, and `evaluate()` refuses held-out scores that encode
+  the categorical with other levels. The forest's `variable_importance()` uses the
+  same column names.
+
+## [0.1.1] - 2026-08-30
+
+Tagged as `v0.1.1`; not uploaded to PyPI.
+
+### Added
+- Hidden-regime inference (`ergodic.latent`): one observed series, a hidden
+  two-state switch, and three questions kept apart. `recover` returns the
+  posterior path of the switch and a credible interval per named mechanism
+  block (level, spread, rhythm, amplitude), `certify` decides whether a regime
+  exists at all against control worlds simulated from a fitted no-switch model,
+  and `calibrate` measures a configured detector's false-fire rate with a
+  Wilson interval. `consensus` lays several likelihoods' verdicts side by side.
+  The hidden chain (`MarkovChain`, `semi_markov`) is summed out by the forward
+  algorithm, so NUTS samples only continuous parameters. Emissions plug in as
+  a `RegimeLikelihood`; two ship, `spectral_whittle` and `switching_ar` (blind
+  to amplitude, and documented as such). pymc is optional,
+  `pip install 'ergodic[latent]'`. A guide page (`docs/latent.md`) and two
+  example scripts come with it.
+
+## [0.1.0] - 2026-08-17
+
+The first release on PyPI: the graph, knowledge, identification, data,
+inference, discovery, process, SCM, and forecast pillars.
+
+### Added
+- Tooling: uv project layout, ruff (lint and format), mypy (strict), pytest,
+  MkDocs Material documentation, pre-commit hooks, and a Makefile.
 - Causal graph objects (`ergodic.graph`): a mixed-graph core with typed endpoint
   marks covering DAG, ADMG, MAG, CPDAG, and PAG; immutable value semantics; d- and
   m-separation; the do-operator and subgraphs; networkx, adjacency, and dict interop.
@@ -138,8 +432,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline and returns a pair-level table rather than a graph (feedback
   across lags is normal; the docstring says what Granger does not claim).
   Shape guards keep the methods honest: iid methods reject temporal data
-  (rows are not exchangeable), `pcmci` rejects tabular data, and `bootstrap`
-  refuses temporal methods until a moving-block variant exists.
+  (rows are not exchangeable) and `pcmci` rejects tabular data.
 - The learn series: six beginner notebook guides (`docs/learn/`) that teach
   causal inference from zero on commercial examples, confounding and Simpson's
   paradox, good and bad controls, estimation with doubly robust and cross-fit
@@ -269,9 +562,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns a `Refutation`. The model-agnostic checks: `"placebo_treatment"` scrambles
   the treatment and the effect should vanish, `"random_common_cause"` adds an
   irrelevant covariate and the effect should hold, `"data_subset"` re-estimates on a
-  random slice. None proves an estimate right; a failure is a real warning. The
-  sharper confounder-specific sensitivity (partial R-squared, the E-value) comes
-  later. `refute_effect` and `Refutation` re-export at the top level.
+  random slice. None proves an estimate right; a failure is a real warning.
+  `refute_effect` and `Refutation` re-export at the top level.
 - Case studies (`docs/case-studies/`): five narrative pages that apply the tools to
   a famous dataset and recover the number the original study published. Smoking and
   birthweight (backdoor adjustment), the 1973 Berkeley admissions paradox (Simpson's
@@ -295,9 +587,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `functional` and `hedge` fields. `ida(graph, treatment, outcome)` identifies
   across an equivalence class: it enumerates the members of a CPDAG and runs
   `identify_effect` per member, returning an `IDA` record (`members`,
-  `n_identifiable`, `all_identifiable`, `agree`, `strategies`, `estimands`); PAG
-  and MAG members need a DAG realization and raise a clear "not built" for the
-  general case. Held executably to the soundness-against-truth anchor (the
+  `n_identifiable`, `all_identifiable`, `agree`, `strategies`, `estimands`). On a
+  PAG or MAG it returns the class-level adjustment answer where one applies and
+  raises otherwise, since general per-member ID needs a DAG realization of each
+  member. Held executably to the soundness-against-truth anchor (the
   functional evaluated on random discrete worlds matches the truth) and the
   identifiability catalog.
 - The discrete plug-in estimator (`ergodic.inference`): `estimate_effect` on a
@@ -305,7 +598,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evaluating the empirical sum-product with a bootstrap standard error. Discrete-
   only and binary-treatment guarded, with a positivity check that raises on an
   empty stratum the formula divides by (the discrete analog of the overlap check);
-  a continuous variable raises and points at the SCM path (not built).
+  a continuous variable raises and points at the SCM pillar.
 - Mediation (`ergodic.identification`, `ergodic.inference`):
   `identify_mediation(graph, treatment, outcome, mediators)` decides the natural
   direct and indirect effects (NDE, NIE) via a covariate set that blocks the X-Y,
@@ -353,7 +646,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded pieces and costs no sampling; the replay engine (for a mechanism that
   does not expose them) zeroes the factor's sites in a copy of the trace and
   forecasts again on the stored seed. pymc is optional, `pip install
-  ergodic[forecast]`, and the bare install never imports it.
+  'ergodic[forecast]'`, and the bare install never imports it.
+- The structural causal model (`ergodic.scm`): a Bayesian `SCM` on PyMC with
+  explicit-noise mechanisms (`GaussianAdditive`, and `BinaryGumbelMax` /
+  `CategoricalGumbelMax` for discrete nodes), `pm.do` interventions, and batched
+  twin-network counterfactuals with per-draw uncertainty. `ate` routes through
+  `identify_effect` first and the return type names the world: a back-door
+  effect returns a posterior `SCMResult`, a non-identified one returns a
+  `Sensitivity` curve with no point accessor. A latent-confounded ADMG fits its
+  confounded districts jointly, so a front-door effect computes from the fitted
+  model; instruments and general ID still raise and point at `estimate_effect`.
+  `SCM.ite` returns per-unit individual treatment effects off the twin network,
+  as a contrast between two levels or a shift from each unit's own baseline.
+  pymc is optional, `pip install 'ergodic[scm]'`.
+- Per-unit effects and the CATE toolkit (`ergodic.inference`): `CATEResult` and
+  `ITEResult` share one array-like `PerUnitEffect` surface (`values`,
+  `interval`, `ate`, `to_frame`), and every meta-learner's `cate` returns one.
+  The top-level `cate(graph, data, X, Y, method=...)` is identification-gated
+  like `estimate_effect`; `uncertainty=False` skips the per-unit uncertainty
+  pass for a fast point-only result. `CATEResult.explain()` gives honest
+  characterization off out-of-fold scores (best linear projection, sorted group
+  effects, CLAN, the calibration test, RATE). `CausalForest` is a native honest
+  generalized random forest with infinitesimal-jackknife intervals,
+  `policy_tree` learns an interpretable treat-or-not rule with its policy value
+  and regret, and `select_cate` ranks candidate learners by doubly robust
+  tau-risk and returns a Q-aggregated ensemble.
 
 ### Fixed
 - Instruments: descendants of the treatment are no longer certified as instruments
@@ -392,3 +709,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to walk them literally. `identify_effect` on a CPDAG or MAG used to run
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
+
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ergodic-ai/ergodic/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/ergodic-ai/ergodic/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/ergodic-ai/ergodic/releases/tag/v0.1.0

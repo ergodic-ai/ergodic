@@ -270,7 +270,7 @@ def resolve_scenarios(
 
     - a key the data has no column for;
     - a key on a node with graph parents, which is an intervention rather than a
-      scenario (see the message, and ``do=`` when the causal layer lands);
+      scenario (see the message);
     - a scenario node with nothing to resolve from;
     - a path of the wrong length.
     """
@@ -294,9 +294,9 @@ def resolve_scenarios(
             "scenario= is for a node whose future is exogenous or already known, and it "
             "makes no causal claim: it pins a path and trusts the fitted regressions "
             "downstream. Pinning an endogenous node is an intervention, which needs the "
-            "effect to be identified on the window graph and is what do= will be for when "
-            "the causal layer lands. Until then, forecast this node from its parents, or "
-            "drop the edges into it if it really is exogenous."
+            "effect to be identified on the window graph; forecast() does not support "
+            "interventions. Forecast this node from its parents, or drop the edges into "
+            "it if it really is exogenous."
         )
 
     out: dict[str, Array] = {}

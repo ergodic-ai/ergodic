@@ -141,9 +141,9 @@ _CATE_KWARGS: dict[str, dict[str, object]] = {
     "s_learner": {"per_arm": False},
 }
 
-# Reserved method names for the neural and foundation-model CATE learners. They are
-# a documented seam: phase 1 ships nothing that imports them, and selecting one
-# raises a clear "install the extra" error until the guarded-import strategies land.
+# Reserved method names for the neural and foundation-model CATE learners. Nothing
+# implements them yet, and selecting one raises a clear "not available" error
+# rather than a generic unknown-name one.
 _CATE_NEURAL = ("tarnet", "dragonnet", "cfr", "drnet")
 _CATE_FOUNDATION = ("causal_pfn", "causalfm", "causal_pfm")
 
@@ -159,9 +159,8 @@ def cate_kwargs_for(strategy: str | None = None) -> dict[str, object]:
 def cate_estimator_for(strategy: str | None = None) -> type[CausalEstimator]:
     """The CATE-capable estimator class for a name, or the doubly-robust default.
 
-    Recognizes the reserved neural and foundation names and raises a clear pointer
-    to the optional extra (the phase-1 seam), rather than a generic unknown-name
-    error.
+    Recognizes the reserved neural and foundation names and says they are not
+    available in this version, rather than raising a generic unknown-name error.
     """
     name = (strategy or _CATE_DEFAULT).lower()
     if name in ("auto", ""):
@@ -170,13 +169,13 @@ def cate_estimator_for(strategy: str | None = None) -> type[CausalEstimator]:
         return _CATE_BY_NAME[name]
     if name in _CATE_NEURAL:
         raise NotImplementedError(
-            f"the neural CATE learner {name!r} needs the optional 'neural' extra "
-            "(pip install ergodic[neural]); it is a reserved seam and not built yet"
+            f"the neural CATE learner {name!r} is not available in this version of "
+            f"ergodic; use one of {', '.join(sorted(_CATE_BY_NAME))}"
         )
     if name in _CATE_FOUNDATION:
         raise NotImplementedError(
-            f"the foundation-model CATE learner {name!r} needs the optional 'foundation' "
-            "extra (pip install ergodic[foundation]); it is a reserved seam and not built yet"
+            f"the foundation-model CATE learner {name!r} is not available in this "
+            f"version of ergodic; use one of {', '.join(sorted(_CATE_BY_NAME))}"
         )
     allowed = ", ".join(sorted(_CATE_BY_NAME))
     raise ValueError(f"unknown CATE method {strategy!r}; use one of {allowed}, or 'auto'")

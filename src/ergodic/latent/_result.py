@@ -102,7 +102,12 @@ class LatentResult:
     #: ``n_decoded`` of them, evenly spaced.
     n_draws: int
     divergences: int | None = None
+    #: Worst split R-hat over the delta blocks after label alignment (the one to
+    #: judge the verdicts by), over the decode subsample grouped by chain.
     rhat_max: float | None = None
+    #: Worst split R-hat over the raw sampler draws, before alignment. Chains in
+    #: mirror modes push it high even when the aligned fit is fine.
+    rhat_max_unaligned: float | None = None
 
     def __post_init__(self) -> None:
         gammas = np.array(self.gammas, dtype=np.float64)
@@ -369,11 +374,10 @@ class Consensus:
     blocks where declaring models disagree, which is where a cross-model rule
     would adjudicate.
 
-    v1 ships the structure with the one planned rule slot explicitly empty:
-    the amp/spread rule (a spectral amplitude fire against a volatility
-    model's spread silence separates a louder wave from a noisier floor)
-    needs the deferred ``vol_garch`` likelihood, and
-    :meth:`amp_vs_spread` raises by name until it lands.
+    One rule is not available: the amp/spread rule (a spectral amplitude fire
+    against a volatility model's spread silence separates a louder wave from a
+    noisier floor) needs a ``vol_garch`` likelihood that ergodic does not have,
+    so :meth:`amp_vs_spread` raises by name.
     """
 
     target: str
@@ -419,13 +423,12 @@ class Consensus:
 
         A spectral amplitude fire and a volatility model's spread silence
         together separate "the wave got louder" from "the noise floor rose",
-        which no single v1 likelihood can do alone. The rule needs the
-        deferred ``vol_garch`` likelihood and lands with it.
+        which no single built-in likelihood can do alone. The rule needs a
+        ``vol_garch`` likelihood, which is not available, so this raises.
         """
         raise NotImplementedError(
-            "the amp/spread cross-model rule needs the deferred vol_garch "
-            "likelihood; consensus() ships the agreement table now and this "
-            "rule lands with that likelihood"
+            "the amp/spread cross-model rule needs a vol_garch likelihood, which "
+            "is not available; consensus() reports the agreement table"
         )
 
     def to_frame(self) -> pd.DataFrame:

@@ -10,14 +10,24 @@ the mediator's discrete levels and averaging over the empirical covariates:
 
     NDE = mean_i sum_m [mu(1, m, w_i) - mu(0, m, w_i)] p(m | 0, w_i)
     NIE = mean_i sum_m mu(0, m, w_i) [p(m | 1, w_i) - p(m | 0, w_i)]
-    TE  = NDE + NIE
+    TE  = mean_i sum_m [mu(1, m, w_i) p(m | 1, w_i) - mu(0, m, w_i) p(m | 0, w_i)]
     CDE(m) = mean_i [mu(1, m, w_i) - mu(0, m, w_i)]   (per mediator level m)
 
-It is the MVP: a binary treatment, a discrete (binary or low-cardinality)
-mediator, and a continuous or binary outcome. A continuous mediator raises with a
-pointer at the future multiply-robust / density path. The standard error is a
-nonparametric bootstrap over the rows, refitting both models per resample, which
-also carries the model uncertainty.
+NDE and NIE are the *pure* effects (both read the outcome at the control
+level of the other path), so ``TE = NDE + NIE`` holds only without a
+treatment-by-mediator interaction; with one, the remainder
+``TE - NDE - NIE`` is the mediated interaction, and the total effect is computed
+directly rather than as the sum.
+
+It handles a binary treatment, a discrete (binary or low-cardinality)
+mediator, and a continuous or binary outcome. A continuous mediator raises (it
+needs a density or multiply-robust estimator, which is not available). The
+standard error is a nonparametric bootstrap over the rows, refitting both models per
+resample, which carries the model uncertainty. Each resample's models are averaged
+over the full sample's covariates, so the standard error is for the effect on these
+units' covariate distribution (the sample-average effect); it leaves out the
+variation a new draw of the covariates would add, and so is somewhat narrow for the
+population effect when the effect varies with the covariates.
 
 Reuses the inference machinery: ``_covariate_matrix`` for the covariate design,
 the :class:`~ergodic.inference.Learner` resolution, and the
@@ -56,18 +66,22 @@ if TYPE_CHECKING:
 class MediationEstimate:
     """A mediation decomposition with its uncertainty.
 
-    ``nde``, ``nie``, and ``total`` are the natural direct effect, the natural
-    indirect effect, and the total effect (``nde + nie``), each a distribution-
-    shaped :class:`~ergodic.inference.EffectEstimate` with a bootstrap standard
-    error and interval. ``cde`` maps each mediator level to the controlled direct
-    effect at that level (also an :class:`EffectEstimate`). ``design`` names the
-    (untestable) assumptions the decomposition rests on, the same role
-    :class:`~ergodic.inference.Design` plays for the quasi-experimental estimators.
+    ``nde``, ``nie``, and ``total`` are the (pure) natural direct effect, the
+    (pure) natural indirect effect, and the total effect
+    ``E[Y(1, M(1))] - E[Y(0, M(0))]``, each a distribution-shaped
+    :class:`~ergodic.inference.EffectEstimate` with a bootstrap standard error and
+    interval. The total equals ``nde + nie`` when the treatment does not interact
+    with the mediator in the outcome; under an interaction the two parts do not
+    add up to it, and ``total - nde - nie`` is the mediated interaction. ``cde``
+    maps each mediator level to the controlled direct effect at that level (also
+    an :class:`EffectEstimate`). ``design`` names the (untestable) assumptions the
+    decomposition rests on, the same role :class:`~ergodic.inference.Design` plays
+    for the quasi-experimental estimators.
 
-    ``proportion_mediated`` is ``nie / total``, the share of the total effect that
-    flows through the mediator. It is unstable when the total effect is near zero
-    (a small denominator), so it is offered with that caveat and a ``flagged``
-    diagnostic.
+    ``proportion_mediated`` is ``nie / total``, the pure indirect effect's share of
+    the total effect (under an interaction it and ``nde / total`` need not sum to
+    one). It is unstable when the total effect is near zero (a small
+    denominator), so it is offered with that caveat and a ``flagged`` diagnostic.
     """
 
     nde: EffectEstimate
@@ -80,13 +94,28 @@ class MediationEstimate:
 
     @property
     def proportion_mediated(self) -> float:
-        """``NIE / TE``: the share of the total effect carried by the mediator.
+        """``NIE / TE``, with the pure NIE: the share *explained* by mediation.
 
-        Unstable when the total effect is near zero; see
-        :attr:`proportion_mediated_flagged`.
+        Pearl's (2001; 2012, "The Mediation Formula") fraction of the response
+        explained by the mediator. The other common convention, VanderWeele's total
+        NIE over TE (the share *owed* to mediation, which CMAverse and paramed
+        report), is ``1 - nde / total``. The two agree without a treatment-mediator
+        interaction and differ by :attr:`mediated_interaction` ``/ total`` with one
+        (on Berkeley admissions, 1.01 against 1.50). Unstable when the total effect is
+        near zero; see :attr:`proportion_mediated_flagged`.
         """
         te = self.total.value
         return self.nie.value / te if te != 0.0 else float("nan")
+
+    @property
+    def mediated_interaction(self) -> float:
+        """``total - nde - nie``: the part of the total effect the pure effects miss.
+
+        VanderWeele's mediated interaction (INTmed): zero without a
+        treatment-by-mediator interaction in the outcome. A point value, from the
+        three estimates.
+        """
+        return self.total.value - self.nde.value - self.nie.value
 
     @property
     def proportion_mediated_flagged(self) -> bool:
@@ -291,13 +320,18 @@ def _compute(design: _Design, idx: npt.NDArray[np.int64]) -> _Effects:
 
     nde_rows = np.zeros(w.shape[0], dtype=np.float64)
     nie_rows = np.zeros(w.shape[0], dtype=np.float64)
+    te_rows = np.zeros(w.shape[0], dtype=np.float64)
     for k, m in enumerate(levels):
         nde_rows += (mu1[m] - mu0[m]) * p0[:, k]
         nie_rows += mu0[m] * (p1[:, k] - p0[:, k])
+        # The total effect E[Y(1, M(1))] - E[Y(0, M(0))], computed directly: with a
+        # treatment-by-mediator interaction it is not the pure NDE plus the pure NIE.
+        te_rows += mu1[m] * p1[:, k] - mu0[m] * p0[:, k]
     nde = float(np.mean(nde_rows))
     nie = float(np.mean(nie_rows))
+    total = float(np.mean(te_rows))
     cde = {m: float(np.mean(mu1[m] - mu0[m])) for m in levels}
-    return _Effects(nde=nde, nie=nie, total=nde + nie, cde=cde)
+    return _Effects(nde=nde, nie=nie, total=total, cde=cde)
 
 
 # -- guards and learner resolution -------------------------------------------
@@ -401,10 +435,28 @@ def _treatment_01(data: TabularData, name: str, treated: Any) -> npt.NDArray[np.
         values = np.asarray(data.column(name), dtype=np.float64)
         if set(np.unique(values).tolist()) <= {0.0, 1.0}:
             return values
+    n_levels = _n_levels(data, name)
+    if n_levels == 2:
+        hint = (
+            "it has two levels that are not coded 0/1, so pass treated=... to name "
+            "the level coded 1"
+        )
+    else:
+        hint = (
+            f"it has {n_levels} levels; treated= only picks one of two levels, so "
+            "recode it to two levels (for example a 0/1 column) first"
+        )
     raise NotImplementedError(
-        f"the mediation estimator needs a binary treatment; {name!r} is not binary. "
-        "Pass treated=... to pick a level, or use a two-level treatment"
+        f"the mediation estimator needs a binary treatment; {name!r} is not binary: {hint}"
     )
+
+
+def _n_levels(data: TabularData, name: str) -> int:
+    """The number of distinct values of a column (its cardinality when discrete)."""
+    col = data.schema[name]
+    if col.is_discrete and col.cardinality is not None:
+        return int(col.cardinality)
+    return int(np.unique(np.asarray(data.column(name))).shape[0])
 
 
 def _mediator_codes(data: TabularData, name: str) -> tuple[npt.NDArray[np.int64], tuple[int, ...]]:
@@ -413,8 +465,9 @@ def _mediator_codes(data: TabularData, name: str) -> tuple[npt.NDArray[np.int64]
     if not col.is_discrete:
         raise NotImplementedError(
             f"the g-computation estimator needs a discrete (binary or low-cardinality) "
-            f"mediator; {name!r} is {col.kind.value}. A continuous mediator needs the "
-            "density / imputation form (the multiply-robust path), not built"
+            f"mediator; {name!r} is {col.kind.value}. A continuous mediator needs a "
+            "density or imputation estimator, which is not available; discretize it "
+            "into a few levels to use this estimator"
         )
     card = col.cardinality or 0
     if card > _MAX_MEDIATOR_LEVELS:
@@ -485,9 +538,11 @@ def estimate_mediation(
     with a continuous or binary outcome. ``learner`` is an alias, a learner, or a
     ``{"outcome": ..., "mediator": ...}`` mapping (the mediator slot needs a
     classifier). ``treated`` names the treatment level coded to 1. The standard
-    errors are a nonparametric bootstrap over the rows at ``random_state``.
+    errors are a nonparametric bootstrap over the rows at ``random_state``, with the
+    models averaged over the full sample's covariates (so they are for the
+    sample-average effect; see the module notes).
 
-    A continuous mediator raises (the density / multiply-robust path is not built);
+    A continuous mediator raises (it needs a density estimator, not available);
     a non-binary treatment raises. Returns a :class:`MediationEstimate` with a
     :class:`~ergodic.inference.Design` record naming the (untestable) cross-world
     assumption.
@@ -532,7 +587,7 @@ def estimate_mediation(
         outcome=outcome,
         treatment=treatment,
         assumptions=ident.assumptions,
-        estimand=f"NDE = {ident.nde_estimand}; NIE = {ident.nie_estimand}",
+        estimand=f"{ident.nde_estimand}; {ident.nie_estimand}",
     )
     return MediationEstimate(
         nde=_to_estimate(point.nde, boot["nde"], n, "nde"),
@@ -579,7 +634,7 @@ def _bootstrap(
             eff = _compute(design, idx)
         except (ValueError, ZeroDivisionError, np.linalg.LinAlgError):
             continue
-        if not (np.isfinite(eff.nde) and np.isfinite(eff.nie)):
+        if not (np.isfinite(eff.nde) and np.isfinite(eff.nie) and np.isfinite(eff.total)):
             continue
         nde[filled] = eff.nde
         nie[filled] = eff.nie

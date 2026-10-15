@@ -170,7 +170,7 @@ class PCMCI:
                 frame = shallow
                 deep_lag = self.max_lag
                 flags["mci_truncated"] = 1.0
-        oracle = resolve_test(self.test, frame)
+        oracle = resolve_test(self.test, frame, algorithm=type(self).__name__)
         names = sorted(data.variables)
         banned, removed, seeds, n_pruned = _knowledge_maps(knowledge, names, self.max_lag)
 

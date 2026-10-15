@@ -1,0 +1,123 @@
+# API-143 / DEC-078: the Graphite documentation site.
+# Pull requests and pushes to main only build and check the site. Publishing happens
+# only for a published GitHub release (or a manual dispatch naming its tag), after the
+# package is on PyPI: that run checks out the release tag, runs every notebook and
+# deploys site/ to GitHub Pages.
+# Before the first publish the owner must (1) allow the release tags (v*) in the
+# deployment rules of the `github-pages` environment, which by default admits only the
+# default branch, and (2) set the custom domain docs.ergodic.dev in the Pages settings (the
+# build also writes CNAME). Actions are pinned by full commit SHA.
+name: Documentation
+on:
+  pull_request:
+    paths:
+      - "docsite/**"
+      - "scripts/docsite/**"
+      - "src/**"
+      - "docs/learn/**"
+      - "docs/case-studies/**"
+      - "tests/test_docsite.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag to document and publish (for example v0.2.0)
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: docs-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  UV_VERSION: "0.9.5"
+  # CI also runs page programs marked slow (make check skips them locally).
+  DOCS_SLOW: "1"
+  # Set only for a release or dispatch run; empty for check-only builds.
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG && format('refs/tags/{0}', env.RELEASE_TAG) || github.ref }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      # ergodic.welt imports welt-client (0.13 is on PyPI). Every build installs the
+      # welt extra and requires the ergodic.welt reference page, so neither a check nor
+      # a release can publish without it.
+      - name: Install the Welt bridge
+        run: |
+          uv sync --frozen --extra welt
+          echo "DOCS_REQUIRE_OPTIONAL=1" >> "$GITHUB_ENV"
+          echo "UV_NO_SYNC=1" >> "$GITHUB_ENV"
+      - name: Builder tests
+        run: uv run pytest -q tests/test_docsite.py
+      - name: Run page programs, check excerpts, recorded outputs and links
+        run: make docs-check
+      - name: Release tags must match the package version
+        if: env.RELEASE_TAG != ''
+        run: |
+          version=$(uv run python -c "import ergodic; print(ergodic.__version__)")
+          test "v$version" = "$RELEASE_TAG"
+      - name: Rebuild retained versions from their own tags
+        run: |
+          for old in $(uv run python -c "import tomllib; print(' '.join(tomllib.load(open('docsite/site.toml', 'rb'))['versions']['previous']))"); do
+            git worktree add "../docs-v$old" "v$old"
+            (cd "../docs-v$old" && uv sync --frozen && uv run python -m scripts.docsite build --allow-undocumented --output "$GITHUB_WORKSPACE/site")
+          done
+      - name: Build the current version
+        run: uv run python -m scripts.docsite build --output site --report site-report/reference-coverage.json
+      - run: uv run python -m scripts.docsite links site
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-site
+          path: site
+          retention-days: 7
+      - if: env.RELEASE_TAG != ''
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  notebooks:
+    # Notebooks never run at build time; a release runs them all once.
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv python install 3.12
+      - run: uv sync --frozen --group docs
+      - run: make docs-notebooks
+
+  publish:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: [build, notebooks]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

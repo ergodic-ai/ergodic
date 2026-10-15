@@ -38,7 +38,7 @@ class EffectEstimate:
     estimator: str
     learners: Mapping[str, str]
     n: int
-    kind: str  # "analytic", "bootstrap", or "posterior"
+    kind: str  # "analytic", "bootstrap", "posterior", "point", or "placebo"
     diagnostics: Mapping[str, float] = field(default_factory=dict)
     _point: float | None = None
     _std_error: float | None = None
@@ -90,7 +90,7 @@ class EffectEstimate:
         if se is not None:
             lo, hi = self.interval()
             body += f", se={se:.3g}, 95% CI [{lo:.3g}, {hi:.3g}]"
-        return f"EffectEstimate({self.estimator}, {self.kind}: {body}, n={self.n})"
+        return f"{type(self).__name__}({self.estimator}, {self.kind}: {body}, n={self.n})"
 
 
 def _summary_fields(estimate: EffectEstimate) -> dict[str, Any]:

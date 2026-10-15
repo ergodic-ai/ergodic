@@ -31,8 +31,10 @@ def discover(
 ) -> DiscoveryResult:
     """Learn causal structure from ``data`` with the named ``method``.
 
-    ``test`` feeds a constraint method (a :class:`CITest` instance, bound or
-    not, or an alias like ``"linear"``); ``score`` feeds a score-based method
+    ``test`` feeds a constraint method (a :class:`CITest` instance built
+    without data, since ``discover`` binds it to ``data``, or an alias like
+    ``"linear"``; a bound test runs through the algorithm class, as in
+    ``PC(test=GCM(data)).fit()``); ``score`` feeds a score-based method
     (a :class:`Score` instance or an alias like ``"bic"``, ``"bdeu"``); both
     default to ``"auto"``, picked from the column schema. Each algorithm
     declares which ingredient it consumes. Extra keyword arguments pass to
@@ -49,7 +51,20 @@ def discover(
     ``"glasso"`` (a sparse precision estimate). They reject ``test=`` and
     ``score=``, and ``alpha`` does not apply (their own knobs, like ``lam``
     or ``prune``, pass through the keyword arguments).
+
+    ``method="welt:<model>"`` (for example ``"welt:arrow"``) runs a hosted Welt
+    model through :func:`ergodic.welt.discover`, one paid Welt job. It needs
+    ``pip install "ergodic[welt]"``, takes no test, score or ``alpha``, and
+    passes only ``client``, ``seed``, ``timeout`` and ``decoder`` through the
+    keyword arguments; anything else raises before any request. ``knowledge``
+    is refused unless ``decoder=`` asks for local decoding of the model's edge
+    scores (:func:`ergodic.decode`), which is also what lets a non-DAG model
+    such as ``"welt:avici"`` return a (decoded) DAG.
     """
+    if method.lower().startswith("welt:"):
+        return _welt(
+            data, method, test=test, score=score, knowledge=knowledge, alpha=alpha, **kwargs
+        )
     cls = algorithm_for(method)
     result: DiscoveryResult
     if cls.ingredient is None:
@@ -68,3 +83,36 @@ def discover(
     chosen_score = score if score is not None else "auto"
     result = cls(score=chosen_score, **kwargs).fit(data, knowledge=knowledge)
     return result
+
+
+def _welt(
+    data: Any,
+    method: str,
+    *,
+    test: Any,
+    score: Any,
+    knowledge: DomainKnowledge | None,
+    alpha: float,
+    **kwargs: Any,
+) -> DiscoveryResult:
+    """Hand a ``welt:<model>`` method to :mod:`ergodic.welt`, imported only now."""
+    if test is not None or score is not None:
+        raise ValueError(f"method {method!r} runs a Welt model; it takes no test or score")
+    if alpha != 0.05:
+        raise ValueError(
+            f"method {method!r} runs a Welt model; alpha is a local test setting and does not apply"
+        )
+    local = sorted(set(kwargs) - {"client", "seed", "timeout", "decoder"})
+    if local:
+        raise ValueError(
+            f"method {method!r} runs a Welt model and takes only client, seed, timeout "
+            f"and decoder; got {local}"
+        )
+    try:
+        from ..welt import discover as welt_discover
+    except ImportError as error:
+        raise ImportError(
+            f"method {method!r} needs welt-client: pip install 'ergodic[welt]'"
+        ) from error
+    model = method.split(":", 1)[1]
+    return welt_discover(data, model, knowledge=knowledge, **kwargs)

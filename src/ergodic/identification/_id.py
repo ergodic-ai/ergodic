@@ -57,8 +57,7 @@ class Hedge(Exception):
 
     The witness is the ``(nodes, district)`` summary of the failing subproblem,
     enough to mark non-identifiability and to seed the bounds. The explicit
-    minimal C-forest pair (the rooted forests of Shpitser-Pearl) is not extracted
-    yet; that is a refinement for later.
+    minimal C-forest pair (the rooted forests of Shpitser-Pearl) is not extracted.
     """
 
     nodes: frozenset[str]
@@ -96,6 +95,7 @@ class IDResult:
         return self.identifiable
 
     def render(self) -> str:
+        """Return a readable result: the estimand, the hedge, or ``"not identifiable"``."""
         if self.identifiable and self.functional is not None:
             return self.functional.render()
         if self.hedge is not None:

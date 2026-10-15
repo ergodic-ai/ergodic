@@ -115,9 +115,9 @@ print(verdict.estimand)
 #
 # ## Knowledge breaks the tie
 #
-# You know something the data doesn't: seasons are not caused by marketing budgets. Say
-# exactly that, as the tier ordering from the [knowledge guide](../knowledge.md), and
-# discovery folds it in:
+# You know something the data doesn't: seasons are not caused by marketing budgets. Say exactly
+# that, as the tier ordering from the
+# [domain knowledge guide](../../docsite/pages/domain-knowledge.md), and discovery folds it in:
 
 # %%
 from ergodic import DomainKnowledge
@@ -300,11 +300,11 @@ fig.tight_layout()
 # orient, the mixed face that recorded your judgment call, the circle that priced in a
 # confounder nobody logged, the refusal that named its reason.
 #
-# What you saw is a slice. Discovery has score-based searches and learner-driven tests for
-# nonlinear worlds ([the discovery guide](../discovery.md)), estimation has the estimator
-# library and the Bayesian path ([inference](../inference.md)), identification generalizes
-# further than adjustment ([identification](../identification.md)), and the parts of the
-# subject the library doesn't do yet, selection bias, time series, the do-calculus, are
-# listed at the end of each guide rather than implied away. Simulation was the teacher
-# throughout, and it's yours to keep: when you wonder whether a method survives a world,
+# What you saw is a slice. Discovery has score-based searches and learner-driven tests for nonlinear
+# worlds ([choosing a method](../../docsite/pages/choose-a-method.md)) and discovery from time
+# series, estimation has a library of estimators
+# ([estimating an average effect](../../docsite/pages/estimate-average-effect.md)), and
+# identification generalizes further than adjustment, to the front door, instruments and the full
+# do-calculus ([identifying an effect](../../docsite/pages/identify-an-effect.md)). Simulation was
+# the teacher throughout, and it's yours to keep: when you wonder whether a method survives a world,
 # build the world and check. The answer key is one `rng` away.

@@ -7,7 +7,7 @@ identification layer already reads). This module is the pure, pymc-free analysis
 that turns the projected ADMG into the bookkeeping the fit and the generative model
 need: which latents exist, which nodes each touches, which node anchors each
 latent's sign gauge, and which districts are confounded (so fit jointly) versus
-singletons (so fit per node, the MVP path).
+singletons (so fit per node).
 
 One latent per bidirected edge, named ``L__{u}__{v}`` for the sorted endpoint pair.
 The gauge anchor is the first endpoint ``u``: its loading on ``L__u__v`` is pinned
@@ -43,7 +43,7 @@ class LatentStructure:
       the first endpoint of those edges), so its loading on them is pinned positive.
     - ``confounded_districts``: districts carrying a bidirected edge (fit jointly),
       each a sorted tuple of nodes.
-    - ``singletons``: nodes whose district is a lone node (fit per node, MVP path).
+    - ``singletons``: nodes whose district is a lone node (fit per node).
     - ``node_district``: node -> its district as a sorted tuple.
     """
 

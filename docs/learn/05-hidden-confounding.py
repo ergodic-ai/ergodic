@@ -233,5 +233,5 @@ fig.tight_layout()
 # that was always going to be an argument.
 #
 # One assumption has run under this whole series so far: that you can draw the graph at
-# all. The [last guide](06-discovering-structure.py) drops it, and lets the data draw the
+# all. The [next guide](06-discovering-structure.py) drops it, and lets the data draw the
 # graph, including an honest mark for "a hidden confounder might live here".

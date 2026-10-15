@@ -12,6 +12,7 @@ from .._estimator import (
     Slot,
     Task,
     _AdjustmentBase,
+    _covariate_columns,
     _covariate_matrix,
     _MetaLearnerBase,
     _outcome_vector,
@@ -64,6 +65,7 @@ class DML(_AdjustmentBase):
         covariates = identification.adjustment_set or frozenset()
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
+        self._covariate_columns, self._covariate_variables = _covariate_columns(data, covariates)
         a = self._treatment_vector(data, treatment, allow_continuous=True)
         y, y_binary = _outcome_vector(data, outcome)
         z = _covariate_matrix(data, covariates)
@@ -198,7 +200,8 @@ class DML(_AdjustmentBase):
             covariates=z,
             treatment=a,
             outcome=y,
-            covariate_names=self._covariates,
+            covariate_names=self._covariate_columns,
+            covariate_variables=self._covariate_variables,
         )
 
 

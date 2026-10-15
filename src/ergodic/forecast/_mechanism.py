@@ -403,9 +403,9 @@ def assign_mechanisms(
         column = data.schema[node]
         if not column.is_continuous:
             raise NotImplementedError(
-                f"column {node!r} is {column.kind.value}, and count and categorical "
-                "mechanisms are a reserved seam; write a custom TemporalMechanism or "
-                "exclude the column"
+                f"column {node!r} is {column.kind.value}, and there are no built-in "
+                "count or categorical forecast mechanisms; write a custom "
+                "TemporalMechanism or exclude the column"
             )
         out[node] = StructuralMechanism(period=period, robust=robust)
     return out

@@ -33,9 +33,17 @@ class Learner(Protocol):
         X: npt.NDArray[np.float64],
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Fit the learner to features ``X`` and target ``y``.
 
-    def predict(self, X: npt.NDArray[np.float64]) -> Any: ...
+        Args:
+            X: A 2-D feature matrix.
+            y: The target, one value per row.
+            sample_weight: Optional per-row weights.
+        """
+
+    def predict(self, X: npt.NDArray[np.float64]) -> Any:
+        """Return predictions for the rows of ``X``."""
 
 
 @runtime_checkable
@@ -58,11 +66,20 @@ class BayesianLearner(Protocol):
         X: npt.NDArray[np.float64],
         y: npt.NDArray[np.float64],
         sample_weight: npt.NDArray[np.float64] | None = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Fit the learner to features ``X`` and target ``y``.
 
-    def predict(self, X: npt.NDArray[np.float64]) -> Any: ...
+        Args:
+            X: A 2-D feature matrix.
+            y: The target, one value per row.
+            sample_weight: Optional per-row weights.
+        """
 
-    def predict_draws(self, X: npt.NDArray[np.float64]) -> Any: ...
+    def predict(self, X: npt.NDArray[np.float64]) -> Any:
+        """Return the posterior predictive mean for the rows of ``X``."""
+
+    def predict_draws(self, X: npt.NDArray[np.float64]) -> Any:
+        """Return ``(S, n)`` posterior draws of the mean function at the rows of ``X``."""
 
 
 _ALIASES: dict[str, type] = {
@@ -93,10 +110,33 @@ def _as_learner(spec: Any, *, want_classifier: bool = False) -> Learner:
     raise TypeError(f"a learner needs fit and predict; got {type(spec)!r}")
 
 
+def _own_clone(learner: Learner) -> Any:
+    """The learner's own ``__sklearn_clone__``, unless it is scikit-learn's default.
+
+    scikit-learn's ``BaseEstimator`` defines the hook for every estimator; those keep
+    the ``get_params`` path below, so only a learner that overrides the hook (a
+    remote learner sharing its client and fit budget with its clones) uses it.
+    """
+    for klass in type(learner).__mro__:
+        if "__sklearn_clone__" in vars(klass):
+            if klass.__module__.split(".")[0] == "sklearn":
+                return None
+            return learner.__sklearn_clone__  # type: ignore[attr-defined]
+    return None
+
+
 def _fresh(learner: Learner) -> Learner:
-    """An unfitted clone, so a resample or an arm never reuses fitted state."""
+    """An unfitted clone, so a resample or an arm never reuses fitted state.
+
+    A learner that overrides ``__sklearn_clone__`` (the scikit-learn clone protocol)
+    clones itself; otherwise the clone is rebuilt from ``get_params`` with deep-copied
+    values, or deep-copied whole.
+    """
     import copy
 
+    own_clone = _own_clone(learner)
+    if own_clone is not None:
+        return cast("Learner", own_clone())
     if hasattr(learner, "get_params"):
         try:
             # deep=True would add nested "step__param" keys that no constructor takes

@@ -4,25 +4,32 @@
 A shallow decision tree that assigns a binary treatment to maximize doubly-robust
 welfare (Athey-Wager 2021; Zhou-Athey-Wager 2023). With the cross-fit AIPW score
 ``Gamma_i`` (its conditional mean is the CATE), the value of a policy
-``pi: X -> {0, 1}`` is the empirical welfare
+``pi: X -> {0, 1}``, measured against treating no one, is the empirical welfare
+gain in outcome units
 
-    W(pi) = mean_i[(2 pi(X_i) - 1) Gamma_i]
-          = mean_i[pi(X_i) Gamma_i^(1) + (1 - pi(X_i)) Gamma_i^(0)]   (up to a constant),
+    V(pi) = mean_i[pi(X_i) Gamma_i]
+          = mean_i[pi(X_i) Gamma_i^(1) + (1 - pi(X_i)) Gamma_i^(0)] - mean_i[Gamma_i^(0)].
 
-so a leaf that covers a set of units is best treated (action 1) when the sum of the
-scores over the leaf is positive and best left untreated (action 0) otherwise; the
-leaf's welfare contribution is then ``|sum Gamma|``. Maximizing welfare over a
+The search maximizes the equivalent objective ``mean_i[(2 pi(X_i) - 1) Gamma_i] =
+2 V(pi) - mean_i[Gamma_i]`` (the same argmax), so a leaf that covers a set of
+units is best treated (action 1) when the sum of the scores over the leaf is
+positive and best left untreated (action 0) otherwise; the leaf's contribution to
+that objective is then ``|sum Gamma|``. Maximizing welfare over a
 depth-``k`` axis-aligned tree is therefore maximizing the sum of those leaf
 absolute-sums. At depth <= 2 the library searches every (feature, threshold) split
 exhaustively, which is the globally optimal regime (the Zhou-Athey-Wager guarantee);
 a deeper tree falls back to a greedy recursive best-split, which is documented and
 is not guaranteed optimal.
 
-The inference discipline is the one the rest of the Tier-B layer follows: the tree
-STRUCTURE is a point estimate (no interval on which split is "the" split), but the
-policy VALUE and the regret against treat-all / treat-none are honest, because they
-are sample means of the per-unit influence terms ``(2 pi(X_i) - 1) Gamma_i`` and so
-inherit a root-n central limit theorem from the orthogonal score.
+The tree STRUCTURE is a point estimate (no interval on which split is "the"
+split). The policy VALUE reported on the tree is the sample mean of the per-unit
+terms ``pi(X_i) Gamma_i`` over the same scores the tree was chosen to maximize, so
+it is optimistic: the search picked the rule that looks best on these units, noise
+included, and the standard error and interval do not account for that selection.
+For an honest value, learn the tree on one sample and score it on another with
+:meth:`PolicyTree.evaluate`: there the rule is fixed before the scores are seen,
+so the mean of ``pi(X_i) Gamma_i`` inherits a root-n central limit theorem from the
+orthogonal score.
 """
 
 from __future__ import annotations
@@ -33,6 +40,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import numpy.typing as npt
 
     from .._perunit import CATEResult
@@ -82,14 +91,58 @@ class PolicyNode:
 
 
 @dataclass(frozen=True)
+class PolicyValue:
+    """A fixed policy's value on a set of units, from :meth:`PolicyTree.evaluate`.
+
+    ``value`` is the mean outcome gain over treating no one (outcome units per
+    unit), ``std_error`` its standard error, and ``treat_all_value`` the
+    treat-everyone baseline (the ATE) on the same units. ``regret_std_error`` is
+    the standard error of ``regret("treat_all")``, from the paired per-unit terms
+    ``(pi(X_i) - 1) Gamma_i``.
+    """
+
+    value: float
+    std_error: float
+    treat_all_value: float
+    n: int
+    regret_std_error: float = float("nan")
+
+    def interval(self, level: float = 0.9) -> tuple[float, float]:
+        """A normal confidence interval for the value at ``level``."""
+        from .._stats import _norm_ppf
+
+        if not 0.0 < level < 1.0:
+            raise ValueError(f"level must be in (0, 1), got {level}")
+        z = _norm_ppf((1.0 + level) / 2.0)
+        return self.value - z * self.std_error, self.value + z * self.std_error
+
+    def regret(self, baseline: str = "treat_all") -> float:
+        """``value`` minus the ``"treat_all"``, ``"treat_none"``, or ``"best_trivial"`` value."""
+        if baseline == "treat_all":
+            return self.value - self.treat_all_value
+        if baseline == "treat_none":
+            return self.value
+        if baseline == "best_trivial":
+            return self.value - max(self.treat_all_value, 0.0)
+        raise ValueError(
+            f"baseline must be 'treat_all', 'treat_none', or 'best_trivial', got {baseline!r}"
+        )
+
+
+@dataclass(frozen=True)
 class PolicyTree:
     """A shallow doubly-robust optimal-policy tree with its value and regret.
 
     ``root`` is the learned tree over the named ``covariates``; :meth:`predict` and
     :meth:`assign` evaluate it. ``value``/``std_error`` are the estimated policy
-    value ``W(pi_hat)`` and its standard error from the per-unit influence terms;
-    ``treat_all_value`` and ``treat_none_value`` are the two trivial baselines, and
-    :meth:`regret` is the value gap against either. ``depth`` is the requested depth
+    value ``V(pi_hat) = mean[pi_hat(X) Gamma]`` and its standard error from the
+    per-unit influence terms, in outcome units per unit and measured against
+    treating no one (the mean outcome gain of following the rule rather than
+    treating nobody). On that scale ``treat_none_value`` is 0 and
+    ``treat_all_value`` is the doubly-robust ATE, and :meth:`regret` is the value
+    gap against either, also in outcome units per unit. These are measured on the
+    units the tree was learned on, so they are optimistic (see
+    :meth:`evaluate` for the value on held-out units). ``depth`` is the requested depth
     and ``exhaustive`` records whether the globally optimal search was used.
     """
 
@@ -106,6 +159,10 @@ class PolicyTree:
     outcome: str = ""
     _scores: npt.NDArray[np.float64] = field(default_factory=lambda: np.empty(0), repr=False)
     _design: npt.NDArray[np.float64] = field(default_factory=lambda: np.empty((0, 0)), repr=False)
+    #: For each variable behind a split column, every design column the training
+    #: scores encoded it as (a categorical's whole one-hot block), so evaluate()
+    #: can refuse held-out scores that encode it differently.
+    _blocks: Mapping[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
 
     # -- evaluation ----------------------------------------------------------
 
@@ -125,7 +182,11 @@ class PolicyTree:
         return self.predict(self._design)
 
     def interval(self, level: float = 0.9) -> tuple[float, float]:
-        """A normal confidence interval for the policy value at ``level``."""
+        """A normal interval for the in-sample policy value at ``level``.
+
+        It ignores that the tree was chosen to maximize this value, so it is
+        optimistic; :meth:`evaluate` gives a valid interval on held-out units.
+        """
         from .._stats import _norm_ppf
 
         if not 0.0 < level < 1.0:
@@ -137,8 +198,9 @@ class PolicyTree:
         """The learned policy's welfare GAIN over a trivial baseline (the baseline's regret).
 
         ``baseline`` is ``"treat_all"``, ``"treat_none"``, or ``"best_trivial"`` (the
-        better of the two). Returns ``value - baseline_value``: how much welfare the
-        learned rule adds over treating everyone / no one. The trivial constant
+        better of the two). Returns ``value - baseline_value``: how much the mean
+        outcome per unit rises under the learned rule compared with treating
+        everyone / no one, in outcome units. The trivial constant
         policies are depth-0 leaves inside the tree's class, so the optimal tree is at
         least as good and this gain is non-negative up to sampling noise (it is the
         baseline's regret against the learned optimum, not the optimum's own regret,
@@ -155,6 +217,56 @@ class PolicyTree:
                 f"baseline must be 'treat_all', 'treat_none', or 'best_trivial', got {baseline!r}"
             )
         return self.value - ref
+
+    def evaluate(self, result_or_scores: CATEResult | DRScores) -> PolicyValue:
+        """The learned rule's value on other units: the honest, out-of-sample value.
+
+        ``result_or_scores`` carries doubly-robust scores for units the tree was not
+        learned on (a :class:`~ergodic.inference.CATEResult` from a held-out sample,
+        or a :class:`~ergodic.inference._scores.DRScores`); its covariates must
+        include the tree's split covariates by name, encoded the same way: a
+        categorical with three or more levels is split on per-level columns
+        (``"C==level"``), and held-out scores whose data has different categories for
+        it (a level missing or new) raise, since the same column would mean a
+        different group. Build both datasets with the same categories (for example
+        one ``pandas.Categorical`` dtype). Passing the learning sample's own result
+        reproduces the optimistic in-sample :attr:`value`. Returns a :class:`PolicyValue`:
+        the mean of ``pi(X_i) Gamma_i`` there (outcome units, against treating no
+        one), its standard error, and the treat-all baseline on the same units.
+        Because the rule was fixed before these scores were seen, the interval is
+        valid, unlike the in-sample :attr:`value` the search maximized.
+        """
+        scores, design, names, variables, _, _ = _extract(result_or_scores)
+        for variable, block in self._blocks.items():
+            held = tuple(c for c, v in zip(names, variables, strict=True) if v == variable)
+            if set(held) != set(block):
+                raise ValueError(
+                    f"the evaluation scores encode {variable!r} as {list(held)} but the "
+                    f"tree was learned with {list(block)}; its categories differ between "
+                    "the two datasets, so a column would name a different group. Build "
+                    "both with the same categories"
+                )
+        index = {name: i for i, name in enumerate(names)}
+        missing = [name for name in self.covariates if name not in index]
+        if missing:
+            raise ValueError(
+                f"the evaluation scores lack the tree's split covariates {missing}; "
+                f"they carry {list(names)}"
+            )
+        n = scores.shape[0]
+        if n < 2:
+            raise ValueError(f"evaluate needs at least 2 units, got {n}")
+        x = design[:, [index[name] for name in self.covariates]]
+        actions = self.predict(x).astype(np.float64)
+        influence = actions * scores
+        regret_terms = (actions - 1.0) * scores
+        return PolicyValue(
+            value=float(np.mean(influence)),
+            std_error=float(np.std(influence, ddof=1) / np.sqrt(n)),
+            treat_all_value=float(np.mean(scores)),
+            n=n,
+            regret_std_error=float(np.std(regret_terms, ddof=1) / np.sqrt(n)),
+        )
 
     def leaves(self) -> list[PolicyNode]:
         """The leaf nodes, left to right (each carries its action, count, and value)."""
@@ -355,8 +467,15 @@ def _greedy_split(
 
 def _extract(
     result_or_scores: CATEResult | DRScores,
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], tuple[str, ...], str, str]:
-    """Pull the AIPW scores, the covariate design, and the names out of either input."""
+) -> tuple[
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    str,
+]:
+    """Pull the AIPW scores, the design, its column names and their variables."""
     from .._perunit import CATEResult
     from .._scores import DRScores
 
@@ -378,6 +497,7 @@ def _extract(
         np.asarray(scores_obj.scores, dtype=np.float64),
         np.asarray(scores_obj.covariates, dtype=np.float64),
         tuple(scores_obj.covariate_names),
+        tuple(scores_obj.column_variables),
         scores_obj.treatment if isinstance(scores_obj.treatment, str) else "",
         scores_obj.outcome if isinstance(scores_obj.outcome, str) else "",
     )
@@ -386,20 +506,33 @@ def _extract(
 def _select_columns(
     design: npt.NDArray[np.float64],
     all_names: tuple[str, ...],
+    variables: tuple[str, ...],
     covariates: str | tuple[str, ...] | list[str] | None,
 ) -> tuple[npt.NDArray[np.float64], tuple[str, ...]]:
-    """Restrict the design to the requested split covariates by name."""
+    """Restrict the design to the requested split covariates by name.
+
+    A name is a design column (``"Z"``, ``"C==b"``) or a variable, which selects
+    every column encoding it (a categorical's whole one-hot block).
+    """
     if covariates is None:
         return design, all_names
     requested = (covariates,) if isinstance(covariates, str) else tuple(covariates)
     if not requested:
         raise ValueError("covariates is empty; pass at least one covariate name or None for all")
     index = {name: i for i, name in enumerate(all_names)}
-    missing = [name for name in requested if name not in index]
+    cols: list[int] = []
+    missing: list[str] = []
+    for name in requested:
+        if name in index:
+            picked = [index[name]]
+        else:
+            picked = [i for i, variable in enumerate(variables) if variable == name]
+        if not picked:
+            missing.append(name)
+        cols.extend(i for i in picked if i not in cols)
     if missing:
         raise ValueError(f"unknown split covariates {missing}; available: {list(all_names)}")
-    cols = [index[name] for name in requested]
-    return design[:, cols], requested
+    return design[:, cols], tuple(all_names[i] for i in cols)
 
 
 def policy_tree(
@@ -413,8 +546,12 @@ def policy_tree(
     ``result_or_scores`` is a :class:`~ergodic.inference.CATEResult` (its cached
     cross-fit scores are read) or a :class:`~ergodic.inference._scores.DRScores`
     directly. ``covariates`` names the split covariates (a name, a list of names, or
-    ``None`` for every covariate carried by the scores). The tree maximizes the
-    doubly-robust welfare ``W(pi) = mean[(2 pi(X) - 1) Gamma_i]``; at ``depth <= 2``
+    ``None`` for every covariate carried by the scores). A categorical covariate with
+    three or more levels is carried as one indicator column per non-first level,
+    named ``"C==level"``; naming the variable ``"C"`` selects its whole block, and
+    the tree's ``covariates`` lists the columns it can split on. The tree maximizes the
+    doubly-robust welfare ``V(pi) = mean[pi(X) Gamma_i]`` (the mean outcome gain over
+    treating no one, in outcome units); at ``depth <= 2``
     the search is exhaustive over thresholds and so globally optimal, and a deeper
     tree uses a greedy recursive best-split (documented, not guaranteed optimal).
 
@@ -424,11 +561,18 @@ def policy_tree(
     """
     if depth < 1:
         raise ValueError(f"depth must be at least 1, got {depth}")
-    scores, full_design, all_names, treatment, outcome = _extract(result_or_scores)
+    scores, full_design, all_names, variables, treatment, outcome = _extract(result_or_scores)
     n = scores.shape[0]
     if n < 2:
         raise ValueError(f"policy_tree needs at least 2 units, got {n}")
-    design, names = _select_columns(full_design, all_names, covariates)
+    design, names = _select_columns(full_design, all_names, variables, covariates)
+    variable_of = dict(zip(all_names, variables, strict=True))
+    blocks = {
+        variable_of[name]: tuple(
+            c for c, v in zip(all_names, variables, strict=True) if v == variable_of[name]
+        )
+        for name in names
+    }
 
     exhaustive = depth <= _EXHAUSTIVE_DEPTH
     if exhaustive:
@@ -437,11 +581,13 @@ def policy_tree(
         _, root = _greedy_split(scores, design, names, depth)
 
     actions = np.asarray([root.predict(row) for row in design], dtype=np.float64)
-    influence = (2.0 * actions - 1.0) * scores
+    # The value against treating no one, in outcome units: mean[pi(X) Gamma]. (The
+    # search's objective mean[(2 pi - 1) Gamma] is twice this minus the ATE.)
+    influence = actions * scores
     value = float(np.mean(influence))
     std_error = float(np.std(influence, ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
     treat_all = float(np.mean(scores))
-    treat_none = float(np.mean(-scores))
+    treat_none = 0.0
     return PolicyTree(
         root=root,
         covariates=names,
@@ -456,4 +602,5 @@ def policy_tree(
         outcome=outcome,
         _scores=scores,
         _design=design,
+        _blocks=blocks,
     )

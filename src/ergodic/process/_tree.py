@@ -5,9 +5,11 @@ A process tree is either a leaf (one activity, or the silent step :data:`TAU`)
 or an operator over at least two children: ``seq`` runs its children left to
 right, ``xor`` runs exactly one, ``par`` interleaves them, and
 ``loop(do, redo)`` runs the do body, then any number of redo-then-do rounds.
-Trees are immutable values with structural equality, and ``xor``/``par``
-children are kept in a canonical order (sorted by their activity alphabets),
-so a mined tree compares directly against one written by hand. The inductive
+Trees are immutable values with structural equality in a canonical form: a
+nested sequence is spliced into its parent (``seq(a, seq(b, c))`` is
+``seq(a, b, c)``), and ``xor``/``par`` children are kept sorted
+by their activity alphabets, so a mined tree compares directly against one
+written by hand. The inductive
 miner (:func:`~ergodic.process.discover_model`) produces them, and
 :meth:`ProcessTree.to_net` converts one to a workflow net that is sound by
 construction.
@@ -33,9 +35,13 @@ class ProcessTree:
     A leaf has no children and carries an activity ``label`` (or ``None``,
     which is the silent step :data:`TAU`). An operator node has ``op`` set,
     no label, and at least two children; ``loop`` takes exactly two, the do
-    body and the redo body. The children of ``xor`` and ``par`` are stored
-    sorted by their activity alphabets (a silent child first), so equal models
-    are equal objects regardless of how they were assembled.
+    body and the redo body. A ``seq`` child of a ``seq`` is spliced into its
+    parent (sequence is associative), and the children of ``xor`` and ``par`` are
+    stored sorted by their activity alphabets (a silent child first), so two trees
+    that differ only in that order or in how sequences were nested are equal
+    objects. Nested ``xor`` and ``par`` nodes are kept as built, so
+    ``xor(a, xor(b, c))`` and ``xor(a, b, c)`` describe the same behaviour but are
+    not equal.
     """
 
     op: str | None = None
@@ -56,6 +62,16 @@ class ProcessTree:
                 raise ValueError("loop takes exactly two children: the do body and the redo body")
         elif len(self.children) < 2:
             raise ValueError(f"{self.op} takes at least two children")
+        if self.op == "seq":
+            # seq is associative and a nested seq marks nothing: a seq child splices
+            # into its parent, so seq(a, seq(b, c)) is seq(a, b, c), the one
+            # canonical form a hand-written tree and a mined one share. A nested
+            # xor is kept, because decision_points reads each xor as its own
+            # decision, and a nested par is left as built.
+            flat: list[ProcessTree] = []
+            for child in self.children:
+                flat.extend(child.children if child.op == "seq" else (child,))
+            object.__setattr__(self, "children", tuple(flat))
         if self.op in ("xor", "par"):
             ordered = tuple(sorted(self.children, key=lambda child: child.activities()))
             object.__setattr__(self, "children", ordered)

@@ -5,7 +5,8 @@ RATE (script 05) tells you a predicted-effect *ranking* is good. But a ranking i
 not yet a decision -- you still have to draw the line. A policy tree draws it for
 you, and draws it interpretably: a shallow decision tree that reads the
 doubly-robust scores and returns a treat / don't-treat RULE, the one that maximizes
-welfare ``W(pi) = mean[(2 pi(X) - 1) * Gamma_i]`` (Athey-Wager 2021). At depth <= 2
+welfare ``V(pi) = mean[pi(X) * Gamma_i]``, the mean gain in outcome units over
+treating no one (Athey-Wager 2021). At depth <= 2
 the search over thresholds is exhaustive, so the rule is globally optimal, not
 greedy.
 
@@ -18,7 +19,8 @@ offer historically, so the graph says to adjust.
 What the script shows:
   - ``describe()`` prints the learned if-else rule -- a split on tenure near 0.
   - the policy VALUE beats both treat-all and treat-none (regret >= 0), with an
-    honest interval from the influence terms.
+    honest interval from the influence terms. The oracle value here is
+    ``E[2 tenure; tenure > 0] = 2 * phi(0) ~ 0.80`` spend-units per customer.
   - priced on a book of customers, the rule is worth real money over blanket.
   - RATE ranks; the policy tree is the rule that ranking implies.
 

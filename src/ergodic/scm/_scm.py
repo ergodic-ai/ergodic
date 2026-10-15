@@ -19,8 +19,9 @@ Queries:
 - :meth:`sample` -- observational draws.
 - :meth:`do` -- a lightweight intervened view for chaining
   (``scm.do({"X": 1}).sample(...)``).
-- :meth:`interventional` -- ``E[Y | do(X = x)]`` through ``pm.do``, carrying
-  parameter uncertainty.
+- :meth:`interventional` -- the distribution of ``Y`` under ``do(X = x)``
+  through ``pm.do``: posterior-predictive draws of the outcome, so the mean
+  estimates ``E[Y | do(X = x)]`` and the spread is that of ``Y`` itself.
 - :meth:`counterfactual` -- the explicit-noise twin-network counterfactual,
   abduct-then-predict, batched over units.
 - :meth:`ate` -- routed through :func:`~ergodic.identification.identify_effect`
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ..graph import GraphKind
 from ..graph._primitives import latent_projection, topological_order
 from ..identification import identify_effect
 from . import _compose
@@ -42,6 +44,7 @@ from ._bounds import Sensitivity, latent_prior_sweep, linear_sensitivity_curve
 from ._district import latent_structure
 from ._mechanism import CategoricalGumbelMax, GaussianAdditive, resolve_mechanism
 from ._result import CategoricalResult, SCMResult
+from ._sampling import using_cores
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -79,6 +82,12 @@ class SCM:
     non-identified effect still returns a :class:`~ergodic.scm.Sensitivity` through
     :meth:`ate`, never a naked point -- identification, not the fit, decides.
     Selection bias stays out of scope (identification raises on selection marks).
+    A CPDAG, MAG, PAG, or mixed graph is refused: pick one world first.
+
+    ``draws``, ``tune``, and ``chains`` set every NUTS run. ``cores`` caps the
+    worker processes PyMC may use for the chains (default 1, so chains run one
+    after another and a fit never fans out over the machine); raise it to run
+    chains in parallel. The draws do not depend on it.
     """
 
     def __init__(
@@ -90,9 +99,23 @@ class SCM:
         draws: int = 1000,
         tune: int = 1000,
         chains: int = 2,
+        cores: int = 1,
         random_state: int | None = None,
         district_size_cap: int = DISTRICT_SIZE_CAP,
     ) -> None:
+        if graph.kind not in (GraphKind.DAG, GraphKind.ADMG):
+            raise ValueError(
+                f"SCM fits a DAG or an ADMG (one causal world); got kind="
+                f"{graph.kind.value}. A MAG's or PAG's directed edges mean ancestry, not "
+                "direct causation, and a CPDAG/MAG/PAG stands for a class of graphs, so "
+                "fitting one as an ADMG would read the edges as mechanisms they are not. "
+                "Pick one member (consistent_extension or dags_of_cpdag for a CPDAG; for "
+                "a MAG/PAG, a DAG with explicit latents you can defend), or re-face a "
+                "graph you do read as one world with graph.as_kind('dag') or "
+                "graph.as_kind('admg')"
+            )
+        if cores < 1:
+            raise ValueError(f"cores must be at least 1, got {cores}")
         if not graph.is_admg():
             raise ValueError(
                 f"SCM fits a DAG or an ADMG (latent-confounded); got kind="
@@ -116,6 +139,7 @@ class SCM:
         self.draws = draws
         self.tune = tune
         self.chains = chains
+        self.cores = cores
         self.random_state = random_state
         self.district_size_cap = district_size_cap
 
@@ -140,7 +164,7 @@ class SCM:
         The parents come from the projected ADMG (so a projection-introduced edge is
         honored), and the mechanism is given its incident latents and the subset it
         anchors the sign gauge for. A Markovian node lists no latents and reduces to
-        the MVP mechanism exactly.
+        the plain mechanism exactly.
         """
         from dataclasses import replace
 
@@ -154,7 +178,7 @@ class SCM:
                     f"node {node!r} sits in a confounded district (incident latents "
                     f"{list(lats)}) but its mechanism {type(mech).__name__} is not a "
                     "built-in Gaussian/categorical, so it cannot carry latent loadings; "
-                    "a custom mechanism in a bidirected district is post-MVP"
+                    "custom mechanisms in a bidirected district are not supported"
                 )
             mech = replace(
                 mech,
@@ -184,17 +208,17 @@ class SCM:
 
     @property
     def fitted(self) -> bool:
+        """Whether every node's mechanism has been fitted."""
         return len(self._fits) == len(self.mechanisms)
 
     def fit(self, *, parallel: bool = False) -> SCM:
         """Fit every node's mechanism, per node for singletons, jointly per district.
 
-        A Markovian singleton district fits per node (cheap, exact, the MVP path); a
+        A Markovian singleton district fits per node (cheap and exact); a
         confounded district (nodes sharing a ``<->``) does not factorize -- the latent
         couples it -- so it fits as one joint NUTS block with the explicit latents,
-        the gauge, a non-centered parameterization, and a high ``target_accept`` (the
-        Track-D recipe). The composed posterior merges the two the same way it merges
-        per-node fits.
+        the gauge, a non-centered parameterization, and a high ``target_accept``. The
+        composed posterior merges the two the same way it merges per-node fits.
 
         Sequential by default (robust, CI-safe). ``parallel=True`` spreads the
         *singleton* nodes over a process pool with the BLAS/OMP threads pinned in the
@@ -204,17 +228,18 @@ class SCM:
         seed = 0 if self.random_state is None else self.random_state
         singletons = set(self._latent.singletons)
         single_mechs = {n: m for n, m in self.mechanisms.items() if n in singletons}
-        if parallel:
-            fits = self._fit_parallel(single_mechs, seed)
-        else:
-            fits = {
-                node: mech.fit(
-                    self.data, draws=self.draws, tune=self.tune, chains=self.chains, seed=seed
-                )
-                for node, mech in single_mechs.items()
-            }
-        for offset, nodes in enumerate(self._latent.confounded_districts):
-            fits.update(self._fit_district(nodes, seed + offset))
+        with using_cores(self.cores):
+            if parallel:
+                fits = self._fit_parallel(single_mechs, seed)
+            else:
+                fits = {
+                    node: mech.fit(
+                        self.data, draws=self.draws, tune=self.tune, chains=self.chains, seed=seed
+                    )
+                    for node, mech in single_mechs.items()
+                }
+            for offset, nodes in enumerate(self._latent.confounded_districts):
+                fits.update(self._fit_district(nodes, seed + offset))
         self._fits = fits
         return self
 
@@ -290,6 +315,7 @@ class SCM:
                     self.tune,
                     self.chains,
                     seed,
+                    self.cores,
                 ): node
                 for node, mech in mechanisms.items()
             }
@@ -320,7 +346,7 @@ class SCM:
         return self._observational(target, n=n, seed=self._seed(1))
 
     def marginal(self, target: str, n: int = 1000) -> SCMResult | CategoricalResult:
-        """Observational posterior-predictive draws of one node.
+        """Observational posterior-predictive draws of one node (``kind="predictive"``).
 
         A continuous node returns an :class:`SCMResult`; a categorical/binary node a
         :class:`CategoricalResult` (the per-category marginal), exactly as
@@ -344,7 +370,7 @@ class SCM:
         if isinstance(self.mechanisms[target], CategoricalGumbelMax):
             return self._categorical_result("sample", target, draws)
         return SCMResult(
-            query="sample", target=target, kind="posterior", identified=True, _draws=draws
+            query="sample", target=target, kind="predictive", identified=True, _draws=draws
         )
 
     def do(self, intervention: Mapping[str, DoValue]) -> InterventionView:
@@ -367,15 +393,22 @@ class SCM:
     def interventional(
         self, target: str, do: Mapping[str, DoValue] | None = None, *, n: int = 2000
     ) -> SCMResult | CategoricalResult:
-        """``E[Y | do(X = x)]`` and its posterior, through ``pm.do``.
+        """The distribution of ``target`` under ``do``, through ``pm.do``.
+
+        Returns posterior-predictive draws of the outcome for ``n`` units under the
+        intervention: each draw is one unit's ``Y`` (parameter uncertainty plus the
+        mechanism's noise). So ``value`` (the mean) estimates ``E[Y | do(X = x)]``,
+        while ``std_error`` and ``interval()`` describe the spread of ``Y`` itself,
+        not the uncertainty in that mean; the result's ``kind`` is
+        ``"predictive"`` and its repr says "predictive interval". For an effect
+        with a credible interval on the expectation, use :meth:`ate`.
 
         ``do`` maps each intervened node to its value (broadcast to a length-n
         vector internally, the verified shape gotcha; an integer code for a
         categorical/binary do-target, a float for a continuous one). ``target`` must
         not be an intervened node. A categorical target returns a
         :class:`CategoricalResult` (the post-intervention per-category marginal); a
-        continuous target an :class:`SCMResult`. Carries parameter-posterior
-        uncertainty via the merged ``idata``.
+        continuous target an :class:`SCMResult`.
         """
         self._require_fit()
         self._check_observable(target, "query target")
@@ -396,7 +429,7 @@ class SCM:
         if isinstance(self.mechanisms[target], CategoricalGumbelMax):
             return self._categorical_result("interventional", target, draws)
         return SCMResult(
-            query="interventional", target=target, kind="posterior", identified=True, _draws=draws
+            query="interventional", target=target, kind="predictive", identified=True, _draws=draws
         )
 
     # -- counterfactual ------------------------------------------------------
@@ -445,7 +478,7 @@ class SCM:
         # The twin-network counterfactual abducts the exact structural noise, which
         # is only valid for invertible mechanisms. A non-invertible (probabilistic-
         # only) node would need the genuinely wider abduction posterior, which is not
-        # in the MVP; refuse rather than reuse the exact residual and mislabel the
+        # implemented; refuse rather than reuse the exact residual and mislabel the
         # result. Every shipped mechanism is invertible, so this guards a future
         # mechanism, not today's worlds.
         non_invertible = sorted(n for n, m in self.mechanisms.items() if not _is_invertible(m))
@@ -453,7 +486,7 @@ class SCM:
             raise NotImplementedError(
                 f"node(s) {non_invertible} use a non-invertible (probabilistic-only) "
                 "mechanism; non-invertible-mechanism counterfactuals (the genuinely "
-                "wider abduction posterior) are not in the MVP. Every built-in "
+                "wider abduction posterior) are not supported. Every built-in "
                 "mechanism is invertible, so this only arises for a custom mechanism"
             )
         draws = _compose.counterfactual_continuous(
@@ -674,13 +707,15 @@ class SCM:
         clean and ``do`` severs the treatment from the district latent, leaving the
         identified value (the front-door mediated effect, the C1 world's 1.2). The
         **instrument** strategy still raises with a pointer to
-        :func:`~ergodic.inference.estimate_effect`: IV identification is linear and
-        rests on the instrument's exclusion restriction, which the latent-district fit
-        does not impose, so its treatment->outcome coefficient stays on the same
-        non-identified ridge as the bow. The **general ID functional** likewise
-        raises for now (verify-then-widen: its latent-fit do-contrast was not held to
-        ``estimate_effect`` to tolerance in this phase). ``engine="dml"`` is the
-        cross-fit reuse path (post-MVP; raises with a pointer for now).
+        :func:`~ergodic.inference.estimate_effect`: an instrument identifies the effect
+        only under parametric assumptions (a linear, homogeneous effect), not
+        nonparametrically, so the SCM's do-contrast, which claims no such assumption,
+        does not report it. The latent-district fit can land near the IV value, but
+        its posterior then leans on the priors along the confounding ridge. The
+        **general ID functional** likewise
+        raises (its latent-fit do-contrast was not verified against
+        ``estimate_effect`` to tolerance). ``engine="dml"`` is reserved for a
+        cross-fit reuse path that is not available; it raises with a pointer.
         """
         self._require_fit()
         self._check_node(treatment)
@@ -697,8 +732,8 @@ class SCM:
             return self._bounds(treatment, outcome, ident)
         if engine == "dml":
             raise NotImplementedError(
-                "engine='dml' (cross-fit reuse of the existing DML estimator) is "
-                "post-MVP; the default engine='posterior' returns the SCM plug-in "
+                "engine='dml' (cross-fit reuse of the existing DML estimator) is not "
+                "available; the default engine='posterior' returns the SCM plug-in "
                 "contrast. Use ergodic.estimate_effect(graph, data, X, Y, "
                 "strategy='dml') for a DML estimate"
             )
@@ -708,17 +743,16 @@ class SCM:
         # and front-door (the latent absorbs the X-Y confounding, so do() on the
         # treatment severs it from the district latent and the identified value
         # survives). Instruments and the general ID functional are NOT computed by
-        # this contrast (decision 3, verify-then-widen): IV rests on an exclusion
-        # restriction the latent fit does not impose, and the general functional was
-        # not validated to tolerance here, so both raise with a pointer rather than
-        # return a confident wrong number.
+        # this contrast: IV identifies only under parametric (linear, homogeneous)
+        # assumptions, and the general functional was not validated to tolerance here,
+        # so both raise with a pointer rather than return a number on a weaker footing.
         if ident.strategy not in ("adjustment", "null", "frontdoor"):
             raise NotImplementedError(
                 f"the effect of {treatment!r} on {outcome!r} is identified by the "
                 f"{ident.strategy!r} criterion, which the SCM latent-fit do-contrast "
                 f"does not yet compute (front-door, adjustment, and the null case do). "
                 f"Use estimate_effect(graph, data, {treatment!r}, {outcome!r}), which "
-                f"handles {ident.strategy}, or scm.ate(..., engine='dml')"
+                f"handles {ident.strategy}"
             )
         low, high = self._ate_levels(treatment, levels)
         draws = _compose.ate_contrast(
@@ -873,21 +907,22 @@ class SCM:
         order = tuple(n for n in self._order if n in set(nodes))
         latents = self._district_latents(tuple(nodes))
         observed = self._district_observed(order)
-        return latent_prior_sweep(
-            order,
-            {n: self.mechanisms[n] for n in order},
-            latents,
-            observed,
-            treatment=treatment,
-            outcome=outcome,
-            low=low,
-            high=high,
-            draws=self.draws,
-            tune=self.tune,
-            chains=self.chains,
-            seed=self._seed(8),
-            obstruction=obstruction,
-        )
+        with using_cores(self.cores):
+            return latent_prior_sweep(
+                order,
+                {n: self.mechanisms[n] for n in order},
+                latents,
+                observed,
+                treatment=treatment,
+                outcome=outcome,
+                low=low,
+                high=high,
+                draws=self.draws,
+                tune=self.tune,
+                chains=self.chains,
+                seed=self._seed(8),
+                obstruction=obstruction,
+            )
 
     # -- helpers -------------------------------------------------------------
 
@@ -899,7 +934,7 @@ class SCM:
     def _check_observable(self, node: str, role: str) -> None:
         """Reject a latent node where a fitted mechanism is required.
 
-        A latent node has no data column and no fitted mechanism (the MVP fits the
+        A latent node has no data column and no fitted mechanism (the SCM fits the
         observed margin), so intervening on it or reading its query would fail with
         an opaque ``KeyError`` from deep in the compose/PyMC path. Reject up front.
         """
@@ -949,7 +984,7 @@ class SCM:
         needs codes); a continuous node as floats. Only the *observed* nodes (those
         carrying a fitted mechanism) are read: a latent node has no column and is
         abducted implicitly into its district children's residuals (the district
-        counterfactual pins the latent at its factual value, the Track-D semantics),
+        counterfactual pins the latent at its factual value),
         so iterating ``self.graph.nodes`` would ``KeyError`` on the latent.
         """
         from ..data import Dataset as _Dataset
@@ -991,10 +1026,19 @@ class InterventionView:
         self.intervention = dict(intervention)
 
     def do(self, more: Mapping[str, DoValue]) -> InterventionView:
+        """Return a new view with ``more`` added to the intervention; later values win per node."""
         merged = {**self.intervention, **more}
         return InterventionView(self._scm, merged)
 
     def interventional(self, target: str, *, n: int = 2000) -> SCMResult | CategoricalResult:
+        """Return the distribution of ``target`` under the view's intervention.
+
+        The same as :meth:`SCM.interventional` with the view's do-map.
+
+        Args:
+            target: The node to read.
+            n: Number of simulated units.
+        """
         return self._scm.interventional(target, self.intervention, n=n)
 
     def sample(self, target: str, *, n: int = 2000) -> SCMResult | CategoricalResult:
@@ -1034,5 +1078,7 @@ def _fit_one(
     tune: int,
     chains: int,
     seed: int,
+    cores: int,
 ) -> FitResult:
-    return mech.fit(data, draws=draws, tune=tune, chains=chains, seed=seed)
+    with using_cores(cores):
+        return mech.fit(data, draws=draws, tune=tune, chains=chains, seed=seed)

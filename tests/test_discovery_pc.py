@@ -324,7 +324,7 @@ def test_bound_test_with_a_different_dataset_raises() -> None:
     rng = np.random.default_rng(0)
     data = tabular({"A": rng.normal(size=8), "B": rng.normal(size=8)})
     oracle = DSeparationOracle(dag(["A -> B"]))
-    with pytest.raises(ValueError, match="already bound"):
+    with pytest.raises(ValueError, match="takes no data"):
         PC(oracle).fit(data=data)
 
 

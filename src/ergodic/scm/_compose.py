@@ -16,19 +16,19 @@ What it owns:
   scalar; after ``do(X)`` node X leaves the predictive set, so a downstream node
   is read. Posterior uncertainty rides through the merged ``idata``.
 - **Counterfactuals, the explicit-noise twin network.** Abduct the units' noise on
-  the factual graph, then predict on an action branch that reuses it. The MVP
+  the factual graph, then predict on an action branch that reuses it. The SCM
   handles invertible mechanisms only: the additive-Gaussian abduction is the exact
   residual and the prediction is deterministic numpy over the parameter posterior
   (machine precision, the ``Y_cf = y + b(x' - x)`` anchor), and the categorical
   Gumbel-max abduction is the truncated-Gumbel numpy sampler. A general
   (non-invertible) node's counterfactual would need the genuinely wider abduction
-  posterior; that is post-MVP, so the SCM refuses it upstream rather than reuse the
+  posterior, which is not implemented, so the SCM refuses it upstream rather than reuse the
   exact-residual route.
 
 The gotchas, all handled here: ``do`` is a length-n vector; the intervened node
 leaves the predictive set; ``sample_posterior_predictive`` matches by name and is
 silent on a mismatch (one naming scheme everywhere); ``do`` returns a new model;
-arviz is v2 (``from_dict``).
+the merged posterior is a plain ``xarray.Dataset`` (see ``_merged_idata``).
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ from ._mechanism import (
     Mechanism,
     encode_parent_design,
 )
+from ._sampling import sampler_cores
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -63,17 +64,22 @@ def _merged_idata(fits: Mapping[str, FitResult]) -> Any:
     present them as a single chain of S draws. No joint sampling ever happened;
     this is the compose step the pressure-test validated (max |composed - joint|
     interventional mean 0.004).
+
+    The result is a plain posterior ``xarray.Dataset``, which
+    ``sample_posterior_predictive`` reads the same way on PyMC 5 (arviz 0.23,
+    Python 3.11) and PyMC 6 (arviz 1.x). ``az.from_dict`` is not portable here: arviz
+    0.23 would read a group-keyed dict as one variable named "posterior", and the
+    parameters would then be silently drawn from the prior.
     """
-    import arviz as az
+    import xarray as xr
 
     posterior: dict[str, Any] = {}
     for fit in fits.values():
         for pname, draws in fit.params.items():
             arr = np.asarray(draws, dtype=np.float64)
-            posterior[pname] = arr.reshape(1, arr.shape[0], *arr.shape[1:])
-    # arviz v2 keys the dict by group (DataTree); the posterior group is what
-    # sample_posterior_predictive reads its parameter draws from.
-    return az.from_dict({"posterior": posterior})
+            dims = ("chain", "draw", *(f"{pname}_dim_{i}" for i in range(arr.ndim - 1)))
+            posterior[pname] = (dims, arr.reshape(1, arr.shape[0], *arr.shape[1:]))
+    return xr.Dataset(posterior)
 
 
 def _resolved_mechanisms(
@@ -151,7 +157,7 @@ def fit_district(
     seed: int,
     target_accept: float = 0.95,
 ) -> dict[str, FitResult]:
-    """Joint NUTS fit of a confounded district, the Track-D recipe.
+    """Joint NUTS fit of a confounded district.
 
     A district whose nodes share a ``<->`` does not factorize -- the latent couples
     them -- so the district fits as one model rather than per node. Each latent is a
@@ -191,6 +197,7 @@ def fit_district(
             draws=draws,
             tune=tune,
             chains=chains,
+            cores=sampler_cores(chains),
             target_accept=target_accept,
             random_seed=seed,
             progressbar=False,

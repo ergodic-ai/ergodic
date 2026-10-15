@@ -8,7 +8,8 @@ object of inference).
 
   ``.blp()``    Best Linear Projection: regress the effect on the covariates. Each
                 slope is "how much does this covariate move the effect," with a valid
-                CI. The intercept is the ATE.
+                CI. The intercept is the effect at covariates all zero (the ATE
+                only when the covariates are centred).
   ``.gates()``  Sorted Group ATEs: bin units by predicted effect and report the true
                 effect per bin, plus the top-minus-bottom contrast. "Does the effect
                 rise across the predicted groups."

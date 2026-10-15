@@ -17,6 +17,14 @@ from ._marks import Mark
 if TYPE_CHECKING:
     import numpy.typing as npt
 
+GRAPH_FORMAT = "ergodic.graph/1"
+"""The serialization format :func:`to_dict` writes and :func:`from_dict` reads.
+
+A dict without a ``"format"`` field (written before the field existed, or by
+hand) is read as this version. Any other value is refused, so a reader never
+guesses at a layout it does not know.
+"""
+
 
 def _reject_parallel(graph: MixedGraph, op: str) -> None:
     """Raise if any node pair carries two edges (a bow from latent_projection).
@@ -57,7 +65,7 @@ def to_networkx(graph: MixedGraph) -> Any:
     return out
 
 
-def from_networkx(graph: Any, *, kind: GraphKind | None = None) -> MixedGraph:
+def from_networkx(graph: Any, *, kind: GraphKind | str | None = None) -> MixedGraph:
     """Build a :class:`MixedGraph` from a networkx graph.
 
     Edges with ``u_mark``/``v_mark`` data keep those marks. A plain edge is read
@@ -108,9 +116,14 @@ def to_adjacency(
 
 
 def to_dict(graph: MixedGraph) -> dict[str, Any]:
-    """Return a JSON-ready dict that :func:`from_dict` can read back."""
+    """Return a JSON-ready dict that :func:`from_dict` can read back.
+
+    The dict carries ``"format": GRAPH_FORMAT`` so a reader can check it
+    understands the layout before trusting it.
+    """
     _reject_parallel(graph, "to_dict")
     return {
+        "format": GRAPH_FORMAT,
         "kind": graph.kind.value,
         "nodes": graph.node_list(),
         "edges": [
@@ -125,8 +138,17 @@ def to_dict(graph: MixedGraph) -> dict[str, Any]:
 def from_dict(data: dict[str, Any]) -> MixedGraph:
     """Rebuild a graph from :func:`to_dict` output.
 
-    Two entries that disagree about one node pair raise ``ValueError``.
+    A missing ``"format"`` field reads as :data:`GRAPH_FORMAT`; any other
+    format raises ``ValueError``. ``kind`` defaults to ``"mixed"``, and
+    ``latent`` and ``selection`` default to empty. Two entries that disagree
+    about one node pair raise ``ValueError``.
     """
+    fmt = data.get("format", GRAPH_FORMAT)
+    if fmt != GRAPH_FORMAT:
+        raise ValueError(
+            f"unsupported graph format {fmt!r}; this version of ergodic reads "
+            f"{GRAPH_FORMAT!r} (a dict without a 'format' field is read as {GRAPH_FORMAT!r})"
+        )
     edges = _merge_edges(
         Edge.make(e["u"], Mark(e["u_mark"]), e["v"], Mark(e["v_mark"])) for e in data["edges"]
     )

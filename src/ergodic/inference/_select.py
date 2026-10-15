@@ -19,8 +19,8 @@ ranked report with the selected result.
 2024): convex weights over the candidates minimizing the DR loss of the ensemble
 with a Q penalty that pulls weight toward the individually-better models. The
 ensemble attains the oracle regret rate without any single candidate being close to
-the truth. Phase-2 lean: the convex DR-loss aggregate with the entropic Q mix;
-richer aggregation (cross-fit weight selection, the exact entropic dual) is deferred.
+the truth. The aggregate is the convex DR-loss one with the entropic Q mix; richer
+aggregation (cross-fit weight selection, the exact entropic dual) is not implemented.
 """
 
 from __future__ import annotations
@@ -156,7 +156,7 @@ def select_cate(
     """Fit and rank candidate CATE learners by the doubly-robust tau-risk.
 
     Identifies the effect (the same back-door gate as :func:`~ergodic.inference.cate`),
-    fits each candidate in ``candidates`` (default the Phase-1 registered meta-learners
+    fits each candidate in ``candidates`` (default the registered meta-learners
     ``dr_learner``/``r_learner``/``x_learner``/``t_learner``) through the ``cate``
     facade, and scores each against one shared cross-fit AIPW signal ``Gamma`` by the
     DR tau-risk ``mean[(Gamma - tau_hat)^2]``. Returns a :class:`SelectionReport` with
@@ -257,7 +257,7 @@ def _aggregate_result(
     Carries the shared cross-fit scores with ``tau_hat`` set to the aggregated
     prediction, so :meth:`~ergodic.inference.CATEResult.explain` runs the Tier-B
     characterization on the ensemble ranking. A point result (the per-unit
-    uncertainty of the ensemble is a documented Phase-2 deferral).
+    uncertainty of the ensemble is not computed).
     """
     from dataclasses import replace
 

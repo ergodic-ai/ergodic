@@ -170,12 +170,13 @@ fig.tight_layout()
 # ## What heterogeneity costs you
 #
 # Heterogeneity is a modeling claim, so the honesty bar is higher than for an ATE. The
-# pseudo-effects are unbiased but loud, and a flexible final model can hallucinate structure
-# in them; held-out validation and stability checks matter more here, not less. Per-customer
-# uncertainty exists but is wide, and the Bayesian path in the
-# [inference guide](../inference.md) is the clean way to get per-customer credible bands
-# when you need them. And the covariates you can target on are the covariates you fed the
-# model: CATE(tenure) is silent about heterogeneity in anything you didn't measure.
+# pseudo-effects are unbiased but loud, and a flexible final model can hallucinate structure in
+# them; held-out validation and stability checks matter more here, not less. Per-customer
+# uncertainty exists but is wide; the
+# [heterogeneous effects guide](../../docsite/pages/heterogeneous-effects.md) shows how to get a
+# per-customer interval when you need one. And the covariates you can target on are the
+# covariates you fed the model: CATE(tenure) is silent about heterogeneity in anything you didn't
+# measure.
 #
 # So far every confounder has been a column in the dataframe. The
 # [next guide](05-hidden-confounding.py) takes that away.

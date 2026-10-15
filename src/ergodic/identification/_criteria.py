@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING
 from ..graph import (
     GraphKind,
     Mark,
+    consistent_extension,
     possible_ancestors,
     possible_descendants,
     visible_edges,
@@ -102,6 +103,82 @@ def _validate(
 _CLASS_KINDS = (GraphKind.CPDAG, GraphKind.MAG, GraphKind.PAG)
 
 
+def _mixed_face_hint(graph: MixedGraph) -> str:
+    """Say which face a ``mixed`` graph fits, if any, and how to re-face it.
+
+    Only advice: the graph is still refused. The checks follow the marks so a
+    partially directed graph is never pointed at the MAG or PAG face, where an
+    undirected edge would mean selection bias rather than an undecided
+    orientation. The face a graph should take depends on where it came from,
+    which the graph does not record, so a graph that fits both a single-world
+    face and the MAG face gets both readings, each with its condition: an FCI
+    or RFCI result means ancestry, and its directed edges can hide
+    confounding, so re-facing it as a DAG or ADMG would be unsound.
+    """
+    edges = graph.edges
+    mag_reading = (
+        "; if it came from FCI or RFCI (or otherwise means ancestry, where a "
+        "directed edge can hide confounding), re-face it with graph.as_kind('mag') "
+        "instead, which identification reads as an equivalence class"
+    )
+    if graph.is_dag():
+        return (
+            "every edge is directed and there is no directed cycle. If it came "
+            "from a search that assumes no hidden confounding (PC or GES with "
+            "domain knowledge orienting every edge, say) and you read it as one "
+            "causal world, re-face it with graph.as_kind('dag')" + mag_reading
+        )
+    if all(e.is_directed or e.is_undirected for e in edges):
+        if graph.is_cpdag():
+            return (
+                "it satisfies the cpdag rules, so if it stands for a Markov "
+                "equivalence class, re-face it with graph.as_kind('cpdag')"
+            )
+        undirected = sorted(e.glyph() for e in edges if e.is_undirected)
+        if consistent_extension(graph) is None:
+            return (
+                "no DAG has its directed edges and v-structures (a directed "
+                "cycle, or orientations that clash), so the orientations and "
+                "the data disagree; check the domain knowledge or rerun discovery"
+            )
+        count = "1 edge is" if len(undirected) == 1 else f"{len(undirected)} edges are"
+        return (
+            f"it is partially directed ({count} undirected, such as "
+            f"{undirected[0]!r}) and is neither a dag nor a cpdag, which is what "
+            "a search such as PC can return when domain knowledge orients edges "
+            "the data leaves open. Orient the rest with more knowledge "
+            "(DomainKnowledge.require) and re-face with graph.as_kind('dag'), "
+            "take one member with ergodic.graph.consistent_extension(graph) (a "
+            "dag; the answer then holds for that member only), or rediscover "
+            "without the orienting knowledge, which usually keeps the cpdag face"
+        )
+    if graph.is_admg():
+        single = (
+            "its edges are directed or bidirected with no directed cycle. If you "
+            "read it as one causal world whose only hidden confounding is the "
+            "drawn <-> edges, re-face it with graph.as_kind('admg')"
+        )
+        return single + (mag_reading if graph.is_mag() else "")
+    for kind in (GraphKind.PAG, GraphKind.MAG):
+        try:
+            graph.validate(kind)
+        except ValueError:
+            continue
+        return (
+            f"it satisfies the {kind.value} rules, so if it stands for an "
+            f"equivalence class, re-face it with graph.as_kind('{kind.value}')"
+        )
+    return (
+        "its marks satisfy no face's rules. If the search ran with domain "
+        "knowledge, the marks the knowledge seeded are the likely cause (FCI and "
+        "RFCI keep them even where the class disagrees, and report "
+        "diagnostics['pag_valid'] at 0.0): rerun without that knowledge, which "
+        "usually returns the class face. Otherwise the data and the orientation "
+        "rules disagree: rerun with more data or another alpha, or write the "
+        "graph you believe with dag(), admg(), or pag()"
+    )
+
+
 def _is_class_kind(graph: MixedGraph) -> bool:
     """Dispatch on the graph's face: single causal world or equivalence class.
 
@@ -109,15 +186,25 @@ def _is_class_kind(graph: MixedGraph) -> bool:
     every graph the class represents, through the generalized criterion.
     MIXED raises: identification needs a verified face, and an FCI fallback
     output (``pag_valid`` 0.0) stays mixed on purpose because it is not a
-    class object.
+    class object. A selection mark raises on every face: the criteria assume
+    the data are not selected on any node.
     """
     if graph.kind is GraphKind.MIXED:
         raise ValueError(
             "identification needs a verified graph face (dag, admg, mag, cpdag, "
-            "or pag), not 'mixed'; re-face the graph with as_kind once it "
-            "satisfies a face's rules"
+            f"or pag), not 'mixed'; {_mixed_face_hint(graph)}"
         )
     if graph.kind not in _CLASS_KINDS:
+        if graph.selection:
+            raise ValueError(
+                f"the {graph.kind.value} marks selection nodes "
+                f"({_join(frozenset(graph.selection))}), so its data are a "
+                "selection-biased sample; identification assumes no selection, and "
+                "an effect is generally not identifiable from a selected sample "
+                "(recovering it needs selection-recoverability conditions, which "
+                "are not supported). Drop selection= only if the data were not "
+                "selected on those nodes"
+            )
         return False
     if graph.latent or graph.selection:
         raise ValueError(

@@ -51,6 +51,11 @@ class DomainKnowledge:
     # -- builders ------------------------------------------------------------
 
     def with_variables(self, *names: str) -> DomainKnowledge:
+        """Return knowledge that also lists ``names`` in :attr:`variables`.
+
+        Every builder records the names it mentions there; this adds names without
+        adding a constraint.
+        """
         return replace(self, variables=self.variables | frozenset(names))
 
     def require(self, cause: str, effect: str) -> DomainKnowledge:
@@ -293,6 +298,10 @@ class DomainKnowledge:
         return self._permits(cause, effect, self._precedence_closure())
 
     def requires_edge(self, cause: str, effect: str) -> bool:
+        """Return ``True`` if ``cause -> effect`` was required with :meth:`require`.
+
+        Only the stated pair counts; nothing is inferred from tiers or other constraints.
+        """
         return (cause, effect) in self.required
 
     def precedence(self) -> frozenset[tuple[str, str]]:
@@ -416,17 +425,17 @@ class DomainKnowledge:
     # -- soft knowledge, not built yet ---------------------------------------
 
     def energy(self, graph: MixedGraph) -> float:
-        """Penalty for ``graph`` under soft knowledge. Planned for the Bayesian phase."""
+        """Penalty for ``graph`` under soft knowledge. Not implemented; raises."""
         raise NotImplementedError(
-            "soft/energy-based knowledge is not implemented yet; it is planned for "
-            "the Bayesian discovery work. Use the hard-constraint methods for now."
+            "soft/energy-based knowledge is not implemented; use the hard-constraint "
+            "methods (require, forbid, tiers, and the rest)."
         )
 
     def log_prior(self, graph: MixedGraph) -> float:
-        """Log prior of ``graph`` under soft knowledge. Planned for the Bayesian phase."""
+        """Log prior of ``graph`` under soft knowledge. Not implemented; raises."""
         raise NotImplementedError(
-            "soft/probabilistic knowledge is not implemented yet; it is planned for "
-            "the Bayesian discovery work. Use the hard-constraint methods for now."
+            "soft/probabilistic knowledge is not implemented; use the hard-constraint "
+            "methods (require, forbid, tiers, and the rest)."
         )
 
     def __repr__(self) -> str:

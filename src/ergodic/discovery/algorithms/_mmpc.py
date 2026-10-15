@@ -95,7 +95,7 @@ class MMPC:
         self, data: TabularData | None = None, knowledge: DomainKnowledge | None = None
     ) -> DiscoveryResult:
         """Run MMPC and return the undirected skeleton with its provenance."""
-        oracle = resolve_test(self.test, data)
+        oracle = resolve_test(self.test, data, algorithm=type(self).__name__)
         nodes = sorted(oracle.variables)
         node_set = frozenset(nodes)
         permits = _permits_all if knowledge is None else knowledge.permits_edge

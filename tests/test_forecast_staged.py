@@ -16,6 +16,7 @@ precedent.
 
 from __future__ import annotations
 
+import importlib.metadata
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -39,6 +40,21 @@ from ergodic.forecast import (
 )
 from ergodic.forecast._fit import _audit_sites, _group_dataset, align_draws, inject_futures
 from ergodic.forecast._schedule import NodeRole
+
+
+def _golden_rel(tight: float, pymc5: float) -> float:
+    """Tolerance for a pinned sampler value.
+
+    PyMC 6 reproduces these draws exactly on macOS and Linux CI, so the pin stays
+    tight. PyMC 5 (what Python 3.11 resolves) samples differently and not
+    identically across platforms, so there the pin only bounds the drift.
+    """
+    try:
+        major = int(importlib.metadata.version("pymc").split(".")[0])
+    except importlib.metadata.PackageNotFoundError:
+        return tight
+    return tight if major >= 6 else pymc5
+
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -478,10 +494,10 @@ def test_scenario_refusals() -> None:
         forecast(data, 4, graph=D1_GRAPH, scenario={"x": "freeze"}, draws=10, warmup=10)
 
 
-def test_a_scenario_on_an_endogenous_node_names_the_causal_layer() -> None:
+def test_a_scenario_on_an_endogenous_node_is_refused_as_an_intervention() -> None:
     """Criterion 11: pinning a driven node is an intervention, and the message says so."""
     data = small_world()
-    with pytest.raises(ValueError, match="do=") as raised:
+    with pytest.raises(ValueError, match="is an intervention") as raised:
         forecast(data, 4, graph=D1_GRAPH, scenario={"y": "hold"}, draws=10, warmup=10)
     message = str(raised.value)
     assert "x[t-1]" in message
@@ -757,8 +773,9 @@ def test_both_strategies_are_bitwise_deterministic() -> None:
     second = forecast_or_skip(data, 4, fit="staged", **options)
     for node in first.nodes:
         assert np.array_equal(first.draws(node), second.draws(node))
+    # PyMC 5 drifted up to 0.7% from these pins (Linux and macOS).
     assert first.median("y") == pytest.approx(
-        [104.05099, 106.755923, 111.066536, 111.7587], rel=0.005
+        [104.05099, 106.755923, 111.066536, 111.7587], rel=_golden_rel(0.005, 0.015)
     )
 
     third = forecast_or_skip(data, 4, fit="joint", **options)
@@ -766,7 +783,7 @@ def test_both_strategies_are_bitwise_deterministic() -> None:
     for node in third.nodes:
         assert np.array_equal(third.draws(node), fourth.draws(node))
     assert third.median("y") == pytest.approx(
-        [104.246123, 107.567608, 111.453376, 112.218051], rel=0.005
+        [104.246123, 107.567608, 111.453376, 112.218051], rel=_golden_rel(0.005, 0.015)
     )
 
 

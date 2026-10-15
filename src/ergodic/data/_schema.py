@@ -71,26 +71,32 @@ class ColumnType:
 
     @property
     def ordered(self) -> bool:
+        """Whether the categories have an order (the column is ordinal)."""
         return self.kind is VariableType.ORDINAL
 
     @property
     def is_continuous(self) -> bool:
+        """Whether the column is continuous."""
         return self.kind is VariableType.CONTINUOUS
 
     @property
     def is_categorical(self) -> bool:
+        """Whether the column is categorical (unordered)."""
         return self.kind is VariableType.CATEGORICAL
 
     @property
     def is_ordinal(self) -> bool:
+        """Whether the column is ordinal."""
         return self.kind is VariableType.ORDINAL
 
     @property
     def is_datetime(self) -> bool:
+        """Whether the column holds timestamps."""
         return self.kind is VariableType.DATETIME
 
     @property
     def is_excluded(self) -> bool:
+        """Whether the column is excluded from modeling."""
         return self.kind is VariableType.EXCLUDED
 
     @property
@@ -100,10 +106,12 @@ class ColumnType:
 
     @property
     def cardinality(self) -> int | None:
+        """The number of categories, or ``None`` when the column has none."""
         return None if self.categories is None else len(self.categories)
 
     @property
     def is_binary(self) -> bool:
+        """Whether the column is discrete with exactly two categories."""
         return self.is_discrete and self.cardinality == 2
 
 
@@ -130,33 +138,41 @@ class Schema:
         return len(self.columns)
 
     def get(self, name: str) -> ColumnType | None:
+        """Return the type of column ``name``, or ``None`` when there is no such column."""
         return self._by_name.get(name)
 
     @property
     def names(self) -> tuple[str, ...]:
+        """The column names, in order."""
         return tuple(c.name for c in self.columns)
 
     def of_kind(self, kind: VariableType) -> tuple[str, ...]:
+        """Return the names of the columns of one kind, in schema order."""
         return tuple(c.name for c in self.columns if c.kind is kind)
 
     @property
     def continuous(self) -> tuple[str, ...]:
+        """The names of the continuous columns."""
         return self.of_kind(VariableType.CONTINUOUS)
 
     @property
     def categorical(self) -> tuple[str, ...]:
+        """The names of the categorical columns (ordinal columns are not included)."""
         return self.of_kind(VariableType.CATEGORICAL)
 
     @property
     def ordinal(self) -> tuple[str, ...]:
+        """The names of the ordinal columns."""
         return self.of_kind(VariableType.ORDINAL)
 
     @property
     def datetime(self) -> tuple[str, ...]:
+        """The names of the datetime columns."""
         return self.of_kind(VariableType.DATETIME)
 
     @property
     def excluded(self) -> tuple[str, ...]:
+        """The names of the excluded columns."""
         return self.of_kind(VariableType.EXCLUDED)
 
     @property

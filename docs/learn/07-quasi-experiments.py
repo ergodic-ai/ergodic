@@ -349,4 +349,6 @@ fig.tight_layout()
 #
 # When there's no comparison pool at all, only a single series with a change date in it,
 # `interrupted_time_series` fits the pre-period and extrapolates it; that and the flavors,
-# pools, and failure modes of everything above are in the [panel guide](../panel.md).
+# pools, and failure modes of everything above are in the
+# [difference-in-differences](../../docsite/pages/difference-in-differences.md) and
+# [synthetic control](../../docsite/pages/synthetic-control.md) guides.

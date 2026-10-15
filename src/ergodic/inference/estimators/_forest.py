@@ -24,16 +24,17 @@ The construction, following the literature review's GRF section:
 * The forest reads out a data-adaptive kernel ``alpha_i(x)`` (the average leaf
   co-membership across trees) and solves the within-neighborhood Robinson moment
   for ``tau(x)``, the closed-form local R-learner.
-* Per-unit variance is the infinitesimal jackknife (the bootstrap-of-little-bags
-  grouping), valid under honesty plus subsampling.
+* Per-unit variance is the infinitesimal jackknife with the Wager-Hastie-Efron
+  Monte-Carlo correction (IJ-U), valid under honesty plus subsampling.
 
-Binary treatment in this phase; a continuous treatment via the same local moment is
-a documented deferral (it raises). The variable importance is a depth-weighted,
+Binary treatment only; a continuous treatment via the same local moment is not
+supported (it raises). The variable importance is a depth-weighted,
 normalized split frequency, a driver signal exposed on the result and the estimator.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -341,7 +342,12 @@ class VariableImportance:
         return pairs if k is None else pairs[:k]
 
     def to_dict(self) -> dict[str, float]:
+        """Return ``{covariate: importance}`` for every covariate, in the stored order."""
         return {name: float(value) for name, value in zip(self.names, self.values, strict=True)}
+
+
+#: The share of zero-width per-unit bands above which ``cate`` warns.
+_ZERO_SE_WARN = 0.05
 
 
 class CausalForest(_MetaLearnerBase):
@@ -357,8 +363,22 @@ class CausalForest(_MetaLearnerBase):
     Hyperparameters: ``n_trees`` (forest size), ``min_leaf`` (the minimum estimate-half
     rows per leaf), ``max_depth``, ``honest`` (split/estimate sample-splitting, on by
     default), ``subsample`` (the per-tree subsample fraction), and ``random_state``.
-    Binary treatment in this phase; a continuous treatment via the same local moment
-    is deferred and raises.
+    Binary treatment only; a continuous treatment via the same local moment is not
+    supported and raises.
+
+    The per-unit intervals need many trees. The infinitesimal-jackknife variance
+    subtracts a Monte-Carlo correction that shrinks only as ``n_trees`` grows, and
+    where the correction exceeds the raw variance the standard error is clipped to
+    zero (a zero-width band). Measured on a 4,000-row world with a linear effect
+    (``min_leaf=15``, nominal 90%): 400 trees covered the true effect for 68% of
+    units with 25% zero-width bands; 1,600 trees covered 87% with 1% zero-width. An
+    independent check (1,500 rows) still found 7% zero-width bands at 750 trees and
+    none at 1,500. So use at least as many trees as rows when the per-unit intervals
+    matter; more trees reduce the clipping but not the smoothing bias below. ``cate``
+    warns, and records
+    ``diagnostics["ij_zero_se_share"]``, when more than 5% of the bands are
+    zero-width. Coverage stays somewhat below nominal where the effect changes
+    steeply (the forest's smoothing bias), so treat the bands as approximate.
     """
 
     name = "causal_forest"
@@ -483,7 +503,7 @@ class CausalForest(_MetaLearnerBase):
             w_res=w_res,
             y_res=y_res,
             importance=importance,
-            covariate_names=self._covariates,
+            covariate_names=self._covariate_columns,
         )
 
     def _predict_cate(
@@ -538,9 +558,9 @@ class CausalForest(_MetaLearnerBase):
 
         Overrides the base meta-learner ``cate`` (which would bootstrap-refit the
         whole forest). The point is the forest-kernel local effect; the per-unit
-        variance is the infinitesimal jackknife over the trees (the
-        bootstrap-of-little-bags grouping), valid because the forest is honest and
-        subsampled. The result carries the cached doubly-robust scores for
+        variance is the infinitesimal jackknife over the trees with the
+        Wager-Hastie-Efron Monte-Carlo correction, valid because the forest is honest
+        and subsampled. The result carries the cached doubly-robust scores for
         :meth:`~ergodic.inference.CATEResult.explain`.
 
         ``uncertainty=False`` returns the point effects with ``kind="point"`` and no
@@ -554,6 +574,20 @@ class CausalForest(_MetaLearnerBase):
         n = point.shape[0]
         std_error = self._ij_standard_error(model, z, point) if uncertainty else None
         kind = "analytic" if uncertainty else "point"
+        diagnostics = dict(self._state.diagnostics)
+        if std_error is not None and std_error.size:
+            zero_share = float(np.mean(std_error == 0.0))
+            diagnostics["ij_zero_se_share"] = zero_share
+            if zero_share > _ZERO_SE_WARN:
+                warnings.warn(
+                    f"{zero_share:.0%} of the per-unit standard errors are zero: with "
+                    f"{len(model.trees)} trees for {model.x_train.shape[0]} rows the "
+                    "infinitesimal-jackknife Monte-Carlo correction swamps the variance, "
+                    "so those bands have zero width. Raise n_trees (at least as many trees "
+                    "as rows) before reading the per-unit intervals.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         scores = self._cate_scores(data)
         return CATEResult(
             treatment=self._treatment_name,
@@ -562,7 +596,7 @@ class CausalForest(_MetaLearnerBase):
             n=n,
             kind=kind,
             source=self.name,
-            diagnostics=dict(self._state.diagnostics),
+            diagnostics=diagnostics,
             identification=self._identification,
             _values=point,
             _index=self._cate_index(data, n),
@@ -584,13 +618,14 @@ class CausalForest(_MetaLearnerBase):
     ) -> npt.NDArray[np.float64]:
         """Per-unit infinitesimal-jackknife standard errors over the trees.
 
-        The IJ variance (Wager-Athey Eq. 8, the bootstrap-of-little-bags form)
-        is ``V(x) = ((n - 1)/n)(n/(n - s))^2 sum_i Cov_b[t_b(x), N_ib]^2``, where
+        The IJ variance (Wager-Athey 2018, Eq. 8, for subsampling) is
+        ``V(x) = ((n - 1)/n)(n/(n - s))^2 sum_i Cov_b[t_b(x), N_ib]^2``, where
         ``t_b(x)`` is tree ``b``'s prediction at ``x``, ``N_ib`` is the inclusion count
         of training row ``i`` in tree ``b`` (here 0/1 under subsampling), and ``s`` is
-        the subsample size. A Monte-Carlo correction subtracts the within-tree
-        sampling noise so the estimate stays non-negative and is not inflated by a
-        finite tree count. Honesty and subsampling are what make this valid.
+        the subsample size. A Monte-Carlo correction subtracts the within-tree sampling noise of a
+        finite tree count (Wager, Hastie and Efron 2014, IJ-U); where it exceeds the raw
+        variance the estimate is clipped to zero. Honesty and subsampling are what make
+        this valid.
         """
         n_trees = len(model.trees)
         n_query = z.shape[0]
@@ -609,7 +644,7 @@ class CausalForest(_MetaLearnerBase):
         # Cov_b[t_b(x), N_ib] over trees, shape (n_query, n_train)
         cov = (pred_centered.T @ inbag_centered) / n_trees
         raw = np.sum(cov * cov, axis=1)
-        # bootstrap-of-little-bags Monte-Carlo bias correction
+        # Wager-Hastie-Efron Monte-Carlo correction for a finite number of trees
         pred_var = pred_centered.var(axis=0)  # (n_query,)
         inbag_var = float(inbag_centered.var())
         correction = n_train * inbag_var * pred_var / n_trees

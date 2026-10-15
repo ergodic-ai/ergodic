@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from typing import Any
 
 import numpy as np
 import pytest
 
-from ergodic import SCM, Sensitivity, TabularData, dag, identify_effect, tabular
+from ergodic import SCM, Sensitivity, TabularData, cpdag, dag, identify_effect, tabular
 from ergodic.scm import (
     BinaryGumbelMax,
     Capability,
@@ -135,7 +136,7 @@ def test_auto_mechanism_reads_parents_from_graph() -> None:
 
 def test_resolve_mechanism_builtin_names() -> None:
     data = _toy_data()
-    g = dag(["cont -> cat"])
+    g = dag(["cont -> cat"], nodes=["binc"])  # every resolved node must be a graph node
     assert isinstance(resolve_mechanism("linear", g, data, "cont"), GaussianAdditive)
     assert isinstance(resolve_mechanism("categorical", g, data, "cat"), CategoricalGumbelMax)
     assert isinstance(resolve_mechanism("binary", g, data, "binc"), BinaryGumbelMax)
@@ -935,3 +936,102 @@ def test_ate_keeps_raising_for_iv_and_general_id() -> None:
         scm_id.ate("A", "D")
     assert "id" in str(exc_id.value)
     assert "estimate_effect" in str(exc_id.value)
+
+
+# -- API-149 regressions -------------------------------------------------------
+
+
+def _fork_data(n: int = 200) -> TabularData:
+    rng = np.random.default_rng(0)
+    z = rng.normal(size=n)
+    x = z + rng.normal(size=n)
+    y = x + z + rng.normal(size=n)
+    return tabular({"Z": z, "X": x, "Y": y})
+
+
+def test_scm_refuses_a_mag_and_other_class_faces() -> None:
+    """A MAG's directed edges mean ancestry; fitting it as an ADMG was silently wrong."""
+    data = _fork_data()
+    mag = dag(["Z -> X", "Z -> Y", "X -> Y"]).as_kind("mag")
+    with pytest.raises(ValueError, match="ancestry"):
+        SCM(mag, data)
+    with pytest.raises(ValueError, match="as_kind"):
+        SCM(cpdag(["Z -- X", "X -- Y"]), data)
+    SCM(dag(["Z -> X", "Z -> Y", "X -> Y"]), data)  # a DAG is fine
+
+
+def test_scm_cores_reaches_every_sampler_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``cores`` caps PyMC's worker processes; the default runs chains one at a time."""
+    from ergodic.scm._sampling import sampler_cores
+
+    seen: list[int] = []
+
+    def fake_fit(self: Any, data: Any, *, draws: int, tune: int, chains: int, seed: int) -> Any:
+        seen.append(sampler_cores(chains))
+        return FitResult(params={}, param_means={})
+
+    monkeypatch.setattr(GaussianAdditive, "fit", fake_fit)
+    graph = dag(["Z -> X", "Z -> Y", "X -> Y"])
+    SCM(graph, _fork_data(), chains=4).fit()
+    assert seen == [1, 1, 1]
+    seen.clear()
+    SCM(graph, _fork_data(), chains=4, cores=2).fit()
+    assert seen == [2, 2, 2]
+    seen.clear()
+    SCM(graph, _fork_data(), chains=2, cores=8).fit()
+    assert seen == [2, 2, 2]  # never more workers than chains
+    assert sampler_cores(4) == 1  # outside an SCM fit: one core
+    with pytest.raises(ValueError, match="cores"):
+        SCM(graph, _fork_data(), cores=0)
+
+
+def test_predictive_results_say_so() -> None:
+    """``interventional``/``sample`` draws are of Y, so the repr must not say CrI."""
+    draws = np.random.default_rng(0).normal(2.0, 1.4, size=2000)
+    pred = SCMResult(
+        query="interventional", target="Y", kind="predictive", identified=True, _draws=draws
+    )
+    assert "predictive interval" in repr(pred)
+    assert "CrI" not in repr(pred)
+    post = SCMResult(query="ate", target="Y", kind="posterior", identified=True, _draws=draws)
+    assert "95% CrI" in repr(post)
+
+
+def test_scm_cores_reaches_the_district_and_worker_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review F7: the cores test covered only the sequential singleton path."""
+    pm = pytest.importorskip("pymc")
+    from ergodic.scm._sampling import sampler_cores
+    from ergodic.scm._scm import _fit_one
+
+    seen: list[int] = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_sample(**kwargs: Any) -> Any:
+        seen.append(kwargs["cores"])
+        raise _Stop
+
+    monkeypatch.setattr(pm, "sample", fake_sample)
+    rng = np.random.default_rng(0)
+    n = 100
+    u = rng.normal(size=n)
+    x = u + rng.normal(size=n)
+    y = x + u + rng.normal(size=n)
+    data = tabular({"X": x, "Y": y})
+    bow = dag(["U -> X", "U -> Y", "X -> Y"], latent=["U"])
+    with pytest.raises(_Stop):
+        SCM(bow, data, chains=4, cores=3).fit()  # the confounded district's joint fit
+    assert seen == [3]
+
+    # the process-pool worker sets the cap inside the spawned process
+    recorded: list[int] = []
+
+    def fake_fit(self: Any, data: Any, *, draws: int, tune: int, chains: int, seed: int) -> Any:
+        recorded.append(sampler_cores(chains))
+        return FitResult(params={}, param_means={})
+
+    monkeypatch.setattr(GaussianAdditive, "fit", fake_fit)
+    mech = SCM(dag(["X -> Y"]), data).mechanisms["Y"]
+    _fit_one(mech, data, 10, 10, 4, 0, 2)
+    assert recorded == [2]
