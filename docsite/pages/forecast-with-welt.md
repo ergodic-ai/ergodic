@@ -30,7 +30,7 @@ from ergodic import backtest, timeseries
 from ergodic.forecast import Naive, SeasonalNaive
 from ergodic.welt import WeltForecaster
 
-# 1. Simulate 120 days of sales with a known promotion every Thursday.
+# 1. Simulate 120 days of history and the 14 after, with a promotion every Thursday.
 rng = np.random.default_rng(0)
 days = pd.date_range("2026-01-01", periods=134, freq="D")
 promo = (days.dayofweek == 3).astype(float)
@@ -64,8 +64,9 @@ prints:
   promotions fall. Then the exact model and configuration versions Welt ran, and
   `21`: the quantile levels behind the draws.
 - **Step 3.** One row per model (`welt:chronos-2`, `Naive`, `SeasonalNaive`) with
-  its MAE, CRPS and 90% coverage, averaged over the three folds. `Naive` and `SeasonalNaive` run locally and cost nothing. Then
-  `paid forecasts: 3`, one per fold.
+  its MAE, CRPS and 90% coverage, averaged over the three folds. `Naive` and
+  `SeasonalNaive` run locally and cost nothing. Then `paid forecasts: 3`, one per
+  fold.
 
 ## Read the result
 
@@ -80,16 +81,20 @@ print(record.model_version, record.configuration, len(record.quantile_levels))
 
 Each series has a `WeltForecastDiagnostics` in `diagnostics`: the Welt `job_id`,
 `model_version` and `configuration`, the `quantile_levels`, Welt's own `quantiles`
-(one row per step), `context_length`, and `rearranged_steps`, the steps whose
-native quantiles crossed and that Welt sorted.
+(one row per step), `context_length`, `rearranged_steps` (the steps whose native
+quantiles crossed and that Welt sorted), and `datasets` (any table uploaded rather
+than sent inline).
 
 !!! caution "The draws are per-step marginals"
     Each step is sampled on its own, so a draw is not a path: it has no dependence
-    from one step to the next, and series have none between them. The median,
-    intervals, coverage and CRPS read one step at a time, so they are unaffected. A
-    total over several steps, or a bottom-up aggregate, treats the errors as
-    independent, which understates its spread when they move together. Chronos-2's
-    intervals are not calibrated either; backtest coverage before you trust them.
+    from one step to the next, and series have none between them. For one series
+    as forecast, the median, intervals, coverage and CRPS read one step at a time,
+    so they follow Welt's quantiles. A total over several steps, a bottom-up
+    aggregate, and the intervals, coverage and CRPS after `bottom_up` or `mint`
+    reconciliation all treat the errors as independent, which understates the
+    spread when they move together. `top_down` scales the root's draws, so it
+    doesn't depend on this. Chronos-2's intervals are not calibrated either;
+    backtest coverage before you trust them.
 
 The draws come from the quantiles by inverse-CDF sampling: linear between levels,
 with exponential tails beyond the 1% and 99% levels.
@@ -159,6 +164,8 @@ for method in ["bottom_up", "mint"]:
 
 Pass `reconcile="mint"` (or `"bottom_up"`, `"top_down"`) to `WeltForecaster` to
 reconcile inside `forecast`, which is how a backtest scores reconciled forecasts.
+Read the reconciled coverage and CRPS of `bottom_up` and `mint` with the caution
+above: they assume the series' errors are independent.
 Pass `targets=tree.leaves` to forecast only the bottom level: each parent is then
 the sum of its children's draws, and the job sends fewer series. MinT-shrink needs
 in-sample residual variances, which Chronos-2 doesn't return: pass `residual_var=`
@@ -180,7 +187,8 @@ to `reconcile` yourself, or keep the posterior weights.
 Every `forecast` call is one paid job, and a backtest sends one per fold.
 `max_forecasts=` caps the jobs this forecaster and every copy of it may send, 10
 by default; one more raises `RuntimeError` before it pays. `forecasts_used` counts
-them.
+the jobs Welt accepted. A request Welt refuses, such as a 422 for a bad cell, costs
+nothing and isn't counted.
 
 ```python
 print("paid forecasts:", models[0].forecasts_used)
@@ -196,13 +204,24 @@ The first job's model and configuration versions are then required of every late
 job, so the folds of one backtest all run the same Chronos-2. Build a new
 `WeltForecaster` to pick up a newer version.
 
+A history or future table larger than 1 MiB of JSON is uploaded first as a
+workspace dataset, as the Welt SDK does, and the job reads it from there. Uploads
+are free and stay in your workspace until you delete them. A table over 10 MiB,
+the API's request limit, raises before anything is sent: use `max_context=`, fewer
+series per job, or `multivariate=True`.
+
 ## Limits
 
 - `fit` reads a `TimeSeriesData` or `HierarchicalTSData` with a datetime index, or
-  an evenly spaced numeric one, which is sent as consecutive days. Chronos-2 reads
-  the order of the rows, not the calendar.
+  an evenly spaced numeric one. A numeric index, or a datetime index without a
+  regular frequency Welt can read (business or trading days), is sent as
+  consecutive days from 1 January 2000. Chronos-2 reads the order of the rows, not
+  the calendar, so the forecast is the same, but the job's records in Welt show
+  those dates. `time_encoding` in the diagnostics says which was sent.
 - Targets must be continuous. Missing target values are sent as missing, and
   Chronos-2 handles them.
+- Covariates are continuous or categorical. A categorical cell goes as a string or
+  an integer (`True` as `1`, `2.0` as `2`); a continuous one as a number.
 - `ergodic.forecast(data, ...)` stays the Bayesian forecaster. Chronos-2 is reached
   through `WeltForecaster`, which `backtest` and `reconcile` take like any other
   model.
@@ -211,8 +230,10 @@ job, so the folds of one backtest all run the same Chronos-2. Build a new
 <details markdown="1"><summary>What if a job times out?</summary>
 
 `forecast` waits 600 seconds by default (`timeout=`). A timeout leaves the job
-running in Welt, and the error names it. Read it with `welt.Client().job(job_id)`
-rather than forecasting again.
+running in Welt, and the error names it. Read it with
+`welt.Client().job(job_id).result()` rather than forecasting again. That returns
+Welt's quantiles, one row per step; `ergodic.forecast.quantile_draws` turns them
+into draws.
 
 </details>
 
