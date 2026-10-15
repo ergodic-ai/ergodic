@@ -757,6 +757,9 @@ def test_both_strategies_are_bitwise_deterministic() -> None:
     second = forecast_or_skip(data, 4, fit="staged", **options)
     for node in first.nodes:
         assert np.array_equal(first.draws(node), second.draws(node))
+    print("PROBE staged", list(first.median("y")))
+    third_ = forecast_or_skip(data, 4, fit="joint", **options)
+    print("PROBE joint", list(third_.median("y")))
     assert first.median("y") == pytest.approx(
         [104.05099, 106.755923, 111.066536, 111.7587], rel=0.005
     )

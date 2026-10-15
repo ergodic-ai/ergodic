@@ -198,6 +198,7 @@ def test_amplitude_arm_fires_amp() -> None:
     block.
     """
     result, switch = run_spectral(AMPLITUDE, seed=25)
+    print("PROBE amp verdicts", result.verdicts(), "deltas", result.deltas(), "agreement", agreement(result.tick_path(), switch[: len(result.tick_path())]))
     assert result.verdicts()["amp"], result.deltas()
     assert agreement(result.tick_path(), switch[: len(result.tick_path())]) > 0.8
 

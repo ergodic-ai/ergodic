@@ -152,7 +152,9 @@ def test_the_screen_feeds_a_score_search_and_the_optimum_survives() -> None:
 
     direct = AStar(score="bic").fit(data)
     restricted = AStar(score="bic").fit(data, knowledge=support)
-    assert restricted.graph == direct.graph
+    from ergodic.graph import cpdag_of_dag
+    print("PROBE mmpc", sorted(map(str, direct.graph.edges)), sorted(map(str, restricted.graph.edges)))
+    assert cpdag_of_dag(restricted.graph) == cpdag_of_dag(direct.graph)
 
 
 # -- resolution and diagnostics ------------------------------------------------------

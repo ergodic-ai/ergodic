@@ -825,6 +825,7 @@ def test_bottom_up_wins_where_the_leaves_are_the_signal(h2: World) -> None:
     actual = h2.actual("total")
     summed = float(crps(actual, bottom_up.draws("total")))
     direct = float(crps(actual, own.draws("total")))
+    print(f"PROBE reconcile summed={summed!r} direct={direct!r}")
     assert summed < direct
     assert summed == pytest.approx(GOLDEN_H2_BU_CRPS, rel=0.02)
     assert direct == pytest.approx(GOLDEN_H2_OWN_CRPS, rel=0.02)
