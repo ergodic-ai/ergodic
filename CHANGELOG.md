@@ -27,8 +27,10 @@ To be released together with Welt (welt-api DEC-078, API-140).
   and `discover(data, method="welt:<model>")` run a Welt causal discovery model
   and return a `DiscoveryResult` with the native DAG and Welt provenance in
   `diagnostics` (ids, model and configuration versions, the edge-score
-  dataframe); a graph Welt does not declare a DAG raises `WeltGraphNotDAGError`
-  and is never projected. `WeltLearner` puts any Welt classification or
+  dataframe). A model known to return non-DAG graphs (`cdfm`, `avici`, or any the
+  catalogue marks so) raises `WeltGraphNotDAGError` before anything is uploaded or
+  paid for, and a result Welt does not declare a DAG raises it with the result
+  attached; nothing is projected. `WeltLearner` puts any Welt classification or
   regression model in a nuisance slot, refuses `sample_weight`, and shares one
   client and a `max_fits` budget (default 10) with its clones.
   `upload_dataset` and `load_research_dataset` move tabular data between ergodic

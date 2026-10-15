@@ -43,8 +43,17 @@ needs_format = pytest.mark.skipif(
 class FakeWelt:
     """A stateful stand-in for the Welt API routes ergodic.welt uses."""
 
-    def __init__(self, *, graph_type: str = "dag", prediction_rows: int | None = 100) -> None:
+    def __init__(
+        self,
+        *,
+        graph_type: str = "dag",
+        prediction_rows: int | None = 100,
+        catalogue_graph: dict[str, str] | None = None,
+    ) -> None:
         self.graph_type = graph_type
+        # Native graph types the fake catalogue states, by model id (none by default,
+        # as Welt's catalogue does not state them today).
+        self.catalogue_graph = catalogue_graph or {}
         self.prediction_rows = prediction_rows
         self.datasets: dict[str, dict[str, Any]] = {}
         self.predictors: dict[str, dict[str, Any]] = {}
@@ -82,7 +91,12 @@ class FakeWelt:
                 {"task": "regression", "limits": limits},
                 {"task": "classification", "limits": limits},
             ]
-            model = {"id": path.rsplit("/", 1)[1], "task_profiles": profiles}
+            ident = path.rsplit("/", 1)[1]
+            if ident in self.catalogue_graph:
+                profiles = [
+                    {"task": "causal_discovery", "native_graph_type": self.catalogue_graph[ident]}
+                ]
+            model = {"id": ident, "task_profiles": profiles}
             return httpx.Response(200, json=model)
         if request.method == "GET" and path.startswith("/v1/predictors/"):
             return httpx.Response(200, json=self.predictors[path.rsplit("/", 1)[1]]["public"])
@@ -250,15 +264,42 @@ def test_discover_facade_routes_welt_methods_lazily() -> None:
 
 
 @pytest.mark.parametrize("model", ["cdfm", "avici"])
-def test_a_native_directed_graph_is_refused_without_projection(model: str) -> None:
+def test_models_known_to_return_directed_graphs_are_refused_before_paying(model: str) -> None:
     fake = FakeWelt(graph_type="directed")
     with fake.client() as client, pytest.raises(WeltGraphNotDAGError) as error:
         welt_discover(continuous(), model, client=client)
+    assert error.value.model == model
+    assert error.value.native_graph_type == "directed"
+    assert error.value.result is None and error.value.scores is None
+    message = str(error.value)
+    assert "'directed'" in message and "nothing was uploaded or submitted" in message
+    assert "welt.Client().discover" in message
+    # Only the free catalogue read happened: no upload, no discovery job.
+    assert fake.count("POST", "/v1/datasets") == 0
+    assert fake.count("POST", "/v1/discoveries") == 0
+
+
+def test_the_catalogue_stated_graph_type_wins_over_the_built_in_list() -> None:
+    fake = FakeWelt(catalogue_graph={"new-causal": "directed"})
+    with fake.client() as client, pytest.raises(WeltGraphNotDAGError) as error:
+        welt_discover(continuous(), "new-causal", client=client)
+    assert error.value.result is None
+    assert fake.count("POST", "/v1/discoveries") == 0
+
+
+def test_a_result_that_is_not_a_declared_dag_is_refused_after_the_run() -> None:
+    """The second guard: a model with no known graph type runs, and its result is checked."""
+    fake = FakeWelt(graph_type="directed")
+    with fake.client() as client, pytest.raises(WeltGraphNotDAGError) as error:
+        welt_discover(continuous(), "unlisted-causal", client=client)
     # The paid result is not lost: the error carries it and its scores.
+    assert error.value.native_graph_type == "directed"
     assert error.value.result.native_graph_type == "directed"
     assert error.value.result.job_id == "job_d1"
+    assert error.value.scores is not None
     assert list(error.value.scores.columns) == ["Z", "X", "Y", "W"]
     assert "does not project" in str(error.value)
+    assert fake.count("POST", "/v1/discoveries") == 1
 
 
 def test_discovery_refusals_happen_before_any_request() -> None:
