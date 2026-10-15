@@ -5,9 +5,9 @@ The skeleton phase is the stable variant (Colombo and Maathuis 2014): at each
 conditioning size it snapshots the adjacencies and tests every ordered pair
 against subsets of the snapshot neighbours, so the result does not depend on
 the order edges are visited. Knowledge enters here as prune (a pair forbidden
-in both directions, which the data model reads as an adjacency ban, is never
-tested) and protect (required and confounded pairs are never tested or
-removed).
+in both directions is never tested, unless it is confounded: a hidden common
+cause keeps it adjacent though neither causes the other) and protect (required
+and confounded pairs are never tested or removed).
 """
 
 from __future__ import annotations

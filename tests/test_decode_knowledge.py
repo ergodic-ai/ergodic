@@ -636,3 +636,37 @@ def test_v1_and_v2_agree_without_knowledge(rule: str) -> None:
 
 
 NAMES_7 = tuple("ABCDEFG")
+
+
+def test_the_audit_flags_order_broken_only_through_the_closure() -> None:
+    """order(a, b) and order(b, c) forbid c -> a, which no single statement names."""
+    probs = _matrix(("a", "b", "c"), {("c", "a"): 0.95})
+    knowledge = DomainKnowledge().order("a", "b").order("b", "c")
+    result = decode(probs, knowledge=knowledge)
+    assert all(e["holds_without_knowledge"] for e in result.diagnostics["knowledge_audit"])
+    assert result.diagnostics["knowledge_violations"] == ()
+    assert result.diagnostics["knowledge_violations_without_knowledge"] == (
+        "order violated: c is an ancestor of a",
+    )
+    skipped = decode(probs, knowledge=knowledge, audit=False)
+    assert skipped.diagnostics["knowledge_violations_without_knowledge"] is None
+    assert decode(probs).diagnostics["knowledge_violations_without_knowledge"] == ()
+
+
+def test_mmpc_and_glasso_keep_a_confounded_pair_neither_side_causes() -> None:
+    from ergodic.discovery import MMPC, DSeparationOracle, Glasso
+
+    truth = dag(["L -> X", "L -> Y", "Z -> X"], latent=["L"])
+    idiom = DomainKnowledge().confound("X", "Y").forbid("X", "Y").forbid("Y", "X")
+    graph = MMPC(test=DSeparationOracle(truth)).fit(knowledge=idiom).graph
+    assert graph.get_edge("X", "Y") is not None
+    # The two directed bans alone still keep the pair apart.
+    apart = DomainKnowledge().forbid("X", "Y").forbid("Y", "X")
+    assert MMPC(test=DSeparationOracle(truth)).fit(knowledge=apart).graph.get_edge("X", "Y") is None
+    names = ["X", "Y", "Z"]
+    free, _ = Glasso._knowledge_arrays(names, idiom)
+    assert free[0, 1] and free[1, 0]
+    free, _ = Glasso._knowledge_arrays(names, apart)
+    assert not free[0, 1]
+    free, _ = Glasso._knowledge_arrays(names, DomainKnowledge().forbid_adjacency("X", "Y"))
+    assert not free[0, 1]

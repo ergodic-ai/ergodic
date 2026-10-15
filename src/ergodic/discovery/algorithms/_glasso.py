@@ -377,7 +377,10 @@ class Glasso:
     Knowledge enters through the penalty, and only its adjacency content
     binds, because the screen is undirected. A pair forbidden in both
     directions (an adjacency ban, including pairs outside a ``restrict_to``
-    support) is a hard zero, excluded from the updates entirely. A required
+    support) is a hard zero, excluded from the updates entirely, unless it is
+    confounded and not under :meth:`~ergodic.DomainKnowledge.forbid_adjacency`
+    (a hidden common cause, neither causing the other): that pair is left to the
+    data like any other. A required
     pair (either direction) is unpenalized, so it survives every lambda the
     data gives it any conditional association at. Directional knowledge
     (tiers, one-way forbids, roots, sinks) does not constrain an undirected
@@ -501,8 +504,9 @@ class Glasso:
     ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.float64]]:
         """The per-entry mask and penalty multipliers the knowledge implies.
 
-        ``free`` is False where a pair is banned in both directions (the
-        coordinate never updates, so the entry is a hard zero); ``factor``
+        ``free`` is False where a pair is banned in both directions and not
+        merely confounded (the coordinate never updates, so the entry is a hard
+        zero); ``factor``
         is 0 on required pairs (unpenalized) and 1 elsewhere.
         """
         p = len(names)
@@ -513,7 +517,11 @@ class Glasso:
         for i in range(p):
             for j in range(i + 1, p):
                 a, b = names[i], names[j]
-                if not knowledge.permits_edge(a, b) and not knowledge.permits_edge(b, a):
+                pair = frozenset((a, b))
+                hidden = pair in knowledge.confounded and pair not in knowledge.nonadjacent
+                if not hidden and not (
+                    knowledge.permits_edge(a, b) or knowledge.permits_edge(b, a)
+                ):
                     free[i, j] = free[j, i] = False
         index = {name: i for i, name in enumerate(names)}
         for u, v in knowledge.required:

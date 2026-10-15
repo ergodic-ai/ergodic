@@ -240,9 +240,10 @@ def _validate_skeleton(graph: MixedGraph, knowledge: DomainKnowledge) -> None:
     A skeleton has no directions, so ``knowledge.is_consistent`` (which
     demands required edges be directed and confounded pairs be bidirected)
     cannot apply. What an undirected graph can honor is adjacency: required
-    and confounded pairs must be adjacent, a pair forbidden in both
-    directions must not be, and under a skeleton restriction no edge may sit
-    outside the allow-list.
+    and confounded pairs must be adjacent, a pair under an adjacency ban
+    (``forbid_adjacency``) or forbidden in both directions must not be, unless
+    it is confounded (a hidden common cause, neither causing the other), and
+    under a skeleton restriction no edge may sit outside the allow-list.
     """
     problems: list[str] = []
     for u, v in sorted(knowledge.required):
@@ -254,12 +255,13 @@ def _validate_skeleton(graph: MixedGraph, knowledge: DomainKnowledge) -> None:
             problems.append(f"confounded pair {a}-{b} is not adjacent")
     reported: set[frozenset[str]] = set()
     for u, v in sorted(knowledge.forbidden):
-        if (v, u) in knowledge.forbidden and graph.get_edge(u, v) is not None:
-            pair = frozenset((u, v))
-            if pair not in reported:
-                reported.add(pair)
-                a, b = sorted((u, v))
-                problems.append(f"present edge between {a} and {b}, forbidden in both directions")
+        pair = frozenset((u, v))
+        banned = pair in knowledge.nonadjacent or pair not in knowledge.confounded
+        both = (v, u) in knowledge.forbidden
+        if both and banned and pair not in reported and graph.get_edge(u, v) is not None:
+            reported.add(pair)
+            a, b = sorted((u, v))
+            problems.append(f"present edge between {a} and {b}, forbidden in both directions")
     if knowledge.allowed_adjacencies is not None:
         for edge in graph.edge_list():
             if frozenset((edge.u, edge.v)) not in knowledge.allowed_adjacencies:

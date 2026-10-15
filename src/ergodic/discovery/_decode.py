@@ -203,6 +203,13 @@ class DecodeResult(DiscoveryResult):
       through any directed path. The probabilities read direct edges only (an
       order's part on a pair is "no direct edge against it"), which ``note`` says
       for order and tier entries.
+    - ``knowledge_violations`` and ``knowledge_violations_without_knowledge``:
+      what :meth:`~ergodic.DomainKnowledge.violations` reports for the hard
+      knowledge as a whole on ``graph`` (always empty: the decode enforces it)
+      and on the knowledge-free decode's graph (``None`` with ``audit=False``).
+      It reads order through the transitive closure, so it catches what no single
+      statement's entry shows, such as ``c -> a`` under ``order(a, b)`` and
+      ``order(b, c)``.
     - ``knowledge_cost``: the knowledge-free decode's ``objective`` minus this
       one's. Non-negative for ``exact_map``; the other decoders are not exact on
       the score, so it can be negative.
@@ -472,6 +479,7 @@ def decode(
     entries: tuple[dict[str, Any], ...] = ()
     conflicts: tuple[dict[str, Any], ...] = ()
     cost: float | None = None
+    free_broken: tuple[str, ...] | None = () if knowledge is None else None
     statements = knowledge.statements() if knowledge is not None else ()
     if knowledge is not None:
         broken = knowledge.violations(result_graph)
@@ -489,6 +497,7 @@ def decode(
             max_nodes,
         )
         free_graph = free.graphs[free.chosen]
+        free_broken = tuple(knowledge.violations(_to_graph(names, free_graph, ())))
         cost = _pair_log_score(free_graph, source, PROBABILITY_FLOOR) - objective
         entries = _audit(statements, names, source, run.graphs[run.chosen], free_graph)
         conflicts = tuple(entry for entry in entries if entry["conflict_pairs"])
@@ -539,6 +548,10 @@ def decode(
         "n_soft_statements": sum(statement.is_soft for statement in statements),
         "knowledge_audit": entries,
         "knowledge_cost": cost,
+        "knowledge_violations": (
+            () if knowledge is None else tuple(knowledge.violations(result_graph))
+        ),
+        "knowledge_violations_without_knowledge": free_broken,
         "knowledge_conflicts": conflicts,
         "note": DECODED_NOTE,
     }

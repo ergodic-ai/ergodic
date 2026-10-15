@@ -92,7 +92,8 @@ class RFCI:
     a perfect oracle: the RFCI skeleton can keep edges only the
     possible-d-sep phase would remove, and the result then stands for more
     than one Markov equivalence class. Domain knowledge enters exactly as in
-    FCI: prune (a pair forbidden in both directions is never tested), protect
+    FCI: prune (a pair forbidden in both directions is never tested, unless it
+    is confounded), protect
     (required and confounded pairs are never tested or removed), orient
     through ancestry (the same seeding helpers), validate at the end.
     """

@@ -18,7 +18,9 @@ circle-tail marks. An undirected edge in the output says both endpoints
 cause the selection in every member of the class.
 
 Domain knowledge translates through ancestry, not edge direction. Prune: a
-pair forbidden in both directions (an adjacency ban) is never tested.
+pair forbidden in both directions is never tested, unless it is confounded
+(then ``confound`` with the two directed bans means a pure hidden common cause,
+and the pair is kept and seeded ``<->``).
 Protect: required and confounded pairs are never tested or removed. Orient:
 ``require(u, v)`` seeds ``u -> v``; ``confound(a, b)`` seeds ``a <-> b`` (the
 data model reads a confounded pair as a pure hidden common cause); a tier or
