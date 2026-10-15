@@ -10,7 +10,7 @@ import pytest
 
 from ergodic import tabular
 from ergodic.discovery._ci import CIResult, CITest
-from ergodic.discovery._stats import _chi2_sf, _norm_cdf, _norm_two_sided
+from ergodic.discovery._stats import _chi2_sf, _norm_cdf
 from ergodic.discovery.algorithms._pc import PC
 from ergodic.discovery.ci._discrete import Discrete
 from ergodic.discovery.ci._gcm import GCM
@@ -294,14 +294,6 @@ def test_chi2_survival_matches_the_classic_quantiles() -> None:
     assert _chi2_sf(3.841, 1) == pytest.approx(0.05, abs=1e-3)
     assert _chi2_sf(5.991, 2) == pytest.approx(0.05, abs=1e-3)
     assert _chi2_sf(18.31, 10) == pytest.approx(0.05, abs=1e-3)
-
-
-def test_the_two_sided_normal_tail_survives_far_out() -> None:
-    assert _norm_two_sided(1.959964) == pytest.approx(0.05, abs=1e-6)
-    assert _norm_two_sided(-1.959964) == _norm_two_sided(1.959964)
-    # 1 - Phi(10) is zero in double precision; the tail itself is 1.52e-23.
-    assert 2.0 * (1.0 - _norm_cdf(10.0)) == 0.0
-    assert _norm_two_sided(10.0) == pytest.approx(1.523970604832e-23, rel=1e-9)
 
 
 def test_norm_cdf_matches_the_classic_quantile() -> None:

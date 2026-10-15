@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Numeric helpers for the discovery tests, kept free of scipy.
 
-``_norm_cdf`` is the standard normal CDF (through ``math.erf``) and
-``_norm_two_sided`` the two-sided normal tail (through ``math.erfc``, so it
-does not underflow to zero until about ``|z| = 38``). ``_chi2_sf``
+``_norm_cdf`` is the standard normal CDF (through ``math.erf``). ``_chi2_sf``
 is the chi-square survival function, computed from the regularized incomplete
 gamma function by series or continued fraction (the classic split at s + 1).
 """
@@ -19,11 +17,6 @@ _MAX_ITER = 500
 def _norm_cdf(x: float) -> float:
     """The standard normal CDF."""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-
-def _norm_two_sided(z: float) -> float:
-    """The two-sided standard normal tail ``P(|Z| >= |z|)``, accurate in the far tail."""
-    return math.erfc(abs(z) / math.sqrt(2.0))
 
 
 def _lower_series(s: float, x: float) -> float:

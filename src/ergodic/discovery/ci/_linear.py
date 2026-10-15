@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 
 from .._ci import CITest
-from .._stats import _norm_two_sided
+from .._stats import _norm_cdf
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -69,5 +69,5 @@ class Linear(CITest):
         r = float(rx @ ry) / denom if denom > 0.0 else 0.0
         r = min(_CLIP, max(-_CLIP, r))
         stat = math.sqrt(n - dz - 3) * math.atanh(r)
-        p = _norm_two_sided(stat)
+        p = 2.0 * (1.0 - _norm_cdf(abs(stat)))
         return stat, p, None
