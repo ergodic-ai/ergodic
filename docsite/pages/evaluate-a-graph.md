@@ -366,6 +366,83 @@ of magnitude. BGe is also a score for the searches: `discover(data, "ges",
 score="bge")`. A score posterior is exact by enumeration up to five variables and runs
 MCMC above that.
 
+## Average an effect over the graphs
+
+A posterior over DAGs carries straight through to effects. `adjustment_probability`
+is the posterior probability that a set is a valid adjustment set, by ergodic's
+adjustment criterion. `average_effect` asks each DAG which adjustment set identifies
+the effect (the one `identify_effect` would use), groups the DAGs by set, estimates the
+effect once per set with ergodic's estimators, and mixes the estimates by posterior
+mass.
+
+```python file="average_over_graphs.py"
+import numpy as np
+
+from ergodic import (
+    EdgeProbabilities,
+    adjustment_probability,
+    average_effect,
+    graph_posterior,
+    tabular,
+)
+
+# 1. Data where c confounds a binary treatment t and the outcome y; the effect is 2.
+rng = np.random.default_rng(0)
+c = rng.normal(size=2000)
+t = (0.9 * c + rng.normal(size=2000) > 0).astype(float)
+y = 2.0 * t + 1.5 * c + rng.normal(size=2000)
+data = tabular({"c": c, "t": t, "y": y}, types={"t": "continuous"})
+
+# 2. A model's pair-state probabilities: sure about t -> y and c -> y, unsure about c, t.
+names = ("c", "t", "y")
+values = np.array(
+    [
+        [0.00, 0.60, 0.95],
+        [0.15, 0.00, 0.90],
+        [0.02, 0.05, 0.00],
+    ]
+)
+posterior = graph_posterior(EdgeProbabilities(names, values, kind="pair_state"))
+
+# 3. How likely is each adjustment set to be valid?
+print(round(adjustment_probability(posterior, "t", "y", ["c"]).probability, 3))
+print(round(adjustment_probability(posterior, "t", "y", []).probability, 3))
+
+# 4. The effect, estimated once per adjustment set and averaged by posterior mass.
+result = average_effect(posterior, data, "t", "y")
+print(result.to_frame()[["adjustment_set", "mass", "n_dags", "estimate", "std_error"]].round(3))
+print(round(result.mean, 3), round(result.std, 3))
+print(round(result.zero_effect_mass, 3), result.unidentified_mass, result.truncated_mass)
+```
+
+```output from="average_over_graphs.py"
+0.811
+0.404
+       adjustment_set   mass  n_dags  estimate  std_error
+0                   c  0.757       3     1.969      0.066
+1             (empty)  0.156       6     3.563      0.072
+2  (no directed path)  0.087      16     0.000      0.000
+2.046 0.857
+0.087 0.0 0.0
+```
+
+- **Step 3.** `{c}` is valid unless `t --> c`, which makes `c` a mediator; no
+  adjustment is valid only when no edge runs from `c` into `t`.
+- **Step 4.** Three DAGs adjust for `c` and estimate about 2. Six adjust for nothing
+  and pick up the confounding. In the rest no directed path runs from `t` to `y`,
+  so the effect is 0 there. The mixture mean weighs the three by mass. Its standard
+  deviation adds the spread between the groups to their own standard errors (the law
+  of total variance), so it says how much the answer depends on the graph.
+
+Mass is kept apart in three ways. DAGs with no directed path enter the mixture at 0
+and are reported as `zero_effect_mass`. If your data lacks a variable of the posterior,
+it's treated as hidden, and DAGs where no adjustment set over your columns is valid are
+`unidentified_mass`. Only the `max_sets` heaviest sets (20 by default) are estimated;
+the rest are `truncated_mass`. The mixture covers `identified_mass` and leaves the
+other two out, never averaging them in. The default estimator is the doubly-robust
+AIPW, which needs a binary treatment; pass `strategy="dml"` for a continuous one, and
+`rule="minimal"` to adjust for a minimal set instead.
+
 ## Read the result
 
 `graph_posterior` returns `GraphSamples`:
@@ -406,6 +483,7 @@ Nothing touches numpy's global random state, and the same `seed` gives the same 
 - [Decode a DAG from edge probabilities](decode-a-graph.md): pick one DAG instead.
 - [Add domain knowledge](domain-knowledge.md): every kind of statement.
 - [Choose a method and test](choose-a-method.md): the scores, BGe among them.
+- [Estimate an average effect](estimate-average-effect.md): one graph, one estimate.
 - [Python reference](reference-discovery.md): `graph_posterior`, `evaluate_graph`, `GraphSamples`.
 
 </div>

@@ -93,6 +93,7 @@ learner) to use other models.
 <div class="cards" markdown="1">
 
 - [Refute an estimate](refute-an-estimate.md): stress-test this estimate with placebo and subset checks.
+- [Average an effect over the graphs](evaluate-a-graph.md#average-an-effect-over-the-graphs): estimate across a posterior over DAGs.
 - [Estimate heterogeneous effects](heterogeneous-effects.md): find who gains more or less from the treatment.
 - [Python reference](reference-inference.md): every option of `estimate_effect`.
 

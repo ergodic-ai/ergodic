@@ -106,6 +106,16 @@ Planned as 0.3.0.
   Monte Carlo error, the class probability of a CPDAG, the expected SHD against the
   between-draw baseline, and P(acyclic) under raw independent marginals. A bidirected
   edge or latent node is listed as not assessable.
+- Effects over a posterior over DAGs (DEC-082 decision 6). `adjustment_probability(samples,
+  treatment, outcome, adjustment)` is the posterior probability that a set satisfies the
+  adjustment criterion. `average_effect(samples, data, treatment, outcome)` groups the
+  DAGs by the adjustment set identification picks, estimates once per set (the family
+  default, seeded; `strategy=`, `learner=`, `rule="minimal"`) and returns an
+  `AveragedEffect`: the `AdjustmentGroup`s (set, mass with its Monte Carlo error, DAG
+  count, estimate, standard error), the mixture mean and its variance by the law of
+  total variance, and the zero-effect (no directed path), unidentified (a variable the
+  data lacks makes every set invalid) and truncated (beyond `max_sets`) masses, the last
+  two left out of the mixture and reported.
 - The `BGe` score (`score="bge"`): the linear-Gaussian marginal likelihood of Geiger and
   Heckerman with the Kuipers, Moffa and Heckerman correction, decomposable and
   score-equivalent, for `graph_posterior` and the score-based searches.
