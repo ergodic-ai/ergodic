@@ -5,7 +5,10 @@ step. Then take the forecast apart to see how much each driver contributes.
 
 !!! need "You'll need"
     - ergodic with the forecasting extra: `pip install "ergodic[forecast]"`. It adds
-      PyMC, and JAX with NumPyro for faster sampling.
+      PyMC only.
+    - Optionally, JAX and NumPyro: `pip install jax numpyro`. Sampling then runs on
+      the faster NumPyro backend, which recorded the output on this page. Without
+      them, PyMC's default backend is slower and its draws differ.
     - Your series in one table with a time column, read with `ergodic.timeseries`.
 
 ## Run the program
@@ -80,12 +83,14 @@ total 1008.4; bars add up: True
 - **Step 2.** The window graph has one edge, `visits[t-1] -> sales[t]`. The schedule
   fits visits first, then sales.
 - **Step 3.** Each row is a forecast step with its median and a 90% band. The sales
-  band widens because it carries the uncertainty of the visits forecast.
-- **Step 4.** No divergent transitions, and dozens of effective draws per parameter.
-  That is enough for a page example; use a larger budget for decisions.
-- **Step 5.** Over the six months, the model expects about 1,008 in sales. Visits
-  account for about 909 of it. The season bar is near zero, as it should be: the
-  simulated data has no season.
+  band widens partly because, from step 2 on, it carries the uncertainty of the
+  visits forecast. Sales' own level and trend add the rest.
+- **Step 4.** No divergent transitions, and at least 48 effective draws for the
+  worst parameter. That is enough for a page example; use a larger budget for
+  decisions.
+- **Step 5.** Over the six months, the model expects about 1,008 in sales. The
+  visits bar is about 909, measured against a world with zero visits. The season bar
+  is near zero, as it should be: the simulated data has no season.
 
 ## Write the window graph
 
@@ -110,12 +115,15 @@ result, unchanged. It uses the same naming.
 - `"staged"` fits one node at a time, in the order `schedule` shows. Each child
   receives its parents' whole forecast posterior, draw for draw.
 - `"joint"` fits every node in one model, so their posteriors stay correlated.
+- `"independent"` fits each series alone and ignores any graph; it refuses a
+  `graph=` or a `scenario=`.
 - `"auto"`, the default, is joint for up to 4 sampled nodes and staged above that.
   Without a graph, each series is fitted alone. `result.strategy` records the choice.
 
 !!! caution "Read the diagnostics"
-    On this data, the joint fit at the same budget gave far fewer effective draws
-    (single digits), so the page uses `fit="staged"`. Check
+    With `fit=` left out, `"auto"` picks the joint fit for this two-node graph. On
+    this data and budget, that gave single-digit effective draws, so the page uses
+    `fit="staged"`. Check
     `result.diagnostics` for divergences and a small `min_ess` before you trust a
     band, and raise `draws` and `warmup` when they look poor.
 
@@ -134,7 +142,13 @@ of sample paths, in the units of your data:
 
 `explain()` returns one bar for the series' own level and trend, one for the season,
 and one per driver. Each bar carries posterior draws, so `to_frame()` shows a
-90% band for it. The bars add up to `total`, the model's mean path over the window.
+90% band for it. The bars add up to `total`: the model's mean path, summed over the
+window with the default `reduce="sum"`.
+
+Each driver bar is measured against the driver at zero, which may be far outside your
+data. When a driver trends, the level bar and the driver bar trade off: read them
+together, with their bands, not as a firm split. On this data, the joint fit splits
+the same total differently, with a smaller level bar and a larger visits bar.
 
 Pass `windows=[Window("Q1", 0, 3), Window("Q2", 3, 6)]` to split the horizon, by
 step or by date. Pass `reduce="mean"` for a rate rather than a flow. Pass
