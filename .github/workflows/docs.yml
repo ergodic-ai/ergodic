@@ -76,7 +76,7 @@ jobs:
         run: |
           for old in $(uv run python -c "import tomllib; print(' '.join(tomllib.load(open('docsite/site.toml', 'rb'))['versions']['previous']))"); do
             git worktree add "../docs-v$old" "v$old"
-            (cd "../docs-v$old" && uv sync --frozen && uv run python -m scripts.docsite build --allow-undocumented --output "$GITHUB_WORKSPACE/site")
+            (cd "../docs-v$old" && uv sync --frozen --extra welt && uv run python -m scripts.docsite build --allow-undocumented --output "$GITHUB_WORKSPACE/site")
           done
       - name: Build the current version
         run: uv run python -m scripts.docsite build --output site --report site-report/reference-coverage.json

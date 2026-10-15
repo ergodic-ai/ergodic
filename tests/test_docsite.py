@@ -231,6 +231,7 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     # links into them are the only problems, and --retained-elsewhere excuses them.
     assert check_links(output, site.previous_versions) == []
     missing = check_links(output)
+    assert missing  # The picker links to every retained version.
     assert all(any(f"v{v}/" in problem for v in site.previous_versions) for problem in missing)
 
 
