@@ -142,6 +142,7 @@ pages = [
     ["Backtest a forecast", "backtest-a-forecast"],
     ["Reconcile a hierarchy", "reconcile-a-hierarchy"],
     ["Run scenarios", "run-scenarios"],
+    ["Forecast with Welt's Chronos-2", "forecast-with-welt"],
 ]
 
 [[groups]]

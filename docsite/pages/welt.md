@@ -251,6 +251,7 @@ of submitting again.
 
 <div class="cards" markdown="1">
 
+- [Forecast with Welt's Chronos-2](forecast-with-welt.md): forecast in Welt, backtest and reconcile in ergodic.
 - [Compatibility with Welt](compatibility.md): versions, graph format and what converts.
 - [Estimate an average effect](estimate-average-effect.md): the same kind of estimate with local learners.
 - [Welt SDK documentation](https://ergodic-ai.github.io/welt-python/): models, keys and usage.
