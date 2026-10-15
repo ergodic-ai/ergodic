@@ -60,3 +60,5 @@ jobs:
           tests/test_forecast_staged.py::test_both_strategies_are_bitwise_deterministic
           tests/test_forecast_reconcile.py::test_bottom_up_wins_where_the_leaves_are_the_signal
           tests/test_latent_golden.py
+          tests/test_forecast_reconcile.py
+          tests/test_forecast_staged.py

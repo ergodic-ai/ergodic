@@ -11,7 +11,7 @@ from ergodic import DomainKnowledge, tabular
 from ergodic.data import TabularData
 from ergodic.discovery import PC, DSeparationOracle, Linear
 from ergodic.discovery.algorithms._mmpc import MMPC
-from ergodic.graph import GraphKind, dag
+from ergodic.graph import GraphKind, cpdag_of_dag, dag
 
 
 def _pairs(graph_edges: frozenset) -> set[frozenset[str]]:  # type: ignore[type-arg]
@@ -152,8 +152,9 @@ def test_the_screen_feeds_a_score_search_and_the_optimum_survives() -> None:
 
     direct = AStar(score="bic").fit(data)
     restricted = AStar(score="bic").fit(data, knowledge=support)
-    from ergodic.graph import cpdag_of_dag
-    print("PROBE mmpc", sorted(map(str, direct.graph.edges)), sorted(map(str, restricted.graph.edges)))
+    # BIC is score-equivalent, so the optimum is a Markov equivalence class: a
+    # reversible edge (here A - C) can come out either way when the tied scores
+    # round differently (Linux CI and macOS do). The class must be the same.
     assert cpdag_of_dag(restricted.graph) == cpdag_of_dag(direct.graph)
 
 
