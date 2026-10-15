@@ -146,6 +146,8 @@ To be released together with welt-client 0.13.
   than a `KeyError`. KNN used before `fit` raises `RuntimeError`, and `set_params`
   on the native KNN, OLS and logistic learners refuses unknown names, as sklearn
   does.
+- The documentation moved to https://ergodic.dev (Graphite builder); the MkDocs
+  site is retired.
 
 ### Fixed
 - `estimate_mediation`: the total effect is now computed directly as

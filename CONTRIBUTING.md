@@ -47,8 +47,7 @@ make docs-notebooks  # execute every learn and case-study notebook (slow; releas
 If you change behaviour a page program shows, run `make docs-record` and review the
 diff of the recorded outputs. If you change a simulation the notebooks call, run
 `make docs-notebooks` and check that every number quoted in the prose still matches
-the seeded output. The legacy MkDocs site builds with `make docs-mkdocs` until it
-retires.
+the seeded output.
 
 ## What a good change looks like
 

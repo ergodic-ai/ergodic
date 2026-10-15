@@ -91,14 +91,9 @@ dev = [
     "markdown>=3.6",
 ]
 docs = [
-    "mkdocs>=1.6,<2",
-    "mkdocs-material>=9.5",
-    "mkdocstrings[python]>=0.26",
-    # The learn series: py:percent notebooks executed at build time.
-    "mkdocs-jupyter>=0.25",
-    "ipykernel>=6.29",
+    # The learn and case-study notebooks draw with matplotlib (make docs-notebooks).
     "matplotlib>=3.8",
-    # The Graphite documentation builder (scripts/docsite, API-143).
+    # The Graphite documentation builder (scripts/docsite).
     "markdown>=3.6",
 ]
 
@@ -125,8 +120,6 @@ exclude = [
     "CLAUDE.md",
     "Makefile",
     "RELEASING.md",
-    "deploy",
-    "mkdocs.yml",
     "plans",
     "uv.lock",
 ]

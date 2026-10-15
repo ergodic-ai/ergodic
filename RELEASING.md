@@ -53,8 +53,9 @@ API tokens anywhere.
 
 5. Owner decisions recorded: which stale remote branches to delete before going
    public (`codex/latent-productization`, `forecast-s5`, `scm-mvp`, `docs-redesign`,
-   `metalearners-phase2`), and whether `deploy/` and the Illustrator data in the logo
-   SVGs stay (see the API-146 scan report). Deleting a branch does **not** hide its
+   `metalearners-phase2`), and whether the Illustrator data in the logo SVGs
+   (`public/`) stays (see the API-146 scan report; `deploy/` and `docs/assets/` went
+   with the MkDocs site in 0.2.0, though history keeps them). Deleting a branch does **not** hide its
    content: the pull-request refs keep those commits reachable on GitHub (`pull/2` is
    `scm-mvp`, `pull/5` is `metalearners-phase2`; `pull/1` and `pull/3` hold 17
    pre-squash commits no branch reaches), and only GitHub support can remove PR refs.
@@ -291,8 +292,9 @@ and the TXT records verify Resend and Google.
    curl -sI https://ergodic.dev | head -3   # HTTP/2 200 from GitHub
    ```
 
-6. Once the new site is live, the MkDocs site on Cloud Run (`ergodic-docs`, project
-   `ergodic`) retires (DEC-078). Deleting that service is a separate owner go.
+6. The MkDocs site's source is gone in 0.2.0. Once the new site is live, the old
+   site still served on Cloud Run (`ergodic-docs`, project `ergodic`) retires
+   (DEC-078). Deleting that service is a separate owner go.
 
 ## 9. Rollback
 

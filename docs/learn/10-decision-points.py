@@ -358,4 +358,4 @@ print(f"overlap_share: {ps.overlap_share:.2f}   flagged: {ps.flagged}")
 # decision points carry price tags. The
 # [conformance and decisions guide](../../docsite/pages/conformance-and-decisions.md) documents the
 # model layer's surface, mining cuts and replay conventions included, and the
-# [API reference](../reference.md) covers every object these guides use.
+# [API reference](https://ergodic.dev/reference.html) covers every object these guides use.
