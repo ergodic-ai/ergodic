@@ -136,7 +136,8 @@ your knowledge names hidden confounders), `method` is
     A model that scores edges one at a time doesn't promise a DAG. The decoder picks
     one, and a different decoder, threshold or seed can pick another. Sampler
     candidates are not draws from a posterior over graphs, and nothing certifies the
-    orientations.
+    orientations. To see how much of the model's posterior over DAGs a decoded graph
+    carries, read it with [Evaluate a candidate graph](evaluate-a-graph.md).
 
 Decoding is deterministic: ties go to the earlier variable, the same seed gives the
 same candidates, and neither the input nor numpy's global random state changes.
@@ -346,6 +347,7 @@ are marginals.
 <div class="cards" markdown="1">
 
 - [Work with edge probabilities](edge-probabilities.md): build and read the input.
+- [Evaluate a candidate graph](evaluate-a-graph.md): the posterior over DAGs, and any graph read against it.
 - [Add domain knowledge](domain-knowledge.md): every kind of statement.
 - [Identify an effect](identify-an-effect.md): use the decoded DAG.
 - [Python reference](reference-discovery.md): `decode`, `Decoder` and `DecodeResult`.

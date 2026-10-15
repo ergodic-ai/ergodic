@@ -113,7 +113,12 @@ types: all continuous, all categorical, or a mix.
 | `"bic"` | `BIC` | Continuous data, Gaussian linear model. |
 | `"bic_discrete"`, `"discrete_bic"` | `DiscreteBIC` | Categorical data. |
 | `"bdeu"` | `BDeu` | Categorical data, Bayesian score with `ess=10.0`. |
+| `"bge"` | `BGe` | Continuous data, linear Gaussian model, Bayesian score (the marginal likelihood). |
 | `"bic_mixed"`, `"mixed_bic"` | `MixedBIC` | A mix of column types. |
+
+BDeu and BGe are marginal likelihoods, so a score search returns their best DAG, and
+`graph_posterior(data, score="bge")` gives the posterior over DAGs behind it. See
+[Evaluate a candidate graph](evaluate-a-graph.md#get-a-posterior-from-data-with-a-score).
 
 ## Give GCM a learner
 
@@ -154,6 +159,7 @@ and restrict the search to the screen (see
 <div class="cards" markdown="1">
 
 - [Check stability with the bootstrap](bootstrap-stability.md): see how much of the graph survives resampling.
+- [Evaluate a candidate graph](evaluate-a-graph.md): a posterior over DAGs from a score, and a graph read against it.
 - [Add domain knowledge](domain-knowledge.md): orient what no test or score can.
 - [Python reference](reference-discovery.md): every method, test and score.
 
