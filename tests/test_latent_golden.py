@@ -204,8 +204,14 @@ def test_amplitude_arm_fires_amp() -> None:
     zero, and the path finds the switch. The other arms assert their verdicts.
     """
     result, switch = run_spectral(AMPLITUDE, seed=25)
-    low, _, _ = result.deltas()["amp"]
-    assert low > 0.05, result.deltas()
+    deltas = result.deltas()
+    low, _, _ = deltas["amp"]
+    assert low > 0.05, deltas
+    # The wave gate lets the amplitude verdict stand, and amp is the block that
+    # moved most (|mean| about 0.45 against at most 0.15 elsewhere, on both
+    # platforms), so a wider co-fire elsewhere cannot pass for the planted one.
+    assert all(gate.passed for gate in result.gates if "amp" in gate.blocks), result.gates
+    assert max(deltas, key=lambda name: abs(deltas[name][1])) == "amp", deltas
     assert agreement(result.tick_path(), switch[: len(result.tick_path())]) > 0.8
 
 
