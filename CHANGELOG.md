@@ -51,6 +51,24 @@ Planned as 0.3.0.
   and `Decoder(..., audit=False)` skip it.
 - `ergodic.KnowledgeConflictWarning` (a `UserWarning`), raised once by a decode whose
   knowledge strongly conflicts with the model, pointing at your call.
+- `test_graph(candidate, data)` (also `ergodic.discovery.test_graph`) tests a
+  candidate graph against data (API-152, DEC-082). It lists one implied
+  independence per pair of observed variables without an edge, tests each with the
+  conditional-independence test `discover` would pick from the columns (or `test=`),
+  and combines the p-values with Fisher's C on `2k` degrees of freedom. A DAG uses
+  Shipley's basis set (the parents of both); a CPDAG uses the same set in its
+  consistent extension; an ADMG, a MAG, a DAG with `latent=` or `selection=` nodes
+  and a PAG (through one member MAG) use m-separation, with the parents of both when
+  they separate and otherwise a minimal set of the pair's observed ancestors. Every
+  conditioning set is checked against the graph's separation routine, and a pair no
+  observed set separates is reported in `untestable`. The result, a frozen
+  `GraphTest`, carries the statistic, p-value, `k`, the test, `alpha`, notes, and the
+  claims (`ImpliedIndependence`) ranked by p-value with Holm-adjusted p-values and
+  decisions; `to_dict()` and `to_frame()` export it. The p-value cannot separate
+  Markov-equivalent graphs and a pass does not confirm the graph; the new guide
+  "Test a graph against data" says so. Over 3,000 seeded six-variable linear-Gaussian
+  worlds the true graph was rejected at `alpha = 0.05` in 5.5% of worlds with 200
+  rows and 4.6% with 1,000.
 
 ### Changed
 - A decode with knowledge, hard-only knowledge included, now audits it: one extra
