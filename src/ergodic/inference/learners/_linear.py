@@ -9,6 +9,7 @@ sklearn or xgboost estimator drops into the same slots with no adapter.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -17,6 +18,27 @@ from .._stats import _sigmoid
 
 if TYPE_CHECKING:
     import numpy.typing as npt
+
+
+class ConvergenceWarning(UserWarning):
+    """An iterative native learner stopped at ``max_iter`` before converging."""
+
+
+def _set_known_params(estimator: Any, params: dict[str, Any]) -> None:
+    """Set ``params`` on ``estimator``, refusing names ``get_params`` does not list.
+
+    Mirrors sklearn: an unknown name raises rather than quietly creating an
+    attribute the learner never reads.
+    """
+    valid = estimator.get_params()
+    unknown = sorted(key for key in params if key not in valid)
+    if unknown:
+        raise ValueError(
+            f"invalid parameter(s) {unknown} for {type(estimator).__name__}; "
+            f"valid parameters are {sorted(valid)}"
+        )
+    for key, value in params.items():
+        setattr(estimator, key, value)
 
 
 def _design(x: npt.NDArray[np.float64], fit_intercept: bool) -> npt.NDArray[np.float64]:
@@ -74,8 +96,7 @@ class OLS:
         return {"fit_intercept": self.fit_intercept, "ridge": self.ridge}
 
     def set_params(self, **params: Any) -> OLS:
-        for key, value in params.items():
-            setattr(self, key, value)
+        _set_known_params(self, params)
         return self
 
 
@@ -114,6 +135,7 @@ class LogisticRegression:
         if self.fit_intercept:
             penalty[0, 0] = 0.0
         beta = np.zeros(k, dtype=np.float64)
+        converged = False
         for _ in range(self.max_iter):
             prob = _sigmoid(design @ beta)
             grad = design.T @ (weight * (label - prob)) - penalty @ beta
@@ -125,7 +147,16 @@ class LogisticRegression:
                 step = np.asarray(np.linalg.lstsq(hessian, grad, rcond=None)[0], dtype=np.float64)
             beta = beta + step
             if float(np.max(np.abs(step))) < self.tol:
+                converged = True
                 break
+        if not converged:
+            warnings.warn(
+                f"LogisticRegression stopped at max_iter={self.max_iter} before the "
+                f"Newton step fell below tol={self.tol:g}; the coefficients may not "
+                "have converged (separable classes do this). Raise max_iter or l2.",
+                ConvergenceWarning,
+                stacklevel=2,
+            )
         self._coef = np.asarray(beta, dtype=np.float64)
         return self
 
@@ -147,6 +178,5 @@ class LogisticRegression:
         }
 
     def set_params(self, **params: Any) -> LogisticRegression:
-        for key, value in params.items():
-            setattr(self, key, value)
+        _set_known_params(self, params)
         return self

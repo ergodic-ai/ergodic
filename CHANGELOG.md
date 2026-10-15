@@ -158,6 +158,16 @@ To be released together with Welt.
 - The best-linear-projection docstrings no longer say the intercept is the ATE:
   the covariates enter uncentred, so the intercept is the projected effect at
   covariates all zero (the ATE only when they are centred). Outputs unchanged.
+- `KNNRegressor` and `KNNClassifier` honour `sample_weight` (a weighted mean
+  over the neighbours). They accepted it and dropped it, so the R-learner's
+  weighted final stage ran unweighted with a KNN learner. `PyMCLearner` now
+  declares `supports_sample_weight = False`, so the R-learner refuses it before
+  any fit, and its `fit` raises on weights instead of ignoring them.
+- KNN used before `fit` raises `RuntimeError` naming the learner instead of an
+  `AssertionError`. `set_params` on the native KNN, OLS and logistic learners
+  refuses unknown names, as sklearn does. `LogisticRegression` warns with the
+  new `ergodic.inference.learners.ConvergenceWarning` when it stops at
+  `max_iter` before converging.
 
 ## [0.1.1] - 2026-08-30
 

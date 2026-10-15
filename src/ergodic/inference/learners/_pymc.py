@@ -20,7 +20,7 @@ mean, not the noisy outcome), and cloning through ``get_params`` / ``set_params`
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -41,6 +41,9 @@ class PyMCLearner:
 
     _mean_node = "mu"
     _data_name = "X"
+    #: A user-written PyMC model has no generic place for row weights, so a
+    #: weighted slot (the R-learner's final stage) refuses this learner up front.
+    supports_sample_weight: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -75,6 +78,12 @@ class PyMCLearner:
     ) -> PyMCLearner:
         import pymc as pm
 
+        if sample_weight is not None:
+            raise TypeError(
+                f"{type(self).__name__}.fit takes no sample_weight: a PyMC model has no "
+                "generic place for row weights. Write them into build() yourself, or "
+                "use a learner that accepts them"
+            )
         x = np.asarray(X, dtype=np.float64)
         target = np.asarray(y, dtype=np.float64).reshape(-1)
         self._model = self.build(x, target)
