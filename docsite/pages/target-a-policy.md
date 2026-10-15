@@ -18,8 +18,7 @@ program learns the rule on one half of the people and measures it on the other.
 ```python file="target_policy.py"
 import numpy as np
 import pandas as pd
-from ergodic import cate, dag, identify_effect, policy_tree, tabular
-from ergodic.inference import dr_scores
+from ergodic import cate, dag, policy_tree, tabular
 
 # 1. Simulate 4,000 people. The effect is +0.8 when need > 0 and age > 0, else negative.
 rng = np.random.default_rng(0)
@@ -53,17 +52,16 @@ train, test = data.take(np.flatnonzero(learn)), data.take(np.flatnonzero(~learn)
 effects = cate(graph, train, "coached", "outcome", random_state=0, uncertainty=False)
 tree = policy_tree(effects, depth=2)
 print(tree.describe())
-in_sample = (tree.value - tree.treat_none_value) / 2  # value is on a doubled scale
-print(f"gain over treating no one, in sample: {in_sample:.3f}")
+print(f"gain over treating no one, in sample: {tree.value:.3f}")
 print(f"best possible gain, learning half: {np.mean(np.maximum(true_effect[learn], 0)):.3f}")
 
 # 4. Evaluate the rule on the held-out half, with fresh doubly robust scores.
-held_out = dr_scores(identify_effect(graph, "coached", "outcome"), test, random_state=0)
-treat = tree.predict(held_out.covariates)  # columns in tree.covariates order
-gain = treat * held_out.scores
-half_width = 1.96 * gain.std(ddof=1) / np.sqrt(len(gain))
-low, high = gain.mean() - half_width, gain.mean() + half_width
-print(f"gain over treating no one, held out: {gain.mean():.3f} [{low:.3f}, {high:.3f}]")
+held_out = cate(graph, test, "coached", "outcome", random_state=0, uncertainty=False)
+value = tree.evaluate(held_out)
+low, high = value.interval(0.95)
+print(f"gain over treating no one, held out: {value.value:.3f} [{low:.3f}, {high:.3f}]")
+x_test = test.to_pandas()[list(tree.covariates)].to_numpy()
+treat = tree.predict(x_test)
 print(f"held-out share treated: {treat.mean():.2f}")
 
 # 5. Check the rule against the truth on the held-out half.
@@ -105,27 +103,23 @@ best possible gain, held-out half: 0.195
 ## Measure a rule on held-out data
 
 The tree is picked to maximize its own scores, so its value on those scores is
-optimistic: a winner's curse. `tree.value` and `tree.interval()` are valid only for
-a rule fixed in advance. To measure a learned rule, score it on rows it never saw:
+optimistic: a winner's curse. `tree.value` is the gain over treating no one in
+outcome units, but `tree.value` and `tree.interval()` are valid only for a rule fixed
+in advance. To measure a learned rule, score it on rows it never saw:
 
 ```python
-held_out = dr_scores(identify_effect(graph, "coached", "outcome"), test, random_state=0)
-treat = tree.predict(held_out.covariates)  # columns in tree.covariates order
-gain = treat * held_out.scores
+held_out = cate(graph, test, "coached", "outcome", random_state=0, uncertainty=False)
+value = tree.evaluate(held_out)
+low, high = value.interval(0.95)
 ```
 
-`dr_scores` returns one doubly robust score per held-out person: a noisy signal of
-their effect. Averaging the score over the people the rule treats, with 0 for the
-rest, estimates the gain over treating no one, in outcome units. Its standard error
-is valid because the rule is fixed before these rows are used. `predict` needs the
-columns in `tree.covariates` order; both use the sorted adjustment set, so they
-match here.
-
-!!! caution "In-sample values are on a doubled scale"
-    `tree.value` averages each score with a plus sign when the rule treats and a
-    minus sign when it does not. Treating everyone scores the average effect;
-    treating no one scores its negative. Halve a difference of two values to get a
-    gain in outcome units, as step 3 does. `tree.regret()` is on the same scale.
+The held-out `cate` result carries one doubly robust score per person: a noisy signal
+of their effect. `tree.evaluate` averages the score over the people the rule treats,
+with 0 for the rest, which estimates the gain over treating no one, in outcome units.
+It returns a `PolicyValue` with `value`, `std_error`, `interval()`, `treat_all_value`
+and `regret()`. Its standard error is valid because the rule is fixed before these
+rows are used. The held-out scores must carry the tree's split covariates; `evaluate`
+picks them by name.
 
 ## How the tree is chosen
 
@@ -152,7 +146,9 @@ when their scores sum to more than 0. The tree maximizes the total over leaves.
   `tree.covariates`, in that order.
 - `tree.leaves()` lists the leaves with their action and size.
 - `tree.regret("treat_all")`, `("treat_none")` or `("best_trivial")` returns
-  `value` minus that baseline's value, on the same doubled, in-sample scale.
+  `value` minus that baseline's value, in outcome units and in sample (so optimistic,
+  like `value`). `tree.treat_none_value` is 0 and `tree.treat_all_value` is the
+  average effect.
 - `effects.explain().policy_tree(depth=2)` builds the same tree.
 
 </details>

@@ -94,7 +94,7 @@ formula as adjustment or the front door, the strategy says so; otherwise it is
 
 | Kind | Where it comes from | What can identify |
 | --- | --- | --- |
-| `dag`, `admg` | Your drawing; LiNGAM | Every strategy |
+| `dag`, `admg` | Your drawing; LiNGAM | Every strategy, unless it marks `selection=` nodes |
 | `cpdag` | PC, GES, BOSS, GRaSP | Null and adjustment, valid in every member |
 | `pag`, `mag` | FCI, RFCI | Null and adjustment, valid in every member |
 | `mixed` | Discovery with orienting knowledge, screens | Nothing until you re-face it |
@@ -102,6 +102,11 @@ formula as adjustment or the front door, the strategy says so; otherwise it is
 A* and HillClimb also return a `dag`, but it is one member of an equivalence class,
 picked by tie-breaking among DAGs with the same score. Identify on
 `cpdag_of_dag(graph)` instead, so the answer doesn't rest on an arbitrary direction.
+
+A graph that marks selection nodes (`selection=`) raises on every kind. The criteria
+assume the data were not selected on any node, and an effect generally isn't
+identifiable from a selected sample: with `X -> S <- Y` and `S` selected, `X` and `Y`
+are dependent in the sample even though `X` has no effect on `Y`.
 
 On a class, the front-door and instruments need a single graph. To see each member's
 answer, use `ida`, described in

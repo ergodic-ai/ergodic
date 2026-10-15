@@ -109,7 +109,8 @@ The methods read knowledge in different ways:
 
 !!! caution "Only FCI and RFCI can represent `confound`"
     A CPDAG or a DAG has no bidirected edge. With `confound`, PC, GES, BOSS, GRaSP,
-    HillClimb and A* raise an error, because their graph can't satisfy the knowledge.
+    HillClimb and A* raise a `ValueError` naming the violation, because their graph
+    can't satisfy the knowledge.
     LiNGAM raises too. MMPC and glasso accept it and only keep the pair adjacent. Use
     `method="fci"`.
 

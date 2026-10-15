@@ -119,7 +119,8 @@ To override one, pass `mechanisms={"Y": "linear"}`. The names are `"linear"`,
 
 `draws`, `tune` and `chains` set the sampler budget. The defaults are 1,000 draws,
 1,000 tuning steps and 2 chains. This page uses a smaller budget so it runs in
-seconds.
+seconds. `cores` (default 1) caps the processes PyMC may use for the chains, so the
+chains run one after another unless you raise it; the draws are the same either way.
 
 !!! caution "The graph carries the assumptions"
     The front-door answer holds only if `M` carries all of the effect of `X`,
@@ -131,11 +132,10 @@ seconds.
 - A DAG, an ADMG, or a DAG with `latent=` nodes. Each `<->` edge becomes one hidden
   variable per unit. Nodes connected through `<->` edges are fitted jointly, as one
   group. A latent node can't be a query target or an intervention target.
-- A graph with undirected or circle edges, such as a CPDAG or PAG, raises a
-  `ValueError`. Pick one member of the class first.
-- A MAG made only of `->` and `<->` edges is not refused: it is fitted as an ADMG,
-  which reads each `->` as a direct effect. A MAG's edges mean ancestry, so convert
-  it to an ADMG yourself first.
+- Any other kind raises a `ValueError`: a CPDAG, PAG or MAG stands for a class of
+  graphs, and a MAG's or PAG's `->` means ancestry, not a direct effect. A `mixed`
+  graph raises too. Pick one member of the class first, or re-face a graph you read
+  as one causal world with `graph.as_kind("dag")` or `graph.as_kind("admg")`.
 - A custom mechanism can't sit on a node with a `<->` edge; only the built-in
   mechanisms carry the hidden variable.
 - `ate` needs a numeric outcome. For a binary or categorical outcome, use

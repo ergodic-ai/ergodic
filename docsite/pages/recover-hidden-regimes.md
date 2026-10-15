@@ -133,8 +133,10 @@ distribution isn't supported.
 - Only two states and one series are supported.
 - `result.divergences` counts divergent transitions, and the fit warns when they
   exceed 0.5% of the draws. `result.rhat_max` is the worst split R-hat over the
-  delta and stay sites, computed before label alignment. Chains that settle in
-  mirror-image labelings inflate it, so it warns only when no draw had to be flipped.
+  deltas after label alignment, by chain, and the fit warns when it passes 1.05.
+  `result.rhat_max_unaligned` is the same reading on the raw draws: chains that
+  settle in mirror-image labelings push it high (1.83 on one well-fitted world whose
+  aligned value was 1.01), so judge the fit by `rhat_max`.
 - `result.to_frame()` gives the path as a table with the first tick of each step.
 
 </details>

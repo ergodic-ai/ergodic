@@ -50,7 +50,7 @@ print(ite.framing, ite.values.round(3))
 ```
 
 ```output from="what_if.py" tol="0.05" rtol="0.05"
-SCMResult(sample, identified: sales=-0.3091, sd=4.45, 95% CrI [-9.02, 8.42])
+SCMResult(sample, identified: sales=-0.3091, sd=4.45, 95% predictive interval [-9.02, 8.42])
 E[sales | do(ads=1)] - E[sales | do(ads=0)] = 2.088
  demand    ads  sales
   0.346 -1.198 -1.164
@@ -59,7 +59,7 @@ shift=1.0 [2.088 2.088 2.088]
 ```
 
 - **Step 3.** `marginal` draws sales from the fitted model with nothing changed. The
-  interval is the spread of weekly sales.
+  predictive interval is the spread of weekly sales.
 - **Step 4.** Setting ads cuts the link from demand to ads. The difference in mean
   sales is about 2.09, close to the true 2.0.
 - **Step 5.** Week 0 had ads at −1.198 and sold −1.164. With ads at 1, it would have
@@ -87,9 +87,10 @@ low = scm.do({"ads": 0.0}).interventional("sales")
 An intervention is not the same as filtering the data. Weeks with high ad spend also
 had high demand, so their sales overstate what ads alone do. `do` removes that link.
 
-`interventional` returns draws of individual outcomes under the intervention. Its
-`.value` is their mean, but its interval and `std_error` describe the spread of
-single weeks' sales, not your uncertainty about the mean. For the mean contrast with a
+`interventional` returns draws of individual outcomes under the intervention, as do
+`marginal` and `sample`. The result's `kind` is `"predictive"` and its repr says
+"predictive interval". Its `.value` is their mean, but its interval and `std_error`
+describe the spread of single weeks' sales, not your uncertainty about the mean. For the mean contrast with a
 credible interval, use `scm.ate(treatment, outcome)`, as in
 [Fit a structural causal model](fit-an-scm.md).
 

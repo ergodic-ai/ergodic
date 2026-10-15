@@ -104,9 +104,15 @@ names: `"r_learner"`, `"x_learner"`, `"t_learner"`, `"s_learner"`, `"dml"` and
 
 - The uncertainty depends on the method. The DR-learner with its default linear
   final model has analytic standard errors. `"causal_forest"` (Athey, Tibshirani
-  and Wager, 2019) uses the infinitesimal jackknife; its per-unit intervals are
-  currently too narrow and cover the truth less often than stated. The other learners bootstrap: `n_boot=` refits (default
-  1,000), which can be slow. Pass `uncertainty=False` to skip that step.
+  and Wager, 2019) uses the infinitesimal jackknife, which needs many trees: with
+  too few, the variance is clipped to zero and some bands have zero width. On a
+  4,000-row simulation, 400 trees gave 25% zero-width bands and covered the true
+  effect for 68% of units at a nominal 90%; 1,600 trees gave 1% and 87%. Set
+  `n_trees` to about half the number of rows or more when the per-unit intervals
+  matter; `cate` warns when more than 5% of the bands have zero width, and
+  `effects.diagnostics["ij_zero_se_share"]` records the share. The other learners
+  bootstrap: `n_boot=` refits (default 1,000), which can be slow. Pass
+  `uncertainty=False` to skip that step.
 - With the default linear models, `"s_learner"` and `"dml"` return one constant
   effect for every unit. Give `"s_learner"` a flexible `learner=` to see variation.
 - `select_cate(graph, data, treatment, outcome)` fits several learners, ranks them
@@ -120,9 +126,12 @@ names: `"r_learner"`, `"x_learner"`, `"t_learner"`, `"s_learner"`, `"dml"` and
 - `explain()` describes the units the model was fit on. To score new rows, fit an
   estimator such as `DRLearner` with `fit(identification, data)`, then call its
   `cate(new_rows)`. That result has no scores, so its `explain()` raises.
-- `effects.ate()` averages the per-unit effects. With analytic per-unit standard
-  errors it treats them as independent, so its interval is too narrow. Use
-  `estimate_effect` for the average effect and its interval.
+- `effects.ate()` returns the average effect. With the DR-learner it is the mean of
+  the doubly robust scores, whose standard error is valid (the per-unit standard
+  errors share one fitted model, so they are never combined as if independent); for
+  the default linear final model its point equals the mean per-unit effect. A result
+  without scores (one scored on new rows) returns the mean as a point, with no
+  interval; use `estimate_effect` then.
 
 </details>
 

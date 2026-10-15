@@ -78,7 +78,8 @@ class PyMCLearner:
     ) -> PyMCLearner:
         """Build the model with :meth:`build` and sample its posterior with NUTS.
 
-        ``sample_weight`` is accepted for the learner surface and ignored. Needs pymc.
+        Raises ``TypeError`` when ``sample_weight`` is given: a PyMC model has no
+        generic place for row weights (``supports_sample_weight`` is ``False``). Needs pymc.
 
         Returns:
             The fitted learner itself.

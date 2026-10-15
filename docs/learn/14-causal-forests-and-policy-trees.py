@@ -82,10 +82,10 @@ print(f"average of the per-customer effects: {effects.mean():.2f} (truth {tau.me
 
 # %% [markdown]
 # The per-customer effects track the truth closely. If you only need the average, you
-# don't need a forest: `estimate_effect` gives it with a standard interval. Don't use
-# `result.ate()` for this. It combines the per-customer standard errors as if they were
-# independent, and forest estimates for neighboring customers share trees, so that
-# interval comes out far too narrow.
+# don't need a forest: `estimate_effect` gives it with a standard interval.
+# `result.ate()` gives one too: it averages the doubly robust scores cached on the
+# result, never the per-customer standard errors, which share trees and so can't be
+# combined as if independent.
 
 # %%
 from ergodic import estimate_effect
@@ -93,6 +93,9 @@ from ergodic import estimate_effect
 average = estimate_effect(graph, data, "offer", "spend")
 lo, hi = average.interval()
 print(f"estimate_effect: {average.value:.2f}  95% CI [{lo:.2f}, {hi:.2f}]")
+from_scores = result.ate()
+lo, hi = from_scores.interval()
+print(f"result.ate():    {from_scores.value:.2f}  95% CI [{lo:.2f}, {hi:.2f}]")
 
 # %% [markdown]
 # Now the error bars. `result.interval(0.9)` returns a lower and an upper bound per
@@ -107,13 +110,15 @@ print(f"band width: median {np.median(width):.2f}, 95th percentile {np.quantile(
 print(f"bands of zero width: {np.mean(width < 1e-9):.0%}")
 
 # %% [markdown]
-# Read this carefully. The bands cover the truth well under 90% of the time here, and
-# some have zero width: the jackknife variance estimate can come out negative, and it is
-# clipped at zero. More trees shrink that share but don't close the coverage gap in this
-# world. So treat the forest's bands as a guide to *which* estimates are shaky (wider is
-# shakier), not as a calibrated 90% promise. If you need calibrated per-customer
-# intervals, check them on a simulation shaped like your data first, the way this cell
-# does.
+# Read this carefully. The bands cover the truth well under 90% of the time here, and some
+# have zero width: with 400 trees for 3,000 customers the jackknife's correction for
+# having finitely many trees outweighs the variance it corrects, and the estimate is
+# clipped at zero (`forest.cate()` warns when more than 5% of the bands have zero width).
+# More trees, of the order of half the rows or more, shrink that share; the forest's
+# smoothing can still leave the bands short where the effect changes steeply. So treat the
+# forest's bands as a guide to *which* estimates are shaky (wider is shakier), not as a
+# calibrated 90% promise. If you need calibrated per-customer intervals, check them on a
+# simulation shaped like your data first, the way this cell does.
 #
 # The plot shows the estimates against the truth, by tenure, for a sample of customers:
 
@@ -199,16 +204,17 @@ print(f"depth 1 policy value {simple.value:.2f}   90% CI [{lo:.2f}, {hi:.2f}]")
 print(f"depth 2 policy value {tree.value:.2f}")
 
 # %% [markdown]
-# The single split is the same tenure cut, and the extra branch adds about 0.1 to a value
-# whose interval is more than half a unit wide. Keep the one-line rule: treat customers
+# The single split is the same tenure cut, and the extra branch adds about 0.06 to a value
+# whose interval is about half a unit wide. Keep the one-line rule: treat customers
 # with more than 2.63 years of tenure.
 #
 # ## What the rule is worth
 #
 # A policy tree reports its estimated value with a standard error, plus the two trivial
-# policies for comparison. The value uses a symmetric scale: a treated customer counts
-# +effect and an untreated one counts -effect. So the gap between the rule and treating no
-# one, halved, is the extra spend per customer the rule earns.
+# policies for comparison. The value is the extra spend per customer the rule earns over
+# treating no one, so treating no one scores 0 and treating everyone scores the average
+# effect. These numbers come from the same customers the tree was chosen on, so they run
+# a little high; `simple.evaluate(...)` scores the rule on customers it never saw.
 
 # %%
 lo, hi = simple.interval(0.9)
@@ -218,9 +224,8 @@ print(f"treat no one          {simple.treat_none_value:6.2f}")
 print(f"gain over the better trivial policy: {simple.regret('best_trivial'):.2f}")
 
 chosen = simple.assign()
-estimated_gain = (simple.value - simple.treat_none_value) / 2.0
 print(f"\nshare of customers the rule treats: {chosen.mean():.0%}")
-print(f"estimated extra spend per customer vs treating no one: {estimated_gain:.2f}")
+print(f"estimated extra spend per customer vs treating no one: {simple.value:.2f}")
 
 # GRADING ONLY: the same numbers from the true effects.
 print(f"true extra spend per customer under the rule:          {np.mean(chosen * tau):.2f}")

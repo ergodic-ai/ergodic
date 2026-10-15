@@ -70,8 +70,8 @@ print(identify_mediation(confounded, "training", "wage", "certified"))
 MediationID(identifiable, ['training'] -> [certified] -> ['wage'], W={experience}, cde=True)
 direct   1.17  95% interval [0.98, 1.38]
 indirect 1.21  95% interval [1.04, 1.37]
-total    2.38  95% interval [2.11, 2.68]
-proportion mediated: 0.51
+total    2.42  95% interval [2.19, 2.66]
+proportion mediated: 0.50
 planted: direct 1.00, indirect 1.32
 MediationID(NDE/NIE not identifiable, ['training'] -> [certified] -> ['wage'], cde=True)
 ```
@@ -119,12 +119,16 @@ for a binary outcome. The mediator model is logistic regression. Pass
 `learner={"outcome": ..., "mediator": ...}` to use others; the mediator needs a
 classifier.
 
-`nie` holds the treatment at its untreated level, and `total` is `nde + nie`. When
-treatment and mediator interact in their effect on the outcome, that sum is not the
-same as the total effect of switching treatment on.
+`nde` and `nie` are the pure effects: each holds the other path at the untreated
+level. `total` is the total effect of switching treatment on, computed directly. When
+treatment and mediator interact in their effect on the outcome, the pure effects don't
+add up to it, and `total - nde - nie` is the mediated interaction. The outcome model
+includes that interaction, so it never quite vanishes in a fit, which is why the
+program's total is close to, but not exactly, the sum of its two parts.
 
-`proportion_mediated` is `nie / total`. It is unstable when the total effect is near
-zero, and `proportion_mediated_flagged` is then `True`.
+`proportion_mediated` is `nie / total`, the pure indirect effect's share. Under an
+interaction it and `nde / total` need not sum to one. It is unstable when the total
+effect is near zero, and `proportion_mediated_flagged` is then `True`.
 
 <details markdown="1"><summary>What if my mediator is continuous?</summary>
 

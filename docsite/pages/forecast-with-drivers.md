@@ -123,9 +123,12 @@ result, unchanged. It uses the same naming.
 !!! caution "Read the diagnostics"
     With `fit=` left out, `"auto"` picks the joint fit for this two-node graph. On
     this data and budget, that gave single-digit effective draws, so the page uses
-    `fit="staged"`. Check
-    `result.diagnostics` for divergences and a small `min_ess` before you trust a
-    band, and raise `draws` and `warmup` when they look poor.
+    `fit="staged"`. Even staged, the smallest effective sample sizes (48 and 62) are
+    below the 100 at which `forecast` warns. The trend model mixes slowly on series
+    that wander like a random walk, and its starting level and slope are often the
+    worst parameters, whichever way you fit. Check `result.diagnostics` for
+    divergences and a small `min_ess` before you trust a band, and raise `draws` and
+    `warmup`, or `chains`, until `min_ess` is in the hundreds.
 
 ## Read the forecast
 
