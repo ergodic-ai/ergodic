@@ -94,6 +94,12 @@ only.
 
 Each method returns a new object, so you can chain them. Combine two objects with `&`.
 
+Every method but `confound` also takes `confidence=`. Without it a statement is a hard
+constraint. With a value between 0.5 and 1 it's a belief that the edge-probability
+decoders weigh against the model, and `knowledge.log_prior(graph)` scores a graph
+under it. The searches on this page read hard constraints only. See
+[Decode with what you know](decode-a-graph.md#decode-with-what-you-know).
+
 The methods read knowledge in different ways:
 
 - **PC** never tests a pair banned in both directions, never removes a required edge,
@@ -107,12 +113,13 @@ The methods read knowledge in different ways:
   roots and sinks are only checked at the end, because in a world with hidden causes
   they don't fix a single mark.
 
-!!! caution "Only FCI and RFCI can represent `confound`"
+!!! caution "Only FCI, RFCI and the decoders can represent `confound`"
     A CPDAG or a DAG has no bidirected edge. With `confound`, PC, GES, BOSS, GRaSP,
     HillClimb and A* raise a `ValueError` naming the violation, because their graph
     can't satisfy the knowledge.
     LiNGAM raises too. MMPC and glasso accept it and only keep the pair adjacent. Use
-    `method="fci"`.
+    `method="fci"`, or decode edge probabilities, which adds `a <-> b` and returns an
+    ADMG ([Decode with what you know](decode-a-graph.md#decode-with-what-you-know)).
 
 <details markdown="1"><summary>What if my knowledge contradicts itself or the data?</summary>
 
@@ -143,6 +150,7 @@ pruned pair records no separating set.
 
 - [Check whether an effect is identifiable](identify-an-effect.md): what the re-faced graph lets you estimate.
 - [Choose a method and test](choose-a-method.md): the assumptions behind each search.
+- [Decode with what you know](decode-a-graph.md#decode-with-what-you-know): soft statements and the knowledge audit.
 - [Python reference](reference-knowledge.md): every `DomainKnowledge` method.
 
 </div>
