@@ -31,7 +31,7 @@ from .data import (
     tabular,
     timeseries,
 )
-from .discovery import discover, granger
+from .discovery import DecodeResult, EdgeProbabilities, decode, discover, granger
 
 # `forecast` names both the pillar and its facade, and the function is what the
 # top level exports: `from ergodic import forecast` gives the callable, while
@@ -146,8 +146,10 @@ __all__ = [
     "CertifyResult",
     "Consensus",
     "Dataset",
+    "DecodeResult",
     "DomainKnowledge",
     "Edge",
+    "EdgeProbabilities",
     "EffectEstimate",
     "EffectTarget",
     "EventLog",
@@ -203,6 +205,7 @@ __all__ = [
     "datasets",
     "decision_points",
     "decision_table",
+    "decode",
     "did",
     "discover",
     "discover_model",

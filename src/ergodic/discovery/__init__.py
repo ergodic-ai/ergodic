@@ -17,7 +17,10 @@ skeleton screen, :class:`GES` wraps a score and returns a CPDAG,
 :class:`AStar` wraps a score and returns the exact optimum, and
 :class:`HillClimb` is the fast greedy baseline. ``discover`` is the one-line
 facade, and :func:`bootstrap` reruns any method on resamples and returns edge
-frequencies (:class:`BootstrapResult`), the first soft output. Background
+frequencies (:class:`BootstrapResult`), the first soft output.
+:class:`EdgeProbabilities` holds a model's directed-edge probabilities (or
+bootstrap frequencies) over named variables, and :func:`decode` turns one into
+a DAG with an explicit, versioned decoder (:class:`DecodeResult`). Background
 knowledge (including a skeleton restriction through ``restrict_to``) enters
 through :class:`ergodic.DomainKnowledge`.
 
@@ -33,9 +36,11 @@ from __future__ import annotations
 
 from ._bootstrap import BootstrapResult, bootstrap
 from ._ci import CIResult, CITest, DSeparationOracle
+from ._decode import DECODERS, Decoder, DecodeResult, decode
 from ._discover import discover
 from ._granger import GrangerResult, granger
 from ._lagged import lagged_node, lagged_tabular, parse_lagged
+from ._probabilities import EdgeProbabilities
 from ._result import DiscoveryResult
 from ._score import Score
 from ._tsresult import TimeSeriesDiscoveryResult
@@ -59,6 +64,7 @@ from .scores import BIC, BDeu, DiscreteBIC, MixedBIC
 __all__ = [
     "BIC",
     "BOSS",
+    "DECODERS",
     "FCI",
     "GCM",
     "GES",
@@ -72,10 +78,13 @@ __all__ = [
     "CIResult",
     "CITest",
     "DSeparationOracle",
+    "DecodeResult",
+    "Decoder",
     "DirectLiNGAM",
     "DiscoveryResult",
     "Discrete",
     "DiscreteBIC",
+    "EdgeProbabilities",
     "GRaSP",
     "Glasso",
     "GrangerResult",
@@ -86,6 +95,7 @@ __all__ = [
     "Score",
     "TimeSeriesDiscoveryResult",
     "bootstrap",
+    "decode",
     "discover",
     "granger",
     "lagged_node",
