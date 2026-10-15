@@ -112,7 +112,7 @@
     {
       "file": "site.css",
       "source": null,
-      "transformation": "New (API-143): product switcher, program download link and landing output spacing; tokens only."
+      "transformation": "New (API-143): product switcher, program download link, service note (API-144) and landing output spacing; tokens only."
     }
   ]
 }

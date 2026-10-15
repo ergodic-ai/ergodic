@@ -59,6 +59,9 @@ def main(argv: list[str] | None = None) -> int:
                 status = "ok" if item.returncode == 0 else "FAILED"
                 where = f"{item.program.page.name}: {item.program.name}"
                 print(f"{status:6} {item.seconds:6.1f} s  {where}")
+            for program in report.skipped:
+                where = f"{program.page.name}: {program.name}"
+                print(f"{'skip':6} {'':8}  {where} (needs {program.requires}; not run)")
             for line in report.recorded:
                 print(f"recorded {line}")
             for problem in report.problems:

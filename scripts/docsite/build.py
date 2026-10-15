@@ -465,6 +465,32 @@ class SiteBuilder:
         return "\n".join(lines)
 
 
+INCLUDE = re.compile(r"^\{\{include:([^}\n]+)\}\}[ \t]*$", re.M)
+
+
+def expand_includes(text: str, root: Path) -> str:
+    """Replace each ``{{include:path}}`` line with that repository file, verbatim.
+
+    A page can publish a file kept elsewhere in the repository (the changelog) without
+    a copy that drifts. Paths are relative to the repository root; includes do not
+    nest, and an included file may not hold programs (the checker reads page sources).
+    """
+
+    def insert(match: re.Match[str]) -> str:
+        base = root.resolve()
+        target = (base / match[1].strip()).resolve()
+        if not target.is_relative_to(base) or not target.is_file():
+            raise DocsError(f"Cannot include {match[1]!r}: not a file in the repository")
+        included = target.read_text().rstrip("\n")
+        if INCLUDE.search(included) or any(
+            fence.language in ("python", "py") for fence in fences(included)
+        ):
+            raise DocsError(f"Included file {match[1]!r} may not hold includes or programs")
+        return included
+
+    return INCLUDE.sub(insert, text)
+
+
 def page_title(text: str, name: str) -> str:
     match = re.search(r"^# (.+)$", text, re.M)
     if not match:
@@ -502,7 +528,10 @@ def build(
             f"match {site.package}.__version__ {version}; reinstall the package."
         )
     builder = SiteBuilder(site, version)
-    sources = {p.stem: p.read_text() for p in sorted(site.pages_dir.glob("*.md"))}
+    sources = {
+        p.stem: expand_includes(p.read_text(), site.root)
+        for p in sorted(site.pages_dir.glob("*.md"))
+    }
     listed = {page for group in site.groups for _, page in group.pages}
     generated = {"reference", site.notebooks_page}
     if missing := sorted(listed - set(sources) - generated):

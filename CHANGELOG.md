@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - Unreleased
 
-To be released together with Welt (welt-api DEC-078, API-140).
+To be released together with welt-client 0.13.
 
 ### Added
 - A versioned graph format. `MixedGraph.to_dict()` writes
@@ -35,15 +35,13 @@ To be released together with Welt (welt-api DEC-078, API-140).
   client and a `max_fits` budget (default 10) with its clones.
   `upload_dataset` and `load_research_dataset` move tabular data between ergodic
   and Welt. `bootstrap` refuses `welt:` methods (each resample would be a paid
-  job). (API-141)
+  job).
 
-### Changed (API-141)
+### Changed
 - `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can
   carry its provenance. Learner cloning honors a learner's own
   `__sklearn_clone__` override; scikit-learn estimators keep the `get_params`
   path.
-
-### Changed
 - Identification's refusal of a `mixed` graph now says how to fix it. A fully
   directed acyclic graph (what PC returns when domain knowledge orients every
   edge) points at `graph.as_kind("dag")`; a partially directed graph lists the

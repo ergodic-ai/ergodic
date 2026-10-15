@@ -18,6 +18,9 @@
 /* A program's header links its download. */
 .code-download { margin-left: auto; font-size: 12px; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
 .code-download:hover { color: var(--foreground); }
+/* A program that needs an outside service says so; the checker does not run it. */
+.code-requires { margin-left: auto; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.code-requires + .code-download { margin-left: 12px; }
 
 @media (max-width: 860px) { .product-switcher { margin-right: 0; } .product-menu { left: auto; right: -40px; } }
 

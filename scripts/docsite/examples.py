@@ -7,6 +7,9 @@ The rules (the Welt next-pass rules in welt-api ``docs/sdk-docs-handoff.md``):
   access disabled, so it can read only the package's bundled datasets.
 - Every other ``python`` fence on that page must be a verbatim, contiguous excerpt of
   one of the page's programs, so fragments cannot drift from the executed code.
+- A program with ``requires="…"`` needs an outside service (an account or a key), so
+  the checker never runs it; its excerpts are still checked, it cannot have an output
+  panel, and a test of its own should run it against a fake service.
 - An ``output`` panel names its program with ``from="name.py"`` (optionally a
   ``lines="a-b"`` slice of its standard output). ``record`` writes the program's output
   into the panel; ``check`` reruns the program and compares, exactly by default or with
@@ -52,6 +55,7 @@ class Program:
     name: str
     code: str
     timeout: int
+    requires: str | None = None  # an outside service the program needs; never run here
 
 
 @dataclass(frozen=True)
@@ -81,7 +85,8 @@ def programs_of(path: Path, site: Site) -> list[Program]:
             if not re.fullmatch(r"[a-z0-9_]+\.py", name):
                 raise DocsError(f"{path.name}: program names are snake_case .py files: {name!r}")
             timeout = int(fence.attributes.get("timeout", site.example_timeout))
-            found.append(Program(path, name, fence.code, timeout))
+            requires = fence.attributes.get("requires")
+            found.append(Program(path, name, fence.code, timeout, requires))
     return found
 
 
@@ -102,6 +107,7 @@ def excerpt_problems(path: Path, site: Site) -> list[str]:
     text = path.read_text()
     programs = [p.code.rstrip("\n").split("\n") for p in programs_of(path, site)]
     names = {p.name for p in programs_of(path, site)}
+    unrun = {p.name for p in programs_of(path, site) if p.requires}
     problems = []
     for fence in fences(text):
         line = text.count("\n", 0, fence.start) + 1
@@ -111,6 +117,11 @@ def excerpt_problems(path: Path, site: Site) -> list[str]:
                 problems.append(f'{path.name}:{line}: output panel needs from="<program>.py"')
             elif source not in names:
                 problems.append(f"{path.name}:{line}: output from unknown program {source!r}")
+            elif source in unrun:
+                problems.append(
+                    f"{path.name}:{line}: {source} has requires=… and is never run, so it "
+                    "cannot have a recorded output panel; describe its output in prose"
+                )
             continue
         if fence.language not in PYTHON or "file" in fence.attributes:
             continue
@@ -224,6 +235,7 @@ class Report:
     runs: list[Run]
     problems: list[str]
     recorded: list[str]
+    skipped: list[Program]  # programs that need an outside service (requires=…)
 
 
 def check(site: Site, only: list[str] | None = None, *, record: bool = False) -> Report:
@@ -234,7 +246,8 @@ def check(site: Site, only: list[str] | None = None, *, record: bool = False) ->
     for path in paths:
         problems += excerpt_problems(path, site)
     programs = [program for path in paths for program in programs_of(path, site)]
-    runs = run_all(programs)
+    skipped = [program for program in programs if program.requires]
+    runs = run_all([program for program in programs if not program.requires])
     by_name = {r.program.name: r for r in runs}
     for item in runs:
         if item.returncode != 0:
@@ -267,4 +280,4 @@ def check(site: Site, only: list[str] | None = None, *, record: bool = False) ->
                 )
         if record and text != path.read_text():
             path.write_text(text)
-    return Report(runs, problems, recorded)
+    return Report(runs, problems, recorded, skipped)
