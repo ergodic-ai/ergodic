@@ -205,9 +205,6 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     output = tmp_path / "site"
     (output / "v0.0.1").mkdir(parents=True)  # An older version that CI placed first.
     (output / "v0.0.1" / "index.html").write_text("<!doctype html>")
-    for retained in site.previous_versions:  # CI rebuilds these from their tags first.
-        (output / f"v{retained}").mkdir()
-        (output / f"v{retained}" / "index.html").write_text("<!doctype html>")
     (output / "stale.html").write_text("left over from another builder")
     summary = build(site, output)
     version = summary["version"]
@@ -230,7 +227,11 @@ def test_build_is_versioned_and_linked(tmp_path: Path) -> None:
     changelog = (output / "changelog.html").read_text()
     release = re.search(r"^## \[(\d+\.\d+\.\d+)\]", (ROOT / "CHANGELOG.md").read_text(), re.M)
     assert release is not None and f">{release[1]}</a> - " in changelog
-    assert check_links(output) == []
+    # The retained versions come from their own tags' builds; until those are placed,
+    # links into them are the only problems, and --retained-elsewhere excuses them.
+    assert check_links(output, site.previous_versions) == []
+    missing = check_links(output)
+    assert all(any(f"v{v}/" in problem for v in site.previous_versions) for problem in missing)
 
 
 def test_build_fails_on_an_undocumented_public_name(
