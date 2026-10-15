@@ -205,11 +205,13 @@ Deletion is permanent. Never reuse 1.0.0 for a real release.
 ## 7. Tag and publish ergodic 0.2.0 **[owner go]**
 
 Order for the joint release (API-147): repository public (step 1), Pages prepared
-(step 5), **ergodic 0.2.0 to PyPI**, then **welt-client to PyPI**, then both doc sites
-(step 8 here), then the console agent docs.
-ergodic goes first because `welt-client[ergodic]` requires `ergodic>=0.2,<0.3`. Until
-the new welt-client is out, `pip install "ergodic[welt]"` can't resolve its welt-client
-floor, so publish welt-client straight after.
+(step 5), **welt-client 0.13.0 to PyPI**, then relock ergodic (`uv lock` now resolves
+`welt-client>=0.13` for the `welt` extra, which CI installs), then **ergodic 0.2.0 to
+PyPI**, then both doc sites (step 8 here), then the console agent docs.
+welt-client goes first because ergodic's lock and CI need it: until it is on PyPI,
+`uv sync --locked` can't resolve the `welt` extra. Its `welt-client[ergodic]` extra
+(`ergodic>=0.2,<0.3`) can't resolve until ergodic 0.2.0 is out, so publish ergodic
+straight after.
 
 ```bash
 git switch main && git pull --ff-only

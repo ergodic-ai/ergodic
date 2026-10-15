@@ -48,8 +48,10 @@ jobs:
           key: pytensor-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}
           restore-keys: pytensor-${{ runner.os }}-py${{ matrix.python }}-
 
+      # The welt extra (welt-client) runs the ergodic.welt bridge tests against the
+      # released client; it is empty on Python 3.14 (DEC-078).
       - name: Install the locked dev environment
-        run: uv sync --locked
+        run: uv sync --locked --extra welt
 
       - name: make check
         run: make check
