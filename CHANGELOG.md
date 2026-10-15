@@ -89,6 +89,9 @@ To be released together with Welt.
   makes the two dependent in the sample. This covers `identify_effect`,
   `identify_distribution`, `identify_mediation`, the adjustment, front-door and
   instrument helpers, and so `estimate_effect` and `cate`.
+- `AStar` raises `ValueError` naming the violations when its searched DAG cannot
+  satisfy the domain knowledge (for example a confounded pair), instead of an
+  `AssertionError` (which `python -O` would also have skipped).
 
 ## [0.1.1] - 2026-08-30
 

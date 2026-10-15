@@ -253,6 +253,14 @@ def test_astar_respects_tiers() -> None:
     assert _skeleton(result.graph) == _skeleton(truth)
 
 
+def test_astar_raises_value_error_when_knowledge_cannot_hold() -> None:
+    """Regression (API-149): a knowledge violation was an AssertionError (gone under -O)."""
+    data, _ = _four_node(n=300, seed=14)
+    knowledge = DomainKnowledge().confound("a", "b")
+    with pytest.raises(ValueError, match="violates the domain knowledge"):
+        AStar("bic").fit(data, knowledge=knowledge)
+
+
 # -- A*: guards -----------------------------------------------------------------------
 
 
