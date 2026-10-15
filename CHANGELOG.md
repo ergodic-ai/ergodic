@@ -74,9 +74,13 @@ Planned as 0.3.0.
   and G squared with fewer than 1,000 rows over-reject true graphs. Claims whose
   p-values tie (for example, underflowed to 0) rank by the larger `|statistic|`. The
   p-value cannot separate Markov-equivalent graphs and a pass does not confirm the
-  graph; the new guide "Test a graph against data" says so. Over 3,000 seeded six-variable
-  linear-Gaussian worlds, with the default partial-correlation test, the true graph
-  was rejected at `alpha = 0.05` in 5.5% of worlds with 200 rows and 4.6% with 1,000.
+  graph; the new guide "Test a graph against data" says so. Size with the default
+  partial-correlation test on six-variable linear-Gaussian worlds at `alpha = 0.05`:
+  the registered run (200 worlds per sample size) rejected the true graph in 9.5% of
+  worlds with 200 rows, outside its [2%, 8%] band, and 4.5% with 1,000; a
+  pre-registered replication on 2,000 fresh worlds per size gave 4.65% [3.77%, 5.67%]
+  and 4.85% [3.95%, 5.88%], inside its [3.5%, 6.5%] band. Power against one missing
+  edge of weight at least 0.5 is close to 1.
 
 ### Changed
 - A decode with knowledge, hard-only knowledge included, now audits it: one extra

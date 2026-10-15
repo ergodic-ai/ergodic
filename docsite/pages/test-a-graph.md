@@ -114,10 +114,19 @@ Don't reject the graph when either one rejects. Taking the union spends more tha
 Fisher's C assumes the claims' tests are independent of each other. Shipley (2000)
 argues that for the DAG basis set they are when the model holds, and with
 large-sample tests such as partial correlation and G squared that holds
-approximately. On simulated six-variable linear-Gaussian graphs, with the default
-partial-correlation test, the true graph was rejected at `alpha = 0.05` in 5.5% of
-3,000 seeded worlds with 200 rows, and 4.6% with 1,000 rows. The partial-correlation
-test is the only one calibrated this way.
+approximately. The partial-correlation test is the only one whose size is calibrated.
+On simulated six-variable linear-Gaussian graphs, the registered run of 200 worlds per
+sample size rejected the true graph at `alpha = 0.05` in 9.5% of worlds with 200 rows,
+outside its band of 2% to 8%, and 4.5% with 1,000 rows. A pre-registered replication
+on 2,000 fresh worlds per sample size gave 4.65% and 4.85%, inside its band of 3.5% to
+6.5%:
+
+| Rows | Registered run (200 worlds) | Replication (2,000 worlds, 95% interval) |
+| --- | --- | --- |
+| 200 | 9.5% | 4.65% (3.77% to 5.67%) |
+| 1,000 | 4.5% | 4.85% (3.95% to 5.88%) |
+
+Against the true graph minus one edge of weight at least 0.5, power was close to 1.
 
 The basis set is also not every independence the graph implies. Together the claims
 imply the rest when the distribution has the composition property, as Gaussian
