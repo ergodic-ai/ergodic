@@ -54,6 +54,17 @@ To be released together with Welt.
   `as_kind` example imports `mixed`. The graph guide documents the format field.
 - The README quotes the install extras (`pip install 'ergodic[bayes]'`), which
   zsh would otherwise read as a glob.
+- `estimate_mediation`: the total effect is now computed directly as
+  `E[Y(1, M(1))] - E[Y(0, M(0))]`. It used to be the pure NDE plus the pure NIE,
+  which drops the mediated interaction whenever the treatment interacts with the
+  mediator (always possible, since the outcome model is saturated in treatment and
+  mediator). On `load_berkeley` (gender, department, admission) the total was
+  -0.072 with a proportion mediated of 1.99; it is now the -0.142 raw gap and the
+  proportion 1.01. `nde` and `nie` are unchanged (the pure effects), so under an
+  interaction they no longer sum to the total; `proportion_mediated` stays
+  `nie / total`. The `Design.estimand` no longer repeats the `NDE =`/`NIE =`
+  prefix, and a treatment with more than two levels is told to recode to two
+  levels instead of being pointed at `treated=` (which needs two levels too).
 
 ## [0.1.1] - 2026-08-30
 

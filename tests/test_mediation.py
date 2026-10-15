@@ -256,8 +256,9 @@ def test_linear_closed_form_recovers_planted() -> None:
     assert est.nde.value == pytest.approx(nde_true, abs=0.06)
     # the indirect effect is b_m times the treatment-induced shift in P(M=1)
     assert est.nie.value == pytest.approx(nie_true, abs=0.06)
-    # TE = NDE + NIE exactly (same computation)
-    assert est.total.value == pytest.approx(est.nde.value + est.nie.value, abs=1e-12)
+    # TE = NDE + NIE without an interaction: the total is computed directly, and the
+    # saturated outcome model's fitted X*M term is only noise here
+    assert est.total.value == pytest.approx(est.nde.value + est.nie.value, abs=0.01)
     # every quantity carries a bootstrap standard error and interval
     assert est.nde.std_error is not None and est.nde.std_error > 0.0
     lo, hi = est.total.interval()
@@ -338,9 +339,78 @@ def test_binary_outcome_runs() -> None:
     data = _frame(cols, continuous=("W",))
     g = _confounded_graph()
     est = estimate_mediation(g, data, "X", "Y", "M", random_state=0, n_boot=40)
-    # the effects are on the probability scale and sum to the total
-    assert est.total.value == pytest.approx(est.nde.value + est.nie.value, abs=1e-12)
+    # the effects are on the probability scale; the logistic link makes X and M
+    # interact there, so the total is computed directly, not as NDE + NIE
+    assert 0.0 < est.total.value < 1.0
     assert np.isfinite(est.nde.value) and np.isfinite(est.nie.value)
+
+
+def test_total_effect_under_interaction_is_the_direct_contrast() -> None:
+    """Under an X*M interaction the total is E[Y(1,M(1))] - E[Y(0,M(0))], not NDE + NIE.
+
+    Regression (API-149): the total used to be the pure NDE plus the pure NIE, which
+    drops the mediated interaction. With no covariates and a saturated outcome model
+    the total effect is exactly the difference in means between the arms.
+    """
+    rng = np.random.default_rng(13)
+    n = 40000
+    x = (rng.random(n) < 0.5).astype(int)
+    m = (rng.random(n) < np.where(x == 1, 0.8, 0.2)).astype(int)
+    y = 1.0 * x + 1.0 * m + 2.0 * x * m + rng.normal(scale=0.3, size=n)
+    data = _frame({"X": x, "M": m, "Y": y}, continuous=("Y",))
+    est = estimate_mediation(
+        dag(["X -> M", "M -> Y", "X -> Y"]), data, "X", "Y", "M", random_state=0, n_boot=30
+    )
+    te_hand = float(y[x == 1].mean() - y[x == 0].mean())
+    assert est.total.value == pytest.approx(te_hand, abs=1e-9)
+    # planted: TE = 1 + 1*(0.8-0.2) + 2*0.8 = 3.2; pure NDE + pure NIE = 1.4 + 0.6 = 2.0
+    assert est.total.value == pytest.approx(3.2, abs=0.05)
+    assert est.nde.value + est.nie.value == pytest.approx(2.0, abs=0.05)
+    assert est.proportion_mediated == pytest.approx(est.nie.value / est.total.value)
+    # the bootstrap draws are of the same quantity
+    assert est.total.draws is not None
+    assert float(np.mean(est.total.draws)) == pytest.approx(3.2, abs=0.05)
+
+
+def test_berkeley_total_effect_is_the_raw_gap() -> None:
+    """Berkeley (gender -> dept -> admit): the total effect is the -0.14 raw gap.
+
+    Gender is exogenous in this graph, so the total effect is the pooled admission
+    gap (women minus men). The old NDE + NIE sum reported about -0.072 and a
+    proportion mediated near 2.
+    """
+    from ergodic.datasets import load_berkeley
+
+    ds = load_berkeley()
+    g = dag(["gender -> dept", "dept -> admit", "gender -> admit"])
+    est = estimate_mediation(
+        g, ds.data, "gender", "admit", "dept", treated="Female", random_state=0, n_boot=20
+    )
+    frame = ds.data.to_pandas()
+    female = frame["gender"] == "Female"
+    raw_gap = float(
+        frame.loc[female, "admit"].astype(float).mean()
+        - frame.loc[~female, "admit"].astype(float).mean()
+    )
+    assert raw_gap == pytest.approx(-0.1416, abs=1e-3)
+    assert est.total.value == pytest.approx(raw_gap, abs=1e-6)
+    assert est.proportion_mediated == pytest.approx(est.nie.value / raw_gap, abs=1e-6)
+
+
+def test_design_estimand_names_each_effect_once() -> None:
+    """The Design record's estimand does not repeat the ``NDE =`` / ``NIE =`` prefix."""
+    rng = np.random.default_rng(3)
+    n = 4000
+    x = (rng.random(n) < 0.5).astype(int)
+    m = (rng.random(n) < np.where(x == 1, 0.7, 0.3)).astype(int)
+    y = x + 2.0 * m + rng.normal(size=n)
+    data = _frame({"X": x, "M": m, "Y": y}, continuous=("Y",))
+    est = estimate_mediation(
+        dag(["X -> M", "M -> Y", "X -> Y"]), data, "X", "Y", "M", random_state=0, n_boot=10
+    )
+    assert est.design.estimand.count("NDE =") == 1
+    assert est.design.estimand.count("NIE =") == 1
+    assert "NDE = NDE" not in est.design.estimand
 
 
 # -- proportion mediated -----------------------------------------------------
@@ -417,8 +487,28 @@ def test_non_binary_treatment_raises() -> None:
     y = x + 2.0 * m + rng.normal(size=n)
     data = _frame({"X": x, "M": m, "Y": y}, continuous=("Y",))
     g = dag(["X -> M", "M -> Y", "X -> Y"])
-    with pytest.raises(NotImplementedError, match="binary treatment"):
+    with pytest.raises(NotImplementedError, match="binary treatment") as err:
         estimate_mediation(g, data, "X", "Y", "M", random_state=0)
+    # the hint does not send a three-level treatment to treated=, which also raises
+    assert "3 levels" in str(err.value)
+    assert "recode" in str(err.value)
+    with pytest.raises(ValueError, match="two-level"):
+        estimate_mediation(g, data, "X", "Y", "M", treated=1, random_state=0)
+
+
+def test_two_valued_treatment_hint_names_treated() -> None:
+    """A two-valued treatment not coded 0/1 is pointed at treated=, which then works."""
+    rng = np.random.default_rng(0)
+    n = 4000
+    x = rng.integers(1, 3, n).astype(float)  # 1.0 / 2.0
+    m = (rng.random(n) < np.where(x == 2.0, 0.7, 0.3)).astype(int)
+    y = x + 2.0 * m + rng.normal(size=n)
+    data = _frame({"X": x, "M": m, "Y": y}, continuous=("X", "Y"))
+    g = dag(["X -> M", "M -> Y", "X -> Y"])
+    with pytest.raises(NotImplementedError, match="treated="):
+        estimate_mediation(g, data, "X", "Y", "M", random_state=0)
+    est = estimate_mediation(g, data, "X", "Y", "M", treated=2.0, random_state=0, n_boot=10)
+    assert np.isfinite(est.total.value)
 
 
 def test_treated_picks_the_level() -> None:

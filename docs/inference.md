@@ -159,12 +159,14 @@ g = dag(["X -> M", "M -> Y", "X -> Y", "W -> X", "W -> Y"])
 med = estimate_mediation(g, data, "X", "Y", "M", random_state=0)
 med.nde.value     # the natural direct effect, with a bootstrap SE
 med.nie.value     # the natural indirect effect
-med.total.value   # the total effect, nde + nie
+med.total.value   # the total effect, E[Y(1, M(1))] - E[Y(0, M(0))]
 med.cde           # a dict: each mediator level to its controlled direct effect
 med.proportion_mediated   # nie / total, the share carried by the mediator
 ```
 
-NDE, NIE, and the total each come back as a distribution-shaped `EffectEstimate`, the same surface the rest of estimation returns, so `value`, `std_error`, and `interval()` all read the same way. The estimator fits an outcome model `E[Y | x, m, w]` and a mediator model `P(m | x, w)`, plugs them into the mediation formula, and bootstraps the rows for the standard error. It is the MVP: a binary treatment, a discrete mediator, and a continuous or binary outcome. A continuous mediator raises and points at the density path, which is not built.
+NDE, NIE, and the total each come back as a distribution-shaped `EffectEstimate`, the same surface the rest of estimation returns, so `value`, `std_error`, and `interval()` all read the same way. The estimator fits an outcome model `E[Y | x, m, w]` and a mediator model `P(m | x, w)`, plugs them into the mediation formula, and bootstraps the rows for the standard error. It handles a binary treatment, a discrete mediator, and a continuous or binary outcome. A continuous mediator raises and points at the density path, which isn't available yet.
+
+The NDE and NIE here are the pure effects: each holds the other path at the control level. When the treatment changes how the mediator acts on the outcome (an interaction), they don't add up to the total; the remainder, `total - nde - nie`, is the mediated interaction. The total is computed directly, so it's right either way.
 
 The result carries a `Design` record naming the assumptions, the same role `Design` plays for the panel designs, because the natural effects rest on a cross-world condition no data can test (see the [identification guide](identification.md)). `proportion_mediated` is `nie / total`, flagged when the total effect is near zero, since a small denominator makes the ratio unstable.
 
