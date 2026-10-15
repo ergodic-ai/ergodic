@@ -4,14 +4,17 @@
 A shallow decision tree that assigns a binary treatment to maximize doubly-robust
 welfare (Athey-Wager 2021; Zhou-Athey-Wager 2023). With the cross-fit AIPW score
 ``Gamma_i`` (its conditional mean is the CATE), the value of a policy
-``pi: X -> {0, 1}`` is the empirical welfare
+``pi: X -> {0, 1}``, measured against treating no one, is the empirical welfare
+gain in outcome units
 
-    W(pi) = mean_i[(2 pi(X_i) - 1) Gamma_i]
-          = mean_i[pi(X_i) Gamma_i^(1) + (1 - pi(X_i)) Gamma_i^(0)]   (up to a constant),
+    V(pi) = mean_i[pi(X_i) Gamma_i]
+          = mean_i[pi(X_i) Gamma_i^(1) + (1 - pi(X_i)) Gamma_i^(0)] - mean_i[Gamma_i^(0)].
 
-so a leaf that covers a set of units is best treated (action 1) when the sum of the
-scores over the leaf is positive and best left untreated (action 0) otherwise; the
-leaf's welfare contribution is then ``|sum Gamma|``. Maximizing welfare over a
+The search maximizes the equivalent objective ``mean_i[(2 pi(X_i) - 1) Gamma_i] =
+2 V(pi) - mean_i[Gamma_i]`` (the same argmax), so a leaf that covers a set of
+units is best treated (action 1) when the sum of the scores over the leaf is
+positive and best left untreated (action 0) otherwise; the leaf's contribution to
+that objective is then ``|sum Gamma|``. Maximizing welfare over a
 depth-``k`` axis-aligned tree is therefore maximizing the sum of those leaf
 absolute-sums. At depth <= 2 the library searches every (feature, threshold) split
 exhaustively, which is the globally optimal regime (the Zhou-Athey-Wager guarantee);
@@ -21,7 +24,7 @@ is not guaranteed optimal.
 The inference discipline is the one the rest of the Tier-B layer follows: the tree
 STRUCTURE is a point estimate (no interval on which split is "the" split), but the
 policy VALUE and the regret against treat-all / treat-none are honest, because they
-are sample means of the per-unit influence terms ``(2 pi(X_i) - 1) Gamma_i`` and so
+are sample means of the per-unit influence terms ``pi(X_i) Gamma_i`` and so
 inherit a root-n central limit theorem from the orthogonal score.
 """
 
@@ -87,9 +90,12 @@ class PolicyTree:
 
     ``root`` is the learned tree over the named ``covariates``; :meth:`predict` and
     :meth:`assign` evaluate it. ``value``/``std_error`` are the estimated policy
-    value ``W(pi_hat)`` and its standard error from the per-unit influence terms;
-    ``treat_all_value`` and ``treat_none_value`` are the two trivial baselines, and
-    :meth:`regret` is the value gap against either. ``depth`` is the requested depth
+    value ``V(pi_hat) = mean[pi_hat(X) Gamma]`` and its standard error from the
+    per-unit influence terms, in outcome units per unit and measured against
+    treating no one (the mean outcome gain of following the rule rather than
+    treating nobody). On that scale ``treat_none_value`` is 0 and
+    ``treat_all_value`` is the doubly-robust ATE, and :meth:`regret` is the value
+    gap against either, also in outcome units per unit. ``depth`` is the requested depth
     and ``exhaustive`` records whether the globally optimal search was used.
     """
 
@@ -137,8 +143,9 @@ class PolicyTree:
         """The learned policy's welfare GAIN over a trivial baseline (the baseline's regret).
 
         ``baseline`` is ``"treat_all"``, ``"treat_none"``, or ``"best_trivial"`` (the
-        better of the two). Returns ``value - baseline_value``: how much welfare the
-        learned rule adds over treating everyone / no one. The trivial constant
+        better of the two). Returns ``value - baseline_value``: how much the mean
+        outcome per unit rises under the learned rule compared with treating
+        everyone / no one, in outcome units. The trivial constant
         policies are depth-0 leaves inside the tree's class, so the optimal tree is at
         least as good and this gain is non-negative up to sampling noise (it is the
         baseline's regret against the learned optimum, not the optimum's own regret,
@@ -414,7 +421,8 @@ def policy_tree(
     cross-fit scores are read) or a :class:`~ergodic.inference._scores.DRScores`
     directly. ``covariates`` names the split covariates (a name, a list of names, or
     ``None`` for every covariate carried by the scores). The tree maximizes the
-    doubly-robust welfare ``W(pi) = mean[(2 pi(X) - 1) Gamma_i]``; at ``depth <= 2``
+    doubly-robust welfare ``V(pi) = mean[pi(X) Gamma_i]`` (the mean outcome gain over
+    treating no one, in outcome units); at ``depth <= 2``
     the search is exhaustive over thresholds and so globally optimal, and a deeper
     tree uses a greedy recursive best-split (documented, not guaranteed optimal).
 
@@ -437,11 +445,13 @@ def policy_tree(
         _, root = _greedy_split(scores, design, names, depth)
 
     actions = np.asarray([root.predict(row) for row in design], dtype=np.float64)
-    influence = (2.0 * actions - 1.0) * scores
+    # The value against treating no one, in outcome units: mean[pi(X) Gamma]. (The
+    # search's objective mean[(2 pi - 1) Gamma] is twice this minus the ATE.)
+    influence = actions * scores
     value = float(np.mean(influence))
     std_error = float(np.std(influence, ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
     treat_all = float(np.mean(scores))
-    treat_none = float(np.mean(-scores))
+    treat_none = 0.0
     return PolicyTree(
         root=root,
         covariates=names,

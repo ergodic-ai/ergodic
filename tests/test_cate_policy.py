@@ -105,6 +105,30 @@ def test_depth2_finds_interaction_rule() -> None:
     assert tree.value - tree.treat_all_value > 0.3
 
 
+def test_value_and_regret_are_in_outcome_units() -> None:
+    """The value is the mean outcome gain over treating no one; regret is not doubled.
+
+    Regression (API-149): the value was ``mean[(2 pi - 1) Gamma]``, so ``regret()``
+    reported twice the outcome gain its docstring promised (about 1.5 here). On the
+    rectangle world treating the planted quarter gains ``0.25 * 3 = 0.75`` per unit
+    over treating no one, and the ATE is ``0.25 * 3 - 0.75 * 1 = 0``.
+    """
+    data, g = _interaction(n=6000, seed=5)
+    res = cate(g, data, "A", "Y", method="dr_learner", random_state=0, n_boot=20)
+    tree = policy_tree(res, ("Z1", "Z2"), depth=2)
+    assert tree.treat_none_value == 0.0
+    assert tree.treat_all_value == pytest.approx(0.0, abs=0.1)
+    assert tree.value == pytest.approx(0.75, abs=0.1)
+    assert tree.regret("treat_none") == pytest.approx(0.75, abs=0.1)
+    assert tree.regret("treat_all") == pytest.approx(0.75, abs=0.15)
+    # the value is the influence mean mean[pi(X) Gamma] on the cached scores
+    assert res._scores is not None
+    scores = res._scores.scores
+    assert tree.value == pytest.approx(float(np.mean(tree.assign() * scores)), abs=1e-12)
+    lo, hi = tree.interval(0.9)
+    assert lo < 0.75 < hi
+
+
 def _internal(tree: PolicyTree) -> list[PolicyNode]:
     """Internal (non-leaf) nodes of the tree."""
     out: list[PolicyNode] = []

@@ -75,6 +75,14 @@ To be released together with Welt.
   point with no standard error. For the DR-learner's linear final stage the point
   is unchanged; for the causal forest it is the score average, which can differ
   slightly from the plain mean of the per-unit effects.
+- `PolicyTree.value` is now the policy's mean outcome gain over treating no one,
+  `mean[pi(X) * Gamma]`, in outcome units, as the docstrings described. It was
+  `mean[(2 pi(X) - 1) * Gamma]`, so `regret()` and the gap to `treat_all_value`
+  came out twice the outcome gain (example 11 priced its rule at ~$324k on a
+  200k book; the true figure is ~$162k, value 0.82 against an oracle 0.80).
+  `treat_none_value` is now 0 and `treat_all_value` (the ATE) is unchanged;
+  `std_error` and `interval()` are on the new scale. The learned rule is the same
+  (the two objectives share their argmax).
 
 ## [0.1.1] - 2026-08-30
 
