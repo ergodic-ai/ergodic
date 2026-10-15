@@ -1,0 +1,65 @@
+/* DEC-065 Graphite tokens. Light values on :root; dark when the system prefers it (unless the user chose light) or when chosen. */
+:root {
+  --background: #ffffff; --foreground: #09090b; --sidebar: #fafafa; --card: #ffffff;
+  --secondary: #f4f4f5; --muted-foreground: #71717a; --subtle-foreground: #a1a1aa; --hover: #f4f4f5;
+  --border: #e4e4e7; --border-strong: #d4d4d8; --input: #e4e4e7;
+  --primary: #18181b; --primary-foreground: #fafafa; --primary-hover: #27272a;
+  --accent: #059669; --accent-soft: rgba(16, 185, 129, .12); --ring: #047857; --ring-soft: rgba(16, 185, 129, .22);
+  --destructive: #b91c1c; --destructive-soft: rgba(220, 38, 38, .10);
+  --status-ok: #166534; --status-ok-bg: rgba(22, 163, 74, .10);
+  --status-warn: #b45309; --status-warn-bg: rgba(217, 119, 6, .10);
+  --status-bad: #b91c1c; --status-bad-bg: rgba(220, 38, 38, .10);
+  --status-neutral: #52525b; --status-neutral-bg: #f4f4f5;
+  --status-live: #047857; --status-live-bg: rgba(16, 185, 129, .10);
+  --chart-1: #10b981; --chart-2: #27272a; --chart-3: #8e8e98; --chart-grid: #f0f0f2;
+  --code-background: #fafafa; --code-keyword: #7c3aed; --code-string: #047857; --code-comment: #a1a1aa; --code-function: #1d4ed8;
+  --scrim: rgba(9, 9, 11, .38);
+  --shadow-sm: 0 1px 2px rgba(9, 9, 11, .06), 0 8px 24px -8px rgba(9, 9, 11, .14);
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --radius: 8px; --radius-control: 6px;
+  color-scheme: light;
+
+  /* Legacy names used by views that API-108/109 have not redesigned yet. */
+  --bg: var(--background); --panel: var(--card); --raised: var(--secondary); --text: var(--foreground); --muted: var(--muted-foreground);
+  --dim: var(--muted-foreground); --success: var(--status-ok); --focus: var(--ring);
+  --control-border: var(--input); --danger: var(--destructive); --danger-bg: var(--destructive-soft);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #09090b; --foreground: #fafafa; --sidebar: #0f0f11; --card: #09090b;
+    --secondary: #18181b; --muted-foreground: #a1a1aa; --subtle-foreground: #71717a; --hover: #18181b;
+    --border: #27272a; --border-strong: #3f3f46; --input: #27272a;
+    --primary: #fafafa; --primary-foreground: #18181b; --primary-hover: #e4e4e7;
+    --accent: #34d399; --accent-soft: rgba(52, 211, 153, .14); --ring: #34d399; --ring-soft: rgba(52, 211, 153, .25);
+    --destructive: #f87171; --destructive-soft: rgba(239, 68, 68, .14);
+    --status-ok: #4ade80; --status-ok-bg: rgba(34, 197, 94, .14);
+    --status-warn: #fbbf24; --status-warn-bg: rgba(245, 158, 11, .14);
+    --status-bad: #f87171; --status-bad-bg: rgba(239, 68, 68, .14);
+    --status-neutral: #a1a1aa; --status-neutral-bg: #27272a;
+    --status-live: #34d399; --status-live-bg: rgba(52, 211, 153, .12);
+    --chart-1: #34d399; --chart-2: #d4d4d8; --chart-3: #63636c; --chart-grid: #1c1c1f;
+    --code-background: #0f0f11; --code-keyword: #c4b5fd; --code-string: #6ee7b7; --code-comment: #71717a; --code-function: #93c5fd;
+    --scrim: rgba(0, 0, 0, .6);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px -8px rgba(0, 0, 0, .7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --background: #09090b; --foreground: #fafafa; --sidebar: #0f0f11; --card: #09090b;
+  --secondary: #18181b; --muted-foreground: #a1a1aa; --subtle-foreground: #71717a; --hover: #18181b;
+  --border: #27272a; --border-strong: #3f3f46; --input: #27272a;
+  --primary: #fafafa; --primary-foreground: #18181b; --primary-hover: #e4e4e7;
+  --accent: #34d399; --accent-soft: rgba(52, 211, 153, .14); --ring: #34d399; --ring-soft: rgba(52, 211, 153, .25);
+  --destructive: #f87171; --destructive-soft: rgba(239, 68, 68, .14);
+  --status-ok: #4ade80; --status-ok-bg: rgba(34, 197, 94, .14);
+  --status-warn: #fbbf24; --status-warn-bg: rgba(245, 158, 11, .14);
+  --status-bad: #f87171; --status-bad-bg: rgba(239, 68, 68, .14);
+  --status-neutral: #a1a1aa; --status-neutral-bg: #27272a;
+  --status-live: #34d399; --status-live-bg: rgba(52, 211, 153, .12);
+  --chart-1: #34d399; --chart-2: #d4d4d8; --chart-3: #63636c; --chart-grid: #1c1c1f;
+  --code-background: #0f0f11; --code-keyword: #c4b5fd; --code-string: #6ee7b7; --code-comment: #71717a; --code-function: #93c5fd;
+  --scrim: rgba(0, 0, 0, .6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px -8px rgba(0, 0, 0, .7);
+  color-scheme: dark;
+}

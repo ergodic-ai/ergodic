@@ -813,6 +813,7 @@ scm = [
 dev = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "markdown" },
     { name = "mypy" },
     { name = "numpyro" },
     { name = "pandas-stubs" },
@@ -825,6 +826,7 @@ dev = [
 ]
 docs = [
     { name = "ipykernel" },
+    { name = "markdown" },
     { name = "matplotlib" },
     { name = "mkdocs" },
     { name = "mkdocs-jupyter" },
@@ -849,6 +851,7 @@ provides-extras = ["bayes", "forecast", "foundation", "latent", "neural", "scm"]
 [package.metadata.requires-dev]
 dev = [
     { name = "jax", specifier = ">=0.4" },
+    { name = "markdown", specifier = ">=3.6" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "numpyro", specifier = ">=0.15" },
     { name = "pandas-stubs", specifier = ">=2.1" },
@@ -860,6 +863,7 @@ dev = [
 ]
 docs = [
     { name = "ipykernel", specifier = ">=6.29" },
+    { name = "markdown", specifier = ">=3.6" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mkdocs", specifier = ">=1.6,<2" },
     { name = "mkdocs-jupyter", specifier = ">=0.25" },

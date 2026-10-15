@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help sync lint format format-check typecheck test check docs docs-serve docs-deploy build clean
+.PHONY: help sync lint format format-check typecheck test check docs docs-check docs-record docs-notebooks docs-mkdocs docs-serve docs-deploy build clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -24,15 +24,29 @@ typecheck: ## Type-check with mypy
 test: ## Run the test suite
 	uv run pytest
 
-check: lint format-check typecheck test ## Lint + format check + type-check + test
+check: lint format-check typecheck test docs-check ## Lint + format check + type-check + test + docs check
 
-docs: ## Build the documentation site
+docs: ## Build the Graphite docs site into site/ (v<version>/ plus the current root)
+	uv run python -m scripts.docsite build
+
+docs-check: ## Run page programs one at a time (slow ones with DOCS_SLOW=1); check excerpts, outputs, links
+	uv run python -m scripts.docsite check
+	uv run python -m scripts.docsite build --output build/docs-check
+	uv run python -m scripts.docsite links build/docs-check
+
+docs-record: ## Rerun page programs and write their output panels (review the diff)
+	uv run python -m scripts.docsite record
+
+docs-notebooks: ## Execute every learn and case-study notebook (release CI; slow)
+	uv run --group docs python -m scripts.docsite notebooks
+
+docs-mkdocs: ## Build the legacy MkDocs site (retires when the Graphite site goes live)
 	uv run --group docs mkdocs build --strict
 
-docs-serve: ## Serve docs locally with live reload
+docs-serve: ## Serve the legacy MkDocs site locally with live reload
 	uv run --group docs mkdocs serve
 
-docs-deploy: ## Build and deploy the docs to Cloud Run
+docs-deploy: ## Build and deploy the legacy MkDocs site to Cloud Run
 	deploy/docs/deploy.sh
 
 build: ## Build sdist + wheel

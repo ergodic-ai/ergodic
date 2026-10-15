@@ -1,0 +1,118 @@
+{
+  "tracking": "API-143 / DEC-078 (builder), DEC-073 (Graphite documentation)",
+  "scope": "The ergodic documentation builder vendors welt-python's generic Graphite rendering core and theme assets. Fonts are self-hosted; pages make no third-party request at runtime.",
+  "source": {
+    "repository": "https://github.com/ergodic-ai/welt-python",
+    "commit": "72fd33f751094301dfa8ae8962a23fa7e4e51d55",
+    "commit_date": "2026-10-14",
+    "release": "v0.12.0"
+  },
+  "builder": [
+    {
+      "file": "scripts/docsite/graphite.py",
+      "source": "scripts/build_docs.py",
+      "source_sha256": "a1cb1fd3a4b9e0684cae58d0cf8413147d543b6ad4559332f35195a9e33e6bca",
+      "transformation": "Ported the generic functions icon, format_signature, highlight, mark_lines, fence_info, code_block, extract_code, wrap_steps, render_markdown and search_records: typed for mypy strict, formatted with ruff, errors raised as DocsError, fence attributes extended (output from/lines/tol/rtol, program timeout), program headers link their download, lenient callouts for notebook previews, deep search records for reference pages. The page shell, landing, llms.txt, sitemap and versioning logic moved to scripts/docsite/build.py and read docsite/site.toml. Not vendored (Welt-only): the models table, method contract and error tables, the Iris notebook landing and the 0.8 redirects."
+    },
+    {
+      "file": "scripts/docsite/examples.py",
+      "source": "scripts/check_guide_invariants.py and the next-pass rules in welt-api docs/sdk-docs-handoff.md",
+      "source_sha256": "cfb748fd9ba22bc2177999ee31012f35404192db6b92059a1f650be71838e60d",
+      "transformation": "New implementation of the rules: file=\"…\" programs run in fresh processes without network, other python fences must be verbatim contiguous excerpts, output panels are recorded and diffed with optional numeric tolerance."
+    }
+  ],
+  "assets": [
+    {
+      "file": "tokens.css",
+      "source": "docs/assets/tokens.css",
+      "note": "Console Graphite design tokens (welt-api apps/web/src/ui/tokens.css via welt-python).",
+      "source_sha256": "0f862985422412b35bfa4d86c12d2c3b6aa21115adaa0751583e6bbcd84dba48",
+      "sha256": "0f862985422412b35bfa4d86c12d2c3b6aa21115adaa0751583e6bbcd84dba48",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "docs.css",
+      "source": "docs/assets/docs.css",
+      "note": "Graphite documentation stylesheet.",
+      "source_sha256": "bcc9a3335ad61ddd3bea2b300d5da2a70a62dc65f33092d8bb369e6f8c84092b",
+      "sha256": "bcc9a3335ad61ddd3bea2b300d5da2a70a62dc65f33092d8bb369e6f8c84092b",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "ergodic-mark-dark.svg",
+      "source": "docs/assets/ergodic-mark-dark.svg",
+      "note": "Ergodic company mark (welt-python brand-provenance.json: cleaned Signal/Workbench asset).",
+      "source_sha256": "7bf1b625839d8a19ba7321c22f204c82474bee646d23edb377775ff1b4ce5cc3",
+      "sha256": "7bf1b625839d8a19ba7321c22f204c82474bee646d23edb377775ff1b4ce5cc3",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "ergodic-mark-light.svg",
+      "source": "docs/assets/ergodic-mark-light.svg",
+      "note": "Ergodic company mark (welt-python brand-provenance.json: cleaned Signal/Workbench asset).",
+      "source_sha256": "f3ba67cb066f484a89b167da5ca6c4d171014e958cb19e5a4b6018212d6036fe",
+      "sha256": "f3ba67cb066f484a89b167da5ca6c4d171014e958cb19e5a4b6018212d6036fe",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "fonts/geist-latin-ext-wght-normal.woff2",
+      "source": "docs/assets/fonts/geist-latin-ext-wght-normal.woff2",
+      "note": "Geist Variable, npm @fontsource-variable/geist@5.3.0 (SIL OFL 1.1).",
+      "source_sha256": "824f485b5d26e2f2da3c2b236132ece1bc8e4e43373452950bb0e40548b4313f",
+      "sha256": "824f485b5d26e2f2da3c2b236132ece1bc8e4e43373452950bb0e40548b4313f",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "fonts/geist-latin-wght-normal.woff2",
+      "source": "docs/assets/fonts/geist-latin-wght-normal.woff2",
+      "note": "Geist Variable, npm @fontsource-variable/geist@5.3.0 (SIL OFL 1.1).",
+      "source_sha256": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+      "sha256": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "fonts/geist-mono-latin-ext-wght-normal.woff2",
+      "source": "docs/assets/fonts/geist-mono-latin-ext-wght-normal.woff2",
+      "note": "Geist Mono Variable, npm @fontsource-variable/geist-mono@5.3.0 (SIL OFL 1.1).",
+      "source_sha256": "1a189eb997c3e2ece68373e387afaec9e8617424186c4b1ab3cff7c54ba6223b",
+      "sha256": "1a189eb997c3e2ece68373e387afaec9e8617424186c4b1ab3cff7c54ba6223b",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "fonts/geist-mono-latin-wght-normal.woff2",
+      "source": "docs/assets/fonts/geist-mono-latin-wght-normal.woff2",
+      "note": "Geist Mono Variable, npm @fontsource-variable/geist-mono@5.3.0 (SIL OFL 1.1).",
+      "source_sha256": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc",
+      "sha256": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "fonts/OFL-Geist.txt",
+      "source": "docs/assets/fonts/OFL-Geist.txt",
+      "note": "Geist licence text.",
+      "source_sha256": "71609cbb5c78b5870d712eab73a31d76622635c6ed034ab5cee3b9ecbda8685f",
+      "sha256": "71609cbb5c78b5870d712eab73a31d76622635c6ed034ab5cee3b9ecbda8685f",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "fonts/OFL-Geist-Mono.txt",
+      "source": "docs/assets/fonts/OFL-Geist-Mono.txt",
+      "note": "Geist Mono licence text.",
+      "source_sha256": "cc815ed4fc045f0e991abb10395b7932bd028c6a067deb13316d6002105074e6",
+      "sha256": "cc815ed4fc045f0e991abb10395b7932bd028c6a067deb13316d6002105074e6",
+      "transformation": "None; byte-identical copy."
+    },
+    {
+      "file": "docs.js",
+      "source": "docs/assets/docs.js",
+      "source_sha256": "7604310b2328b48374b2f2ab551c43b8b0c7d78cdd10153a657d257b8dc0e9e1",
+      "sha256": "c7203dc9536884716b7b4f3165234fb49cdd2ce27a6ede8d9768e52fe419ebad",
+      "transformation": "Header comment extended; the theme storage key reads <html data-theme-key> (neutral fallback 'docs-theme') and the two search prompts read <body data-search-prompt/data-search-hint>, each with a neutral fallback. Behaviour is otherwise unchanged."
+    },
+    {
+      "file": "site.css",
+      "source": null,
+      "transformation": "New (API-143): product switcher, program download link, landing output spacing and a ring on the brand tile in dark mode; tokens only."
+    }
+  ]
+}

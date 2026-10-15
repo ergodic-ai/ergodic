@@ -84,6 +84,9 @@ dev = [
     # the model the forecaster fits.
     "jax>=0.4",
     "numpyro>=0.15",
+    # The documentation builder (scripts/docsite) renders with Python-Markdown; the
+    # docs tests in `make check` import it.
+    "markdown>=3.6",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -93,6 +96,8 @@ docs = [
     "mkdocs-jupyter>=0.25",
     "ipykernel>=6.29",
     "matplotlib>=3.8",
+    # The Graphite documentation builder (scripts/docsite, API-143).
+    "markdown>=3.6",
 ]
 
 [build-system]
@@ -150,7 +155,7 @@ select = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 mypy_path = "src"
 explicit_package_bases = true
 namespace_packages = true
@@ -162,6 +167,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # scipy rides in with pymc (the spectral null fit optimizes with it).
 module = ["pymc.*", "pytensor.*", "arviz.*", "xarray.*", "numpyro.*", "scipy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["markdown.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -178,6 +187,8 @@ ignore_missing_imports = true
 minversion = "8.0"
 addopts = "-ra --import-mode=importlib"
 testpaths = ["tests"]
+# The documentation builder (scripts/docsite) is tested from tests/test_docsite.py.
+pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["ergodic"]
