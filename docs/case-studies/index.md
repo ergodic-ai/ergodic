@@ -8,7 +8,7 @@ So this is the applied tier. The concepts live in [the learn series](../learn/in
 
 | Case study | Method | The question | What it recovers |
 | --- | --- | --- | --- |
-| [Smoking and birthweight](01-birthweight.py) | backdoor adjustment | Does maternal smoking lower birthweight? | naive -275 g, adjusted -222 g, near the published -203 |
+| [Smoking and birthweight](01-birthweight.py) | backdoor adjustment | Does maternal smoking lower birthweight? | naive -275 g, adjusted -222 g, near the published -231 |
 | [Berkeley admissions](02-berkeley.py) | confounding, Simpson's paradox | Did 1973 admissions favor men? | a pooled -14 point gap reverses to +4 once you condition on department |
 | [401(k) and wealth](03-pension401k.py) | double machine learning | What does 401(k) eligibility do to savings? | naive $19,500, a panel of flexible learners near $9,000 |
 | [Proposition 99](04-synthetic-control.py) | synthetic control | Did California's tobacco program cut smoking? | -21 packs per capita, placebo p = 0.05 |

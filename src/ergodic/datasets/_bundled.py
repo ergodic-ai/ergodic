@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Loaders for the bundled CSVs: birthweight, pension, smoking, and reunification.
 
-The data files ship inside the wheel and load offline. Their values are
-public-domain or permissively licensed; see the NOTICE for provenance and
-citations.
+The data files ship inside the wheel and load offline. The birthweight and
+pension files derive from public-domain US government data (natality records and
+the Survey of Income and Program Participation); the smoking and germany files
+are replication data the authors of the cited studies publish without an explicit
+licence. See the NOTICE for each source and its terms.
 """
 
 from __future__ import annotations
@@ -51,8 +53,12 @@ natality records.
 Treatment mbsmoke (the mother smoked during pregnancy), outcome bweight (grams),
 and a set of parental and prenatal-care confounders. The lesson is the gap
 between the naive difference (about -275 g) and the adjusted effect (about
--203 g): smoking lowers birthweight, and adjustment moves the estimate toward the
-literature figure. Build the graph from ds.confounders and run
+-231 g): smoking lowers birthweight, and adjustment moves the estimate toward the
+published figure. That figure is the doubly robust (AIPW) estimate on this same
+4,642-row extract in the Stata treatment-effects manual (teffects aipw, example
+1: -231 g, standard error 26 g); other adjustments there land between about
+-210 g (nearest-neighbour matching) and -240 g (regression adjustment).
+Build the graph from ds.confounders and run
 estimate_effect(graph, ds.data, "mbsmoke", "bweight", treated="smoker",
 strategy="aipw").
 """
@@ -101,11 +107,16 @@ def load_birthweight() -> Bunch:
         confounders=_BIRTHWEIGHT_CONFOUNDERS,
         target={
             "estimand": "ATE",
-            "value": -225.0,
-            "tol": 90.0,
-            "naive": -275.0,
+            "value": -231.0,
+            "tol": 30.0,
+            "naive": -275.3,
             "units": "grams",
-            "source": "Almond, Chay and Lee (2005); Cattaneo (2010)",
+            "source": (
+                "StataCorp, Stata Treatment-Effects Reference Manual (Release 13), "
+                "teffects aipw, example 1, on this Cattaneo (2010) extract: "
+                "ATE -230.99 g (SE 26.2); data from US natality records as used by "
+                "Almond, Chay and Lee (2005) and Cattaneo (2010)"
+            ),
         },
         DESCR=_BIRTHWEIGHT_DESCR,
     )

@@ -102,6 +102,16 @@ To be released together with Welt.
   installing `ergodic[neural]`/`ergodic[foundation]`, which do not provide those
   learners in this version. A test reads
   every string constant in the package and refuses those words.
+- `load_birthweight`: the `target` said -225 g with a tolerance of 90 g, the
+  description and the case study said about -203 g, and neither figure traced to
+  a published estimate on this extract. The target is now -231 g (tolerance
+  30 g, naive -275.3 g), the AIPW estimate on this same 4,642-row Cattaneo (2010)
+  extract in the Stata treatment-effects manual, and the description, the case
+  study, and the example quote it with that source. The `ergodic.datasets`
+  docstrings no longer call every bundled file public-domain or permissively
+  licensed; they say which files derive from public-domain US government data
+  and which are authors' replication data without an explicit licence, as the
+  NOTICE does.
 
 ## [0.1.1] - 2026-08-30
 

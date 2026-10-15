@@ -87,9 +87,25 @@ def test_birthweight_adjustment_moves_toward_the_literature() -> None:
         treated=ds.treated,
     )
     assert abs(adjusted.value - ds.target["value"]) < ds.target["tol"]
-    assert abs(naive.value - ds.target["naive"]) < 20.0
+    assert abs(naive.value - ds.target["naive"]) < 1.0
     # adjustment pulls the estimate up from the naive number
     assert adjusted.value > naive.value
+
+
+def test_birthweight_target_matches_its_description_and_source() -> None:
+    """Regression (API-149): the target said -225 +/- 90 while DESCR said -203.
+
+    The target is the Stata manual's AIPW estimate on this exact extract, the
+    description quotes the same figure, and the tolerance covers the published
+    spread of adjustment estimators (about -210 to -240).
+    """
+    ds = D.load_birthweight()
+    assert ds.data.n_rows == 4642
+    assert ds.target["value"] == -231.0
+    assert ds.target["tol"] == 30.0
+    assert "-231 g" in ds.DESCR
+    assert "-203" not in ds.DESCR
+    assert "teffects aipw" in ds.target["source"]
 
 
 def test_pension_double_ml_recovers_the_eligibility_effect() -> None:
