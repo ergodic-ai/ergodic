@@ -131,8 +131,10 @@ reruns the search on resamples and reports how often each edge appears.
 <details markdown="1"><summary>What does `method="welt:..."` do?</summary>
 
 `discover(data, method="welt:<model>")` sends the table to a hosted Welt model. It
-needs `pip install "ergodic[welt]"`, runs one paid job, and takes no test, score or
-knowledge. See [Discover in Welt, estimate in ergodic](welt.md).
+needs `pip install "ergodic[welt]"`, runs one paid job, and takes no test or score.
+Domain knowledge applies only when you also pass `decoder=`, because ergodic then
+decodes the model's edge probabilities locally. See
+[Discover in Welt, estimate in ergodic](welt.md) and [Decode a graph](decode-a-graph.md).
 
 </details>
 
