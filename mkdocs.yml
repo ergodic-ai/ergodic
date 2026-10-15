@@ -5,6 +5,10 @@ copyright: Copyright &copy; 2026 Ergodic
 repo_url: https://github.com/ergodic-ai/ergodic
 repo_name: ergodic-ai/ergodic
 
+# Page sources written for the docs site (docsite/), kept here until they move there.
+exclude_docs: |
+  drafts/
+
 theme:
   name: material
   logo: assets/ergodic_logomark_dark.svg

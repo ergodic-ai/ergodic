@@ -36,6 +36,41 @@ To be released together with Welt (welt-api DEC-078, API-140).
   `upload_dataset` and `load_research_dataset` move tabular data between ergodic
   and Welt. `bootstrap` refuses `welt:` methods (each resample would be a paid
   job). (API-141)
+- `ergodic.EdgeProbabilities` (also `ergodic.discovery.EdgeProbabilities`): an
+  immutable matrix of directed-edge probabilities over named variables, source rows
+  and target columns, with a zero diagonal and a read-only copy of the values. `kind`
+  is `"independent"` (per-edge marginals, as AVICI and CDFM return), `"pair_state"`
+  (three exclusive states per pair, `P[i, j] + P[j, i] <= 1` enforced) or
+  `"frequency"` (bootstrap shares); `calibrated` defaults to `False` and `provenance`
+  is a read-only mapping. `to_pair_states()` conditions independent marginals on "not
+  both directions", `existence()` gives skeleton probabilities, `threshold(t)` a
+  diagnostic `mixed` graph that may be cyclic, `to_frame()`/`from_frame()` a
+  dataframe round trip, and `from_bootstrap()` reads a `BootstrapResult`. It is not
+  a graph posterior. (API-148, DEC-079)
+- `ergodic.decode(probabilities, method="greedy", *, threshold=None, knowledge=None,
+  samples=1, seed=None, max_nodes=20)`: explicit, versioned decoders from edge
+  probabilities to a DAG, ported from Ergodic's research library: `greedy_v1`
+  (default; optional strict `threshold`), `exact_map_v1` (A*, capped at `max_nodes`),
+  `expected_count_v1`, `soft_f1_v1`, and the seeded samplers `pair_sampler_v1` and
+  `perturb_and_map_v1` (candidate DAGs plus a medoid consensus; a seed is required).
+  It returns a `DecodeResult` (a `DiscoveryResult`, `method="decode:<id>"`) labelled
+  `decoded` with the decoder, parameters, seed, rejected cycles, objective and source
+  provenance, and the note "not a graph posterior; orientation not certified".
+  `DomainKnowledge` constrains decoding (forbidden edges, tiers, roots, sinks,
+  `restrict_to`, order on ancestry, required edges first); `confound` is refused.
+  `ergodic.discovery.Decoder` holds a decoder and its settings. Re-decoding 4,730
+  stored EXP-0626 AVICI and CDFM rows reproduces the research decoders' DAGs exactly.
+  (API-148, DEC-079)
+- `ergodic.welt.discover(..., decoder=...)` and
+  `discover(data, method="welt:<model>", decoder=...)`: opt-in local decoding. The
+  run then accepts `avici` and `cdfm`, reads the native scores as
+  `EdgeProbabilities(kind="independent")` with the Welt provenance, and returns a
+  `DecodeResult` whose graph is the decoded DAG, with `edge_probabilities`,
+  `welt_native_edges` and the decode labels in `diagnostics`. Greedy defaults to the
+  model's native threshold (0.5 for AVICI, the recorded adaptive threshold for CDFM).
+  With a decoder, `knowledge=` constrains the local decoding and is checked before
+  anything is uploaded. Without `decoder=` nothing changes: non-DAG models are still
+  refused before paying. (API-148, DEC-079)
 
 ### Changed (API-141)
 - `DiscoveryResult.diagnostics` is typed `Mapping[str, Any]` so a Welt run can
