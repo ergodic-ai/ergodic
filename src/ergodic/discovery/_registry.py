@@ -150,6 +150,7 @@ _SCORE_ALIASES: dict[str, tuple[str, str]] = {
     "bic_discrete": ("ergodic.discovery.scores._discrete_bic", "DiscreteBIC"),
     "discrete_bic": ("ergodic.discovery.scores._discrete_bic", "DiscreteBIC"),
     "bdeu": ("ergodic.discovery.scores._bdeu", "BDeu"),
+    "bge": ("ergodic.discovery.scores._bge", "BGe"),
     "bic_mixed": ("ergodic.discovery.scores._mixed_bic", "MixedBIC"),
     "mixed_bic": ("ergodic.discovery.scores._mixed_bic", "MixedBIC"),
 }

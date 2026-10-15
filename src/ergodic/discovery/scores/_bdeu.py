@@ -52,6 +52,7 @@ class BDeu(Score):
     needs: ClassVar[str] = "codes"
     decomposable: ClassVar[bool] = True
     score_equivalent: ClassVar[bool] = True
+    marginal_likelihood: ClassVar[bool] = True
 
     def __init__(self, data: TabularData | None = None, *, ess: float = 10.0) -> None:
         if ess <= 0.0:
