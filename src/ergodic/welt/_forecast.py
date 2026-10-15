@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import pandas as pd
 
-__all__ = ["NATIVE_QUANTILE_LEVELS", "Chronos", "WeltForecastDiagnostics", "WeltForecaster"]
+__all__ = ["NATIVE_QUANTILE_LEVELS", "WeltForecastDiagnostics", "WeltForecaster"]
 
 #: The 21 quantile levels Chronos-2 predicts natively (DEC-085 §1), the default
 #: request. Any strictly increasing subset of them is accepted.
@@ -713,8 +713,9 @@ class WeltForecaster:
         return f"WeltForecaster({', '.join(parts)}; {state})"
 
 
-#: ``Chronos`` is :class:`WeltForecaster`, named for the model it runs by default:
-#: ``Chronos()`` is ``WeltForecaster("chronos-2")``.
+# ``Chronos`` is WeltForecaster under the name of the model it runs by default
+# (DEC-085 §9): ``Chronos()`` is ``WeltForecaster("chronos-2")``. Importable from
+# ergodic.welt but left out of ``__all__``, so the reference documents the class once.
 Chronos = WeltForecaster
 
 

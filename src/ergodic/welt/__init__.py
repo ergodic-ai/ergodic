@@ -10,7 +10,7 @@ estimation and forecasting:
   run is ``ergodic.discover(data, method="welt:arrow")``.
 - :class:`WeltLearner` fills an estimator's nuisance slots with a Welt tabular
   model, so ``estimate_effect(..., learner=WeltLearner("tabicl-v2"))`` works.
-- :class:`WeltForecaster` (also :data:`Chronos`) forecasts a
+- :class:`WeltForecaster` (also importable as ``Chronos``) forecasts a
   :class:`~ergodic.data.TimeSeriesData` with Welt's Chronos-2, covariates
   included, as an ergodic :class:`~ergodic.forecast.ForecastModel`, so
   ``backtest(WeltForecaster(), data, test_size=12)`` and
@@ -41,17 +41,12 @@ except ImportError as error:  # pragma: no cover - exercised without the extra
 
 from ._data import load_research_dataset, upload_dataset
 from ._discovery import WeltDecodeError, WeltGraphNotDAGError, discover
-from ._forecast import (
-    NATIVE_QUANTILE_LEVELS,
-    Chronos,
-    WeltForecastDiagnostics,
-    WeltForecaster,
-)
+from ._forecast import NATIVE_QUANTILE_LEVELS, WeltForecastDiagnostics, WeltForecaster
+from ._forecast import Chronos as Chronos  # the same class; see WeltForecaster
 from ._learner import WeltLearner
 
 __all__ = [
     "NATIVE_QUANTILE_LEVELS",
-    "Chronos",
     "WeltDecodeError",
     "WeltForecastDiagnostics",
     "WeltForecaster",
