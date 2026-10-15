@@ -64,10 +64,16 @@ class Task(Enum):
 
 @dataclass(frozen=True)
 class Slot:
-    """A named nuisance position with the learning task it requires."""
+    """A named nuisance position with the learning task it requires.
+
+    ``weighted`` marks a slot whose learner is fit with ``sample_weight``. A learner
+    that declares ``supports_sample_weight = False`` (a remote learner whose fits
+    take no row weights) is refused there when the slots resolve, before any fit.
+    """
 
     name: str
     task: Task
+    weighted: bool = False
 
 
 @dataclass
@@ -257,6 +263,11 @@ class CausalEstimator(ABC):
                 raise TypeError(
                     f"slot {slot.name!r} needs a classifier with predict_proba; "
                     f"got {type(learner).__name__}"
+                )
+            if slot.weighted and getattr(learner, "supports_sample_weight", True) is False:
+                raise TypeError(
+                    f"slot {slot.name!r} needs a learner whose fit accepts sample_weight; "
+                    f"{type(learner).__name__} declares it does not, so nothing was fit"
                 )
             make[slot.name] = partial(_fresh, learner)
             names[slot.name] = type(learner).__name__

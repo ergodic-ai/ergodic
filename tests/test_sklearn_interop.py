@@ -90,3 +90,43 @@ def test_sklearn_learners_clone_per_fold_in_dml() -> None:
     )
     assert np.isfinite(est.value)
     assert abs(est.value - 2.0) < 0.3
+
+
+def test_fresh_honors_an_overridden_sklearn_clone_hook_only() -> None:
+    """A learner overriding ``__sklearn_clone__`` clones itself; sklearn's default does not.
+
+    A remote learner uses the hook to share its client and fit budget with its clones.
+    sklearn estimators all inherit the default hook and keep the get_params path.
+    """
+    from sklearn.linear_model import Ridge
+
+    shared = object()
+
+    class Remote:
+        def __init__(self, alpha: float = 1.0) -> None:
+            self.alpha = alpha
+            self.shared = shared
+
+        def get_params(self, deep: bool = True) -> dict[str, Any]:
+            return {"alpha": self.alpha}
+
+        def __sklearn_clone__(self) -> Remote:
+            twin = Remote(self.alpha)
+            twin.shared = self.shared
+            return twin
+
+        def fit(self, X: Any, y: Any, sample_weight: Any = None) -> Remote:
+            return self
+
+        def predict(self, X: Any) -> Any:
+            return np.zeros(len(X))
+
+    remote = Remote(alpha=2.0)
+    remote.shared = object()
+    twin = _fresh(remote)
+    assert isinstance(twin, Remote) and twin is not remote
+    assert twin.shared is remote.shared and twin.alpha == 2.0
+
+    ridge = Ridge(alpha=3.0)
+    cloned: Any = _fresh(ridge)
+    assert type(cloned) is Ridge and cloned is not ridge and cloned.alpha == 3.0

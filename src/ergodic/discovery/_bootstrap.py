@@ -267,6 +267,7 @@ def bootstrap(
         data: The dataset to resample: tabular for the iid methods, a time
             series or panel for the temporal ones.
         method: A registered discovery method name, as in :func:`discover`.
+            ``welt:<model>`` methods are refused: each resample would be a paid job.
         n_bootstrap: How many resamples to draw, at least 1.
         seed: Seed for the resampling generator.
         knowledge: Hard constraints, handed to every replicate.
@@ -276,6 +277,11 @@ def bootstrap(
     """
     if n_bootstrap < 1:
         raise ValueError(f"n_bootstrap must be >= 1, got {n_bootstrap}")
+    if method.lower().startswith("welt:"):
+        raise ValueError(
+            f"bootstrap would submit {n_bootstrap} paid Welt jobs for {method!r}, one per "
+            "resample, so it refuses Welt methods; run ergodic.discover once instead"
+        )
     temporal: TimeSeriesData | PanelData | None = None
     if method.lower() in TEMPORAL_METHODS:
         if not isinstance(data, TimeSeriesData | PanelData):

@@ -51,7 +51,17 @@ def discover(
     ``"glasso"`` (a sparse precision estimate). They reject ``test=`` and
     ``score=``, and ``alpha`` does not apply (their own knobs, like ``lam``
     or ``prune``, pass through the keyword arguments).
+
+    ``method="welt:<model>"`` (for example ``"welt:arrow"``) runs a hosted Welt
+    model through :func:`ergodic.welt.discover`, one paid Welt job. It needs
+    ``pip install "ergodic[welt]"``, takes no test, score, knowledge or
+    ``alpha``, and passes only ``client``, ``seed`` and ``timeout`` through the
+    keyword arguments; anything else raises before any request.
     """
+    if method.lower().startswith("welt:"):
+        return _welt(
+            data, method, test=test, score=score, knowledge=knowledge, alpha=alpha, **kwargs
+        )
     cls = algorithm_for(method)
     result: DiscoveryResult
     if cls.ingredient is None:
@@ -70,3 +80,36 @@ def discover(
     chosen_score = score if score is not None else "auto"
     result = cls(score=chosen_score, **kwargs).fit(data, knowledge=knowledge)
     return result
+
+
+def _welt(
+    data: Any,
+    method: str,
+    *,
+    test: Any,
+    score: Any,
+    knowledge: DomainKnowledge | None,
+    alpha: float,
+    **kwargs: Any,
+) -> DiscoveryResult:
+    """Hand a ``welt:<model>`` method to :mod:`ergodic.welt`, imported only now."""
+    if test is not None or score is not None:
+        raise ValueError(f"method {method!r} runs a Welt model; it takes no test or score")
+    if alpha != 0.05:
+        raise ValueError(
+            f"method {method!r} runs a Welt model; alpha is a local test setting and does not apply"
+        )
+    local = sorted(set(kwargs) - {"client", "seed", "timeout"})
+    if local:
+        raise ValueError(
+            f"method {method!r} runs a Welt model and takes only client, seed and timeout; "
+            f"got {local}"
+        )
+    try:
+        from ..welt import discover as welt_discover
+    except ImportError as error:
+        raise ImportError(
+            f"method {method!r} needs welt-client: pip install 'ergodic[welt]'"
+        ) from error
+    model = method.split(":", 1)[1]
+    return welt_discover(data, model, knowledge=knowledge, **kwargs)
