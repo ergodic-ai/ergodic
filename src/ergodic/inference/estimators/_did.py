@@ -80,7 +80,7 @@ class EventTimeEffect:
     n_treated: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class DiDEffect(EffectEstimate):
     """A difference-in-differences result: the estimate plus the design it rests on.
 

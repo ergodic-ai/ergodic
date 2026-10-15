@@ -25,7 +25,7 @@ class TwoStageRegression(_FrontdoorBase):
     For binary treatment ``A`` and binary mediator ``M``: a classifier gives
     ``P(M | A)``, a regression gives ``E[Y | M, A]``, and the effect is the
     front-door sum ``E[Y | do(A=1)] - E[Y | do(A=0)]``. Continuous and multi-level
-    mediators come later.
+    mediators are not supported.
     """
 
     name = "two_stage_regression"

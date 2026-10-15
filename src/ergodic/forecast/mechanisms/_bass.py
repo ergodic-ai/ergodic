@@ -184,7 +184,7 @@ class Bass(TemporalMechanism):
             raise NotImplementedError(
                 f"{name!r} carries a Bass mechanism, which is pure diffusion: it has no slot "
                 f"for the driver(s) {sorted(parents)}. A driver that moves adoption is the "
-                "hybrid form, which is deferred; until then model the driver separately or "
+                "hybrid form, which is not available; model the driver separately or "
                 "give this node a StructuralMechanism or CausalOU."
             )
         n_total = int(T) + int(horizon)

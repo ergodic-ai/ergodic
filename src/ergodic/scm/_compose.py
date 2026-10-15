@@ -16,13 +16,13 @@ What it owns:
   scalar; after ``do(X)`` node X leaves the predictive set, so a downstream node
   is read. Posterior uncertainty rides through the merged ``idata``.
 - **Counterfactuals, the explicit-noise twin network.** Abduct the units' noise on
-  the factual graph, then predict on an action branch that reuses it. The MVP
+  the factual graph, then predict on an action branch that reuses it. The SCM
   handles invertible mechanisms only: the additive-Gaussian abduction is the exact
   residual and the prediction is deterministic numpy over the parameter posterior
   (machine precision, the ``Y_cf = y + b(x' - x)`` anchor), and the categorical
   Gumbel-max abduction is the truncated-Gumbel numpy sampler. A general
   (non-invertible) node's counterfactual would need the genuinely wider abduction
-  posterior; that is post-MVP, so the SCM refuses it upstream rather than reuse the
+  posterior, which is not implemented, so the SCM refuses it upstream rather than reuse the
   exact-residual route.
 
 The gotchas, all handled here: ``do`` is a length-n vector; the intervened node
@@ -44,6 +44,7 @@ from ._mechanism import (
     Mechanism,
     encode_parent_design,
 )
+from ._sampling import sampler_cores
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -151,7 +152,7 @@ def fit_district(
     seed: int,
     target_accept: float = 0.95,
 ) -> dict[str, FitResult]:
-    """Joint NUTS fit of a confounded district, the Track-D recipe.
+    """Joint NUTS fit of a confounded district.
 
     A district whose nodes share a ``<->`` does not factorize -- the latent couples
     them -- so the district fits as one model rather than per node. Each latent is a
@@ -191,6 +192,7 @@ def fit_district(
             draws=draws,
             tune=tune,
             chains=chains,
+            cores=sampler_cores(chains),
             target_accept=target_accept,
             random_seed=seed,
             progressbar=False,

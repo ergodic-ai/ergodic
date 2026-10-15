@@ -105,6 +105,92 @@ def test_depth2_finds_interaction_rule() -> None:
     assert tree.value - tree.treat_all_value > 0.3
 
 
+def test_value_and_regret_are_in_outcome_units() -> None:
+    """The value is the mean outcome gain over treating no one; regret is not doubled.
+
+    Regression (API-149): the value was ``mean[(2 pi - 1) Gamma]``, so ``regret()``
+    reported twice the outcome gain its docstring promised (about 1.5 here). On the
+    rectangle world treating the planted quarter gains ``0.25 * 3 = 0.75`` per unit
+    over treating no one, and the ATE is ``0.25 * 3 - 0.75 * 1 = 0``.
+    """
+    data, g = _interaction(n=6000, seed=5)
+    res = cate(g, data, "A", "Y", method="dr_learner", random_state=0, n_boot=20)
+    tree = policy_tree(res, ("Z1", "Z2"), depth=2)
+    assert tree.treat_none_value == 0.0
+    assert tree.treat_all_value == pytest.approx(0.0, abs=0.1)
+    assert tree.value == pytest.approx(0.75, abs=0.1)
+    assert tree.regret("treat_none") == pytest.approx(0.75, abs=0.1)
+    assert tree.regret("treat_all") == pytest.approx(0.75, abs=0.15)
+    # the value is the influence mean mean[pi(X) Gamma] on the cached scores
+    assert res._scores is not None
+    scores = res._scores.scores
+    assert tree.value == pytest.approx(float(np.mean(tree.assign() * scores)), abs=1e-12)
+    lo, hi = tree.interval(0.9)
+    assert lo < 0.75 < hi
+
+
+def test_evaluate_scores_a_fixed_rule_on_held_out_units() -> None:
+    """Regression (API-149): the in-sample value is optimistic; evaluate() is honest.
+
+    The tree is chosen to maximize its value on the same scores, so the reported
+    value runs high. Learning on one sample and evaluating on a fresh one removes
+    the selection; the held-out interval covers the oracle value of the learned
+    rule, and evaluating on the training scores reproduces the in-sample value.
+    """
+    train, g = _signflip(n=1500, seed=31)
+    test, _ = _signflip(n=4000, seed=32)
+    fit = cate(g, train, "A", "Y", method="dr_learner", random_state=0, n_boot=20)
+    held = cate(g, test, "A", "Y", method="dr_learner", random_state=1, n_boot=20)
+    tree = policy_tree(fit, "Z", depth=2)
+
+    same = tree.evaluate(fit)
+    assert same.value == pytest.approx(tree.value, abs=1e-12)
+    assert same.std_error == pytest.approx(tree.std_error, abs=1e-12)
+
+    out = tree.evaluate(held)
+    assert out.n == 4000
+    z = test.to_pandas()["Z"].to_numpy()
+    oracle = float(np.mean(tree.predict(z.reshape(-1, 1)) * 2.0 * z))  # tau = 2 z
+    lo, hi = out.interval(0.95)
+    assert lo < oracle < hi
+    assert out.regret("treat_none") == out.value
+    assert out.regret("treat_all") == pytest.approx(out.value - out.treat_all_value)
+    with pytest.raises(ValueError, match="split covariates"):
+        PolicyTree(
+            root=tree.root,
+            covariates=("nope",),
+            n=tree.n,
+            depth=tree.depth,
+            value=tree.value,
+            std_error=tree.std_error,
+            treat_all_value=tree.treat_all_value,
+            treat_none_value=0.0,
+            exhaustive=True,
+        ).evaluate(held)
+
+
+def test_in_sample_value_is_optimistic_on_average() -> None:
+    """Across seeds the in-sample value exceeds the same rule's held-out value.
+
+    A pure-noise world (no effect anywhere) makes the optimism plain: the true
+    value of any rule is zero, but the search finds a positive in-sample value.
+    """
+    gaps = []
+    for seed in range(6):
+        rng = np.random.default_rng(100 + seed)
+        n = 800
+        z = rng.normal(size=2 * n)
+        a = (rng.uniform(size=2 * n) < 0.5).astype(float)
+        y = 0.5 * z + rng.normal(size=2 * n)
+        frame = pd.DataFrame({"A": a, "Z": z, "Y": y})
+        g = dag(["Z -> A", "Z -> Y", "A -> Y"])
+        fit = cate(g, tabular(frame.iloc[:n]), "A", "Y", random_state=0, uncertainty=False)
+        held = cate(g, tabular(frame.iloc[n:]), "A", "Y", random_state=0, uncertainty=False)
+        tree = policy_tree(fit, "Z", depth=2)
+        gaps.append(tree.value - tree.evaluate(held).value)
+    assert float(np.mean(gaps)) > 0.0
+
+
 def _internal(tree: PolicyTree) -> list[PolicyNode]:
     """Internal (non-leaf) nodes of the tree."""
     out: list[PolicyNode] = []

@@ -15,7 +15,7 @@ sample that still looks plausible. :func:`_audit_sites` runs before every
 posterior-predictive pass and checks the match in both directions, so a
 mismatched name is an exception rather than a quiet lie.
 
-The sampler binding: PyMC through its JAX backend. The engine spike measured
+The sampler binding: PyMC through its JAX backend. A benchmark measured
 that path at parity with raw NumPyro and roughly four times the C backend on
 exactly this kind of scan model, and it found that PyMC picks nutpie when
 ``nuts_sampler`` is left off. So the backend is always named at the call site,
@@ -80,7 +80,7 @@ def resolve_nuts_sampler() -> str:
     """The NUTS backend to name at the call site: the JAX path when it is installed.
 
     Never left to PyMC's own default. PyMC picks nutpie when it is present and
-    ``nuts_sampler`` is omitted, and the spike measured nutpie at 3.8 times the
+    ``nuts_sampler`` is omitted, and a benchmark measured nutpie at 3.8 times the
     wall clock of the JAX path on the model this pillar fits, so the choice is
     made here and stated.
 
@@ -217,7 +217,7 @@ def lag_align(history: Array, future: Any | None, lag: int, horizon: int) -> Any
     where it started before we began watching, which is the mildest thing to
     assume and is wrong in exactly one direction, understating the trend over the
     first ``k`` steps. The alternative, masking the first ``max_lag`` steps out of
-    the likelihood, is a real option and is deliberately not taken in v1: with
+    the likelihood, is a real option and is deliberately not taken: with
     ``k`` small against ``T`` the padded rows are a fraction of a percent of the
     information, and dropping rows makes two nodes at different lags fit
     different windows.
@@ -804,7 +804,7 @@ def _build_joint(
                 if column.base not in means:
                     raise ValueError(
                         f"{slot.node!r} reads {column.base!r}, which this joint model has not "
-                        "built yet; the nodes have to arrive in topological order"
+                        "reached yet; the nodes have to arrive in topological order"
                     )
                 paths[column.key] = _shift_mean(means[column.base], column.lag, t_len + horizon)
             else:

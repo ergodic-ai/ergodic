@@ -69,18 +69,18 @@ A fitted `SCM` is stateful: it holds the per-node posteriors, and the queries ar
 
 ```python
 scm.sample(n=2000)
-# SCMResult(sample, identified: score=-0.03779, sd=2.43, 95% CrI [-4.8, 4.72])
+# SCMResult(sample, identified: score=-0.03779, sd=2.43, 95% predictive interval [-4.8, 4.72])
 ```
 
-Every query returns an `SCMResult`: a posterior over the answer, with `value` (the mean), `std_error`, `draws()`, and `interval()`. The point is the degenerate one-draw case, the same distribution shape the Bayesian estimators in [`ergodic.inference`](inference.md) emit. The `identified` flag in the repr is the honesty marker; for a query that is a function of the data alone it reads `identified`.
+Every query returns an `SCMResult` of draws, with `value` (the mean), `std_error`, `draws()`, and `interval()`. Its `kind` says what the draws are: `"predictive"` for `sample`, `marginal`, and `interventional`, where each draw is one unit's outcome, so the interval is the spread of the outcome; `"posterior"` for `ate` and `counterfactual`, where the draws are of the answer itself and the interval is a credible interval. The point is the degenerate one-draw case, the same distribution shape the Bayesian estimators in [`ergodic.inference`](inference.md) emit. The `identified` flag in the repr is the honesty marker; for a query that is a function of the data alone it reads `identified`.
 
 ### Interventional: do, not condition
 
-`interventional` answers `E[Y | do(X = x)]`. This is surgery, not conditioning. PyMC's `pm.do` severs the intervened node from its causes and pins it to the value, so the back door through any confounder is cut and what flows downstream is the causal effect. The query carries the parameter posterior, so the answer has a credible interval that reflects how well the mechanisms are pinned.
+`interventional` draws the outcome under `do(X = x)`. This is surgery, not conditioning. PyMC's `pm.do` severs the intervened node from its causes and pins it to the value, so the back door through any confounder is cut and what flows downstream is the causal effect. The draws are posterior-predictive: each is one unit's outcome, carrying the parameter posterior and the mechanism's noise. So `value` estimates `E[Y | do(X = x)]`, while the interval is the spread of `Y` under the intervention (about 1.4 here), not the uncertainty in its mean. For the effect with a credible interval, use `ate`, below.
 
 ```python
 high = scm.interventional("score", do={"hours": 1.0}, n=2000)
-high   # SCMResult(interventional, identified: score=2.013, sd=1.4, 95% CrI [-0.722, 4.75])
+high   # SCMResult(interventional, identified: score=2.013, sd=1.4, 95% predictive interval [-0.722, 4.75])
 
 low = scm.interventional("score", do={"hours": 0.0}, n=2000)
 high.value - low.value   # ~1.99, against the planted 2.0

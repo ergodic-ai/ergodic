@@ -5,8 +5,8 @@ A hierarchy is hard structure. A parent equals the aggregate of its children by
 construction, so the edges are known and deterministic, not something to learn.
 It drives :class:`HierarchicalTSData` now and is reusable for grouped data later.
 
-v1 covers strict trees with sum or mean aggregation. Crossed groupings (region by
-category) come later.
+It covers strict trees with sum or mean aggregation. Crossed groupings (region by
+category) are not supported.
 """
 
 from __future__ import annotations
@@ -75,16 +75,32 @@ class Hierarchy:
             out.add(child)
         return frozenset(out)
 
+    def _require_node(self, node: str) -> None:
+        if node not in self.nodes:
+            raise ValueError(f"unknown node {node!r}; the hierarchy has {sorted(self.nodes)}")
+
     def children_of(self, node: str) -> tuple[str, ...]:
-        """Return the children of ``node``, sorted; empty for a leaf or an unknown name."""
+        """Return the children of ``node``, sorted; empty for a leaf.
+
+        Raises ``ValueError`` when ``node`` is not in the hierarchy.
+        """
+        self._require_node(node)
         return self._children.get(node, ())
 
     def parent_of(self, node: str) -> str | None:
-        """Return the parent of ``node``, or ``None`` for a root or an unknown name."""
+        """Return the parent of ``node``, or ``None`` for a root.
+
+        Raises ``ValueError`` when ``node`` is not in the hierarchy.
+        """
+        self._require_node(node)
         return self._parent.get(node)
 
     def is_leaf(self, node: str) -> bool:
-        """Return ``True`` when ``node`` has no children (also for a name not in the hierarchy)."""
+        """Return ``True`` when ``node`` has no children.
+
+        Raises ``ValueError`` when ``node`` is not in the hierarchy.
+        """
+        self._require_node(node)
         return node not in self._children
 
     @property

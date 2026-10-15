@@ -91,7 +91,7 @@ class _FitState:
 
 def _single(names: frozenset[str], role: str) -> str:
     if len(names) != 1:
-        raise NotImplementedError(f"E1 supports a single {role}; got {sorted(names)}")
+        raise NotImplementedError(f"these estimators support a single {role}; got {sorted(names)}")
     return next(iter(names))
 
 
@@ -111,8 +111,9 @@ def _binary_vector(data: TabularData, name: str, role: str) -> npt.NDArray[np.fl
         if set(np.unique(values).tolist()) <= {0.0, 1.0}:
             return values
     raise NotImplementedError(
-        f"E1 estimators need a binary {role}; {name!r} is not binary "
-        "(continuous treatment and multi-level effects come later)"
+        f"this estimator needs a binary {role}; {name!r} is not binary. For a "
+        "continuous treatment use strategy='dml' or 'pliv'; a multi-level "
+        "treatment is not supported, so recode it to two levels"
     )
 
 
@@ -122,7 +123,9 @@ def _numeric_vector(data: TabularData, name: str, role: str) -> npt.NDArray[np.f
         return np.asarray(data.column(name), dtype=np.float64)
     if col.is_discrete and col.cardinality == 2:
         return data.codes(name).astype(np.float64)
-    raise NotImplementedError(f"E1 needs a continuous or binary {role}; {name!r} is {col.kind}")
+    raise NotImplementedError(
+        f"this estimator needs a continuous or binary {role}; {name!r} is {col.kind.value}"
+    )
 
 
 def _coded_treatment(data: TabularData, name: str, treated: Any) -> npt.NDArray[np.float64]:
@@ -153,7 +156,9 @@ def _outcome_vector(data: TabularData, name: str) -> tuple[npt.NDArray[np.float6
         return data.codes(name).astype(np.float64), True
     if col.is_continuous:
         return np.asarray(data.column(name), dtype=np.float64), False
-    raise NotImplementedError(f"E1 supports a continuous or binary outcome; {name!r} is {col.kind}")
+    raise NotImplementedError(
+        f"the estimators support a continuous or binary outcome; {name!r} is {col.kind.value}"
+    )
 
 
 def _covariate_matrix(

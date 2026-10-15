@@ -9,12 +9,12 @@ estimators emit (:class:`~ergodic.inference.EffectEstimate`): ``mean``, ``draws`
 
 What it adds is the honesty flag. ``identified`` is ``True`` for a query that is a
 function of the data alone: an interventional distribution that the identification
-layer certified, or a counterfactual on invertible mechanisms. In the MVP every
+layer certified, or a counterfactual on invertible mechanisms. Today every
 query that reaches an :class:`SCMResult` is identified -- the back-door effect, the
-interventional distribution, and the exact invertible counterfactual (the MVP
+interventional distribution, and the exact invertible counterfactual (the SCM
 refuses a non-invertible-mechanism counterfactual rather than return a result). The
-flag is carried for the post-MVP wider-abduction counterfactual, where ``False``
-will mean the answer is the wider posterior and its width is the message. A
+flag is kept so a result can say ``False`` if a wider-abduction counterfactual is
+ever returned, where the width of the posterior would be the message. A
 *non-identified effect* never lands here at all; it returns a
 :class:`~ergodic.scm.Sensitivity`, so a naked point read is impossible by
 construction.
@@ -33,17 +33,24 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SCMResult:
-    """A posterior over a query's answer.
+    """Draws of a query's answer.
 
     ``query`` names what was asked (``"sample"``, ``"interventional"``,
     ``"counterfactual"``, ``"ate"``). ``target`` names the node read.
-    ``_draws`` holds the posterior draws (flattened); the accessors read them.
+    ``_draws`` holds the draws (flattened); the accessors read them.
     ``identified`` records whether the answer is a function of the data alone.
+
+    ``kind`` says what the draws are. ``"posterior"`` (``ate``,
+    ``counterfactual``): draws of the answer itself, so ``interval`` is a
+    credible interval. ``"predictive"`` (``sample``, ``marginal``,
+    ``interventional``): posterior-predictive draws of the outcome, one unit
+    each, so ``value`` estimates the mean outcome while ``std_error`` and
+    ``interval`` give the spread of the outcome, not the uncertainty in its mean.
     """
 
     query: str
     target: str
-    kind: str  # "posterior"
+    kind: str  # "posterior" or "predictive"
     identified: bool
     diagnostics: dict[str, float] = field(default_factory=dict)
     _draws: npt.NDArray[np.float64] = field(repr=False, default_factory=lambda: np.empty(0))
@@ -61,7 +68,7 @@ class SCMResult:
 
     @property
     def std_error(self) -> float | None:
-        """The posterior standard deviation of the answer."""
+        """The standard deviation of the draws (the outcome's spread when predictive)."""
         if self._draws.size < 2:
             return None
         return float(np.std(self._draws, ddof=1))
@@ -71,7 +78,11 @@ class SCMResult:
         return np.array(self._draws, copy=True)
 
     def interval(self, level: float = 0.95) -> tuple[float, float]:
-        """A credible interval at ``level``, from the draw quantiles."""
+        """An interval at ``level`` from the draw quantiles.
+
+        A credible interval for a ``"posterior"`` result; for a ``"predictive"``
+        result, the range a single unit's outcome falls in.
+        """
         if not 0.0 < level < 1.0:
             raise ValueError(f"level must be in (0, 1), got {level}")
         if self._draws.size == 0:
@@ -86,7 +97,8 @@ class SCMResult:
         body = f"{self.target}={self.value:.4g}"
         if se is not None:
             lo, hi = self.interval()
-            body += f", sd={se:.3g}, 95% CrI [{lo:.3g}, {hi:.3g}]"
+            label = "95% predictive interval" if self.kind == "predictive" else "95% CrI"
+            body += f", sd={se:.3g}, {label} [{lo:.3g}, {hi:.3g}]"
         return f"SCMResult({self.query}, {flag}: {body})"
 
 

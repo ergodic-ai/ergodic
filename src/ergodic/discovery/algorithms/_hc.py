@@ -39,6 +39,19 @@ if TYPE_CHECKING:
 _EPS = 1e-9
 
 
+def _beats(delta: float, incumbent: float) -> bool:
+    """Whether ``delta`` is a strictly better move than ``incumbent``, beyond rounding.
+
+    Score-equivalent moves (adding ``u -> v`` versus ``v -> u``, reversing a
+    covered edge) have exactly equal deltas in exact arithmetic, but the computed
+    values differ in the last few bits, and which bits depends on the BLAS build.
+    Comparing them raw let that noise pick the move, so the climb took different
+    paths on different machines. A difference within a relative ``_EPS`` is a tie,
+    and a tie keeps the move enumerated first.
+    """
+    return delta > incumbent + _EPS * max(1.0, abs(incumbent))
+
+
 def _inverse(move: _Move) -> _Move:
     """The move that undoes ``move``; what the tabu ring stores."""
     kind, u, v = move
@@ -185,7 +198,7 @@ class HillClimb:
             applied[kind] += 1
             if ring is not None:
                 ring.append(_inverse(move))
-            if total > best_total:
+            if _beats(total, best_total):
                 best_total = total
                 best = {node: frozenset(ps) for node, ps in parents_of.items()}
         edges = [f"{u} -> {v}" for v in variables for u in sorted(best[v])]
@@ -243,7 +256,7 @@ class HillClimb:
             nonlocal best
             if ring is not None and move in ring:
                 return
-            if best is None or delta > best[1]:
+            if best is None or _beats(delta, best[1]):
                 best = (move, delta)
 
         for u in variables:

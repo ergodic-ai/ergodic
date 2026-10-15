@@ -6,8 +6,10 @@ treatment, the outcome, the confounders or the instrument, and the ``target`` th
 literature already measured. So an example can run the analysis and check itself
 against a known number.
 
-``load_*`` reads bundled or generated data and runs offline. The bundled CSVs are
-public-domain or permissively licensed; see the NOTICE for provenance.
+``load_*`` reads bundled or generated data and runs offline. The bundled CSVs
+derive from public-domain US government data (birthweight, pension) or are the
+authors' published replication data, which carry no explicit licence (smoking,
+germany); see the NOTICE for each source and its terms.
 
     from ergodic.datasets import load_birthweight
 

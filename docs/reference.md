@@ -79,6 +79,8 @@ The honest causal forest (GRF) is its own CATE learner, reachable through the `c
 
 ::: ergodic.PolicyTree
 
+::: ergodic.inference.PolicyValue
+
 ::: ergodic.select_cate
 
 ::: ergodic.SelectionReport

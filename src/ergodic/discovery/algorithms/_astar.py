@@ -110,11 +110,12 @@ class AStar:
         parents_of, expanded = self._search(variables, tables)
         edges = [f"{u} -> {v}" for v in variables for u in sorted(parents_of[v])]
         graph = dag(edges, nodes=variables)
-        if knowledge is not None:
-            assert knowledge.is_consistent(graph), (
-                "the searched DAG violates the domain knowledge; constraints a DAG "
-                "cannot express (confounded pairs) or required edges over variables "
-                "missing from the data can cause this"
+        if knowledge is not None and not knowledge.is_consistent(graph):
+            raise ValueError(
+                "the searched DAG violates the domain knowledge "
+                f"({'; '.join(knowledge.violations(graph))}); constraints a DAG cannot "
+                "express (confounded pairs) or required edges over variables missing "
+                "from the data can cause this"
             )
         diagnostics = dict(score.diagnostics())
         diagnostics["expanded_states"] = float(expanded)

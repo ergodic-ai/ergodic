@@ -10,7 +10,8 @@
 # during pregnancy lower her baby's birthweight, and by how many grams? The data is 4,642
 # singleton births in Pennsylvania, pulled from public-domain US natality records and made a
 # textbook case by Almond, Chay and Lee (2005) and by Cattaneo (2010). The outcome is birth
-# weight in grams. The published figure, after adjusting for who smokes, is around -200 g.
+# weight in grams. The published figure on this extract, after adjusting for who smokes, is
+# around -231 g.
 #
 # We'll get there, but the interesting part is the gap we have to cross to get there. The raw
 # difference in birthweight between smokers and nonsmokers is about -275 g. That number is a
@@ -178,19 +179,21 @@ adjusted
 # %%
 summary = pd.DataFrame(
     {
-        "effect (g)": [naive.value, adjusted.value, -203.0],
+        "effect (g)": [naive.value, adjusted.value, ds.target["value"]],
         "low": [np.nan, adjusted.interval()[0], np.nan],
         "high": [np.nan, adjusted.interval()[1], np.nan],
     },
-    index=["naive difference", "adjusted (AIPW)", "literature (Almond et al.)"],
+    index=["naive difference", "adjusted (AIPW)", "published (Stata manual, AIPW)"],
 )
 summary.round(1)
 
 # %% [markdown]
-# The published adjusted figure is about -203 g. Our adjustment lands at -222 g, in the same
-# place and well inside the same interval. We started 70 g away from the literature and ended
-# 20 g away, having moved in the right direction for the right reason. The remaining gap is
-# down to which confounders enter and how each model is fit, and the published interval and
+# The published adjusted figure on this same extract is about -231 g: the doubly robust (AIPW)
+# estimate in the Stata treatment-effects manual, with a standard error of 26 g. Our
+# adjustment lands at -222 g, well inside that interval. We started 44 g away from the
+# published number and ended 9 g away, having moved in the right direction for the right
+# reason. The remaining gap is down to which confounders enter and how each model is fit (the
+# manual's own estimators range from about -210 to -240 g), and the published interval and
 # ours overlap heavily. This is what a closed back door looks like on real data: not the
 # exact textbook digit, but the textbook neighborhood, reached from a graph you could defend
 # to a skeptic.

@@ -578,3 +578,15 @@ def test_event_log_missing_column_raises() -> None:
     df = pd.DataFrame({"case": ["1"], "act": ["A"]})
     with pytest.raises(KeyError):
         event_log(df, case="case", activity="act", timestamp="ts")
+
+
+def test_hierarchy_lookups_refuse_unknown_nodes() -> None:
+    """Regression (API-149): children_of('typo') returned () and is_leaf said True."""
+    from ergodic.data import Hierarchy
+
+    tree = Hierarchy.tree({"total": ["a", "b"]})
+    for lookup in (tree.children_of, tree.parent_of, tree.is_leaf, tree.leaf_descendants):
+        with pytest.raises(ValueError, match="unknown node 'zz'"):
+            lookup("zz")
+    assert tree.children_of("total") == ("a", "b")
+    assert tree.parent_of("total") is None

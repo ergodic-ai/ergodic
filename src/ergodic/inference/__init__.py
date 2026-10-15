@@ -66,7 +66,7 @@ from .estimators import (
     interrupted_time_series,
     synthetic_control,
 )
-from .explain import Heterogeneity, PolicyTree, policy_tree
+from .explain import Heterogeneity, PolicyTree, PolicyValue, policy_tree
 from .learners import (
     OLS,
     KNNClassifier,
@@ -106,6 +106,7 @@ __all__ = [
     "OutcomeRegression",
     "PerUnitEffect",
     "PolicyTree",
+    "PolicyValue",
     "PyMCClassifier",
     "PyMCLearner",
     "RLearner",

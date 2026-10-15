@@ -425,17 +425,17 @@ class DomainKnowledge:
     # -- soft knowledge, not built yet ---------------------------------------
 
     def energy(self, graph: MixedGraph) -> float:
-        """Penalty for ``graph`` under soft knowledge. Planned for the Bayesian phase."""
+        """Penalty for ``graph`` under soft knowledge. Not implemented; raises."""
         raise NotImplementedError(
-            "soft/energy-based knowledge is not implemented yet; it is planned for "
-            "the Bayesian discovery work. Use the hard-constraint methods for now."
+            "soft/energy-based knowledge is not implemented; use the hard-constraint "
+            "methods (require, forbid, tiers, and the rest)."
         )
 
     def log_prior(self, graph: MixedGraph) -> float:
-        """Log prior of ``graph`` under soft knowledge. Planned for the Bayesian phase."""
+        """Log prior of ``graph`` under soft knowledge. Not implemented; raises."""
         raise NotImplementedError(
-            "soft/probabilistic knowledge is not implemented yet; it is planned for "
-            "the Bayesian discovery work. Use the hard-constraint methods for now."
+            "soft/probabilistic knowledge is not implemented; use the hard-constraint "
+            "methods (require, forbid, tiers, and the rest)."
         )
 
     def __repr__(self) -> str:

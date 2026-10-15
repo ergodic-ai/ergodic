@@ -71,6 +71,17 @@ WARMUP = 300
 # Seeded goldens, measured at implementation time and recorded in the close-out.
 # They are pinned loosely (2 to 5 percent) so another machine's floating point
 # does not fail the suite; the strict inequalities beside them are the criteria.
+#
+# Two goldens need more room than that (API-149). A 400-draw NUTS run is
+# deterministic on one machine but chaotic in the last bit, so a different BLAS
+# or XLA build behaves like a different seed. The MinT total move and the
+# forecast-proportion MAE vary across sampler seeds by more than 5 and 2 percent:
+# sampler seeds 11-15 on Apple arm64 (the locked stack, jax 0.11, pymc 6.0.1)
+# gave total moves 6.65, 8.11, 6.25, 8.26, 8.44 (trusted 0.95, 0.94, 0.78, 0.92,
+# 1.12) and forecast MAEs 6.81, 6.55, 6.79, 6.40, 6.88. Their tolerances cover
+# that seed-to-seed spread; the CRPS and historical-MAE goldens stay tight.
+GOLDEN_SEED_SPREAD_TOTAL_MOVE = 0.25
+GOLDEN_SEED_SPREAD_DRIFT_MAE = 0.06
 GOLDEN_H1_TD_CRPS = 3.7034
 GOLDEN_H1_BU_CRPS = 4.1912
 GOLDEN_H1_WIDTH_RATIO = 2.0512
@@ -758,9 +769,11 @@ def test_trust_moves_a_node_less(h1: World) -> None:
     siblings = tuple(leaf for leaf in LEAVES if leaf != "leaf_a")
     assert _moved(trust_leaf, h1.result, siblings) > _moved(plain, h1.result, siblings)
 
-    assert _moved(plain, h1.result, ("total",)) == pytest.approx(GOLDEN_H1_TOTAL_MOVE, rel=0.05)
+    assert _moved(plain, h1.result, ("total",)) == pytest.approx(
+        GOLDEN_H1_TOTAL_MOVE, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE
+    )
     assert _moved(trust_total, h1.result, ("total",)) == pytest.approx(
-        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=0.05
+        GOLDEN_H1_TOTAL_MOVE_TRUSTED, rel=GOLDEN_SEED_SPREAD_TOTAL_MOVE
     )
 
 
@@ -833,7 +846,7 @@ def test_forecast_proportions_follow_a_moving_share(drifting: World) -> None:
     lagged = float(mae(actual, historical.draws("leaf_a")))
     following = float(mae(actual, per_draw.draws("leaf_a")))
     assert following < lagged
-    assert following == pytest.approx(GOLDEN_DRIFT_FORECAST_MAE, rel=0.02)
+    assert following == pytest.approx(GOLDEN_DRIFT_FORECAST_MAE, rel=GOLDEN_SEED_SPREAD_DRIFT_MAE)
     assert lagged == pytest.approx(GOLDEN_DRIFT_HISTORICAL_MAE, rel=0.02)
 
 

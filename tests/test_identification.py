@@ -237,3 +237,28 @@ def test_mediator_between_two_treatments_is_adjustable() -> None:
     g = dag(["x1 -> m", "m -> x2", "x2 -> y"])
     assert is_valid_adjustment_set(g, {"x1", "x2"}, "y", {"m"})
     assert adjustment_set(g, {"x1", "x2"}, "y") == frozenset({"m"})
+
+
+# -- selection marks ---------------------------------------------------------
+
+
+def test_selection_on_a_single_graph_raises() -> None:
+    """Regression (API-149): a selected collider used to identify as plain P(Y | X).
+
+    ``X -> S <- Y`` with ``S`` selected makes ``X`` and ``Y`` dependent in the
+    sample although ``X`` has no effect on ``Y``; the class faces already refused
+    selection, and a DAG or ADMG now refuses it the same way.
+    """
+    g = dag(["X -> Y", "X -> S", "Y -> S"], selection=["S"])
+    with pytest.raises(ValueError, match="selection"):
+        identify_effect(g, "X", "Y")
+    with pytest.raises(ValueError, match="selection"):
+        adjustment_set(g, "X", "Y")
+    collider = dag(["X -> S", "Y -> S"], selection=["S"])
+    with pytest.raises(ValueError, match="selection"):
+        identify_effect(collider, "X", "Y")
+    confounded = admg(["X -> M", "M -> Y", "X <-> Y", "Y -> S"], selection=["S"])
+    with pytest.raises(ValueError, match="selection"):
+        identify_effect(confounded, "X", "Y")
+    # without the selection mark the same graph identifies
+    assert identify_effect(dag(["X -> Y", "X -> S", "Y -> S"]), "X", "Y").identifiable

@@ -115,6 +115,141 @@ To be released together with welt-client 0.13.
 - Install hints in error messages and module docs quote their extras
   (`pip install 'ergodic[scm]'`), which zsh would otherwise read as a glob.
 
+### Fixed
+- `estimate_mediation`: the total effect is now computed directly as
+  `E[Y(1, M(1))] - E[Y(0, M(0))]`. It used to be the pure NDE plus the pure NIE,
+  which drops the mediated interaction whenever the treatment interacts with the
+  mediator (always possible, since the outcome model is saturated in treatment and
+  mediator). On `load_berkeley` (gender, department, admission) the total was
+  -0.072 with a proportion mediated of 1.99; it is now the -0.142 raw gap and the
+  proportion 1.01. `nde` and `nie` are unchanged (the pure effects), so under an
+  interaction they no longer sum to the total; `proportion_mediated` stays
+  `nie / total`. The `Design.estimand` no longer repeats the `NDE =`/`NIE =`
+  prefix, and a treatment with more than two levels is told to recode to two
+  levels instead of being pointed at `treated=` (which needs two levels too).
+- `CATEResult.ate()` no longer treats per-unit analytic standard errors as
+  independent (`sqrt(sum se^2) / n`); the units share one fitted model, so that
+  was about `sqrt(n)` too narrow (0.0009 against a sampling spread of 0.038 on a
+  4,000-row world). It now reports the AIPW average off the result's cached
+  cross-fit scores (standard error `std(scores) / sqrt(n)`, 0.039 there, the
+  same as `estimate_effect(strategy="aipw")`), the result's own standard error
+  for a homogeneous result such as `DML.cate()`, and otherwise the mean as a
+  point with no standard error. For the DR-learner's linear final stage the point
+  is unchanged; for the causal forest it is the score average, which can differ
+  slightly from the plain mean of the per-unit effects.
+- `PolicyTree.value` is now the policy's mean outcome gain over treating no one,
+  `mean[pi(X) * Gamma]`, in outcome units, as the docstrings described. It was
+  `mean[(2 pi(X) - 1) * Gamma]`, so `regret()` and the gap to `treat_all_value`
+  came out twice the outcome gain (example 11 priced its rule at ~$324k on a
+  200k book; the true figure is ~$162k, value 0.82 against an oracle 0.80).
+  `treat_none_value` is now 0 and `treat_all_value` (the ATE) is unchanged;
+  `std_error` and `interval()` are on the new scale. The learned rule is the same
+  (the two objectives share their argmax).
+- Identification on a DAG or ADMG with `selection=` nodes now raises, as the
+  class faces already did. It used to ignore the selection mark, so a selected
+  collider `X -> S <- Y` identified as plain `P(Y | X)` although selecting on `S`
+  makes the two dependent in the sample. This covers `identify_effect`,
+  `identify_distribution`, `identify_mediation`, the adjustment, front-door and
+  instrument helpers, and so `estimate_effect` and `cate`.
+- `AStar` raises `ValueError` naming the violations when its searched DAG cannot
+  satisfy the domain knowledge (for example a confounded pair), instead of an
+  `AssertionError` (which `python -O` would also have skipped).
+- Error messages and docstrings state limits plainly instead of internal planning
+  words ("reserved seam", "not built yet", "phase 1", "MVP", "post-MVP", "when the
+  causal layer lands", "E1", "v1", "lands in D2", "in this phase", "Phase-2",
+  "Track-D", "deferred"): the neural and foundation CATE method names, `ITEResult.explain`,
+  multi-unit synthetic control, a continuous mediator, per-member ID on a PAG,
+  count and categorical forecast columns, scenario pins on endogenous nodes, the
+  SCM's custom-mechanism and `engine="dml"` refusals, soft knowledge, and the
+  `ergodic.latent` refusals. The neural and foundation names no longer suggest
+  installing `ergodic[neural]`/`ergodic[foundation]`, which do not provide those
+  learners in this version. A test reads
+  every string constant in the package and refuses those words.
+- `load_birthweight`: the `target` said -225 g with a tolerance of 90 g, the
+  description and the case study said about -203 g, and neither figure traced to
+  a published estimate on this extract. The target is now -231 g (tolerance
+  30 g, naive -275.3 g), the AIPW estimate on this same 4,642-row Cattaneo (2010)
+  extract in the Stata treatment-effects manual, and the description, the case
+  study, and the example quote it with that source. The `ergodic.datasets`
+  docstrings no longer call every bundled file public-domain or permissively
+  licensed; they say which files derive from public-domain US government data
+  and which are authors' replication data without an explicit licence, as the
+  NOTICE does.
+- Reprs: `CATEResult`, `ITEResult`, `DiDEffect`, `SyntheticControlEffect`, and
+  `ITSEffect` print the short one-line summary again (with their own class name)
+  instead of a field-by-field dump of every array, and `DiscoveryResult` prints
+  the graph kind as `cpdag` rather than `GraphKind.CPDAG`.
+- `SyntheticControlEffect.kind` is `"placebo"` instead of `"analytic"`: there is
+  no standard error, and the interval is a placebo band.
+- `HillClimb` breaks ties between score-equivalent moves by its documented
+  enumeration order instead of by floating-point rounding. Adding `x -> y` and
+  `y -> x` (or reversing a covered edge) score the same, but the computed deltas
+  differ in the last bits depending on the BLAS build, so the climb took
+  machine-dependent paths; on Apple Accelerate the default run on a five-node
+  world stopped at a lower-scoring graph (BIC -127.0 against the truth's -123.2)
+  with an extra edge. Moves within a relative 1e-9 are now ties, and a tie keeps
+  the first move.
+- The policy tree's docstrings no longer call its `value` and interval honest:
+  they are measured on the scores the tree was chosen to maximize, so they are
+  optimistic and the interval ignores the selection. `PolicyTree.evaluate`
+  (new) scores the fixed rule on held-out doubly-robust scores and returns a
+  `PolicyValue` with a valid interval and regret.
+- The best-linear-projection docstrings no longer say the intercept is the ATE:
+  the covariates enter uncentred, so the intercept is the projected effect at
+  covariates all zero (the ATE only when they are centred). Outputs unchanged.
+- `KNNRegressor` and `KNNClassifier` honour `sample_weight` (a weighted mean
+  over the neighbours). They accepted it and dropped it, so the R-learner's
+  weighted final stage ran unweighted with a KNN learner. `PyMCLearner` now
+  declares `supports_sample_weight = False`, so the R-learner refuses it before
+  any fit, and its `fit` raises on weights instead of ignoring them.
+- KNN used before `fit` raises `RuntimeError` naming the learner instead of an
+  `AssertionError`. `set_params` on the native KNN, OLS and logistic learners
+  refuses unknown names, as sklearn does. `LogisticRegression` warns with the
+  new `ergodic.inference.learners.ConvergenceWarning` when it stops at
+  `max_iter` before converging.
+- `MixedGraph.from_networkx` takes `kind=` like the module-level function (the
+  classmethod had no such parameter). `MixedGraph` neighbourhood lookups
+  (`parents`, `children`, `neighbors`, `spouses`, `ancestors`, `descendants`,
+  `markov_blanket`) and `Hierarchy` lookups (`children_of`, `parent_of`,
+  `is_leaf`, `leaf_descendants`) raise `ValueError` on a name that is not a node
+  instead of answering with an empty set (or, for `is_leaf`, `True`), as
+  identification and separation already did. `get_edge`/`has_edge` still answer
+  `None`/`False` for an absent edge. `HierarchicalTSData.aggregate` on an unknown node now
+  raises this `ValueError` rather than a `KeyError`.
+- `SCM` refuses a graph that is not a DAG or an ADMG. A MAG passed the
+  acyclic-directed-plus-bidirected check and was fitted as an ADMG, reading
+  ancestral edges as direct mechanisms; it now raises with the alternatives
+  (pick a member, or re-face a graph you read as one world with `as_kind`).
+- `SCM.interventional`, `sample`, and `marginal` return posterior-predictive
+  draws of the outcome, not a posterior of `E[Y | do(X)]`: the mean estimates the
+  expectation, but `std_error` and `interval()` are the outcome's spread (sd 1.4
+  in the guide's example, where the effect's own posterior sd is 0.023). The docstrings
+  and the guide said otherwise, and the repr printed a "95% CrI". These results
+  now carry `kind="predictive"` and print "95% predictive interval"; `ate` and
+  `counterfactual` keep `kind="posterior"` and the credible interval.
+- `SCM(cores=)` (new, default 1) caps the processes PyMC may use for the chains
+  in every SCM fit, including the latent-district and sensitivity refits. PyMC
+  otherwise ran up to four chains in parallel processes. The draws do not depend
+  on it.
+- `LatentResult.rhat_max` is the split R-hat after label alignment, over the
+  sign-corrected delta draws grouped by chain. It was the raw R-hat, so chains
+  sitting in mirror modes of a good fit reported 1.83 (the spread arm of the
+  golden worlds; aligned, 1.01). The raw number moves to the new
+  `rhat_max_unaligned`, and the R-hat warning now reads the aligned value.
+- `CausalForest.cate()` records the share of per-unit standard errors clipped to
+  zero (`diagnostics["ij_zero_se_share"]`) and warns when it exceeds 5%. With too
+  few trees for the rows, the infinitesimal-jackknife Monte-Carlo correction
+  exceeds the raw variance and the band has zero width; on a 4,000-row world 400
+  trees gave 25% zero-width bands and 68% coverage of a nominal 90%, 1,600 trees
+  1% and 87%. The estimator is unchanged; its docstring states these
+  measurements and recommends `n_trees` of the order of half the rows or more.
+- Process trees splice a nested sequence into its parent, so
+  `seq(a, seq(b, c))` is `seq(a, b, c)`. `discover_model(noise=...)` could return
+  an unflattened `seq(..., seq(xor(TAU, 'standard'), xor(TAU, 'expedite')), ...)`
+  that did not compare equal to the same model written by hand, although the
+  tree docstring promised a canonical form. Nested `xor` and `par` nodes are
+  kept as built (`decision_points` reads each `xor` as its own decision).
+
 ## [0.1.1] - 2026-08-30
 
 Tagged as `v0.1.1`; not uploaded to PyPI.

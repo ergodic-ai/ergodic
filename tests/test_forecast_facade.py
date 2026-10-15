@@ -100,7 +100,7 @@ def test_auto_assignment_carries_the_period() -> None:
 
 
 def test_a_categorical_column_names_the_seam() -> None:
-    """Criterion 9: a non-continuous column raises and points at the reserved seam."""
+    """Criterion 9: a non-continuous column raises and says there is no mechanism."""
     stamps = np.array(
         [np.datetime64("2019-01-01") + np.timedelta64(31 * i, "D") for i in range(24)]
     )
@@ -108,7 +108,7 @@ def test_a_categorical_column_names_the_seam() -> None:
         {"month": stamps, "sales": series(24), "region": np.array(["north", "south"] * 12)},
         time="month",
     )
-    with pytest.raises(NotImplementedError, match="reserved seam"):
+    with pytest.raises(NotImplementedError, match="no built-in"):
         assign_mechanisms(data)
 
 
