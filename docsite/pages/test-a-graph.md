@@ -28,7 +28,7 @@ rng = np.random.default_rng(0)
 n = 1000
 season = rng.normal(size=n)
 ads = 0.8 * season + rng.normal(size=n)
-visits = 0.9 * ads + 0.2 * season + rng.normal(size=n)
+visits = 0.9 * ads + 0.3 * season + rng.normal(size=n)
 price = rng.normal(size=n)
 sales = 0.7 * visits - 0.6 * price + rng.normal(size=n)
 data = tabular(
@@ -61,16 +61,16 @@ print(test_graph(twin, data))
 ```
 
 ```output from="test_a_graph.py"
-GraphTest(dag, linear test, k=5, C=4.537, p=0.9199, not rejected at alpha=0.05, 0 claim(s) rejected after Holm)
+GraphTest(dag, linear test, k=5, C=4.589, p=0.9169, not rejected at alpha=0.05, 0 claim(s) rejected after Holm)
         x       y                  given  p_value  p_holm
-0  season   sales          price, visits    0.280     1.0
+0  season   sales          price, visits    0.273     1.0
 1   price     ads                 season    0.655     1.0
 2   price  visits            ads, season    0.769     1.0
 3   price  season                           0.811     1.0
 4     ads   sales  price, season, visits    0.905     1.0
-GraphTest(dag, linear test, k=6, C=19.308, p=0.08136, not rejected at alpha=0.05, 1 claim(s) rejected after Holm)
-season _||_ visits | ads: p_holm = 0.0038
-GraphTest(dag, linear test, k=5, C=4.824, p=0.9026, not rejected at alpha=0.05, 0 claim(s) rejected after Holm)
+GraphTest(dag, linear test, k=6, C=42.518, p=2.724e-05, rejected at alpha=0.05, 1 claim(s) rejected after Holm)
+season _||_ visits | ads: p_holm = 3.5e-08
+GraphTest(dag, linear test, k=5, C=4.840, p=0.9016, not rejected at alpha=0.05, 0 claim(s) rejected after Holm)
 ```
 
 - **Step 2.** The true graph has five pairs without an edge, so it makes five claims.
@@ -79,12 +79,9 @@ GraphTest(dag, linear test, k=5, C=4.824, p=0.9026, not rejected at alpha=0.05, 
   a chi-square with 10 degrees of freedom, and the p-value is its tail. Each claim
   also gets a Holm-adjusted p-value.
 - **Step 3.** Without `season -> visits` the graph claims that `season` and `visits` are
-  independent given `ads`. They aren't: that claim's Holm-adjusted p-value is 0.0038, so
-  Holm rejects it at 0.05. Fisher's C doesn't, with p = 0.081, because one false claim
-  is averaged with five true ones. Read both: the combined p-value is the better
-  detector when many claims fail a little, and the ranked claims are the better one
-  when a single claim fails clearly. They come smallest p-value first, so the first one
-  points at the problem.
+  independent given `ads`. They aren't, and the combined p-value of 0.000027 rejects the
+  graph. The claims come ranked, smallest p-value first, and Holm rejects only the first
+  one, so it points at the missing edge.
 - **Step 4.** The reversed graph is Markov equivalent to the truth: it has the same
   edges and the same colliders, so it implies the same independences. It passes too.
   No test on observational data can tell the two apart.
@@ -107,12 +104,24 @@ claims with small Holm-adjusted p-values say which missing edges the data reject
     - The independence test brings its own assumptions. The partial-correlation test
       sees only linear dependence.
 
-There are two readings of the same tests. `p_value` combines all claims with Fisher's C,
-which assumes the claims' tests are independent of each other. Shipley (2000) built the
-DAG basis set so that they are when the model holds. `rejected` on a claim uses Holm's
-procedure instead, which keeps the chance of any false rejection at `alpha` whatever
-the dependence. On simulated six-variable linear graphs, the true graph was rejected at
-`alpha = 0.05` in 5.5% of 3,000 seeded worlds with 200 rows, and 4.6% with 1,000 rows.
+Decide how you'll read the result before you run the test. The combined p-value is the
+decision: `rejected` is `True` when it is at most `alpha`, and that is the test whose
+error rate is `alpha`. The Holm-adjusted p-values then locate the claims that fail.
+Don't reject the graph when either one rejects. Taking the union spends more than
+`alpha`: on simulated linear graphs it rejected true graphs about 8% of the time at
+`alpha = 0.05`.
+
+Fisher's C assumes the claims' tests are independent of each other. Shipley (2000)
+argues that for the DAG basis set they are when the model holds, and with
+large-sample tests such as partial correlation and G squared that holds
+approximately. On simulated six-variable linear-Gaussian graphs, with the default
+partial-correlation test, the true graph was rejected at `alpha = 0.05` in 5.5% of
+3,000 seeded worlds with 200 rows, and 4.6% with 1,000 rows. That is the only size
+this guide has measured.
+
+The basis set is also not every independence the graph implies. Together the claims
+imply the rest when the distribution has the composition property, as Gaussian
+distributions do. With discrete data a pass says less.
 
 ## Read the result
 
@@ -129,11 +138,17 @@ the dependence. On simulated six-variable linear graphs, the true graph was reje
 | `n` | Rows used, after dropping incomplete ones. |
 | `implications` | The claims, smallest p-value first. |
 | `untestable` | Pairs without an edge that no observed set separates. |
-| `notes` | Caveats about this run, such as a small sample. |
+| `vacuous` | Claims whose test had zero degrees of freedom, such as one with a single-level column. They carry no information and are left out of `k`. |
+| `notes` | Caveats about this run, such as a small sample or a test whose size isn't measured. |
 
 Each claim is an `ImpliedIndependence` with `x`, `y`, `given`, `statistic`, `p_value`,
-`p_holm`, `rejected` and `rule`. `to_frame()` lays them out as a table, and `to_dict()`
-gives the whole result as plain data.
+`p_holm`, `rejected`, `dof` and `rule`. `x` comes before `y` in a topological order of
+the graph; for a CPDAG or PAG, of the member graph the claims were read in.
+`to_frame()` lays them out as a table, and `to_dict()` gives the whole result as plain
+data.
+
+Rows with a missing value in the graph's columns are dropped, and a note counts them. An
+infinite value raises an error instead: a test would read it as no evidence at all.
 
 ## Which claims each graph makes
 
@@ -141,23 +156,33 @@ gives the whole result as plain data.
 | --- | --- |
 | DAG | Independent given the parents of both. |
 | CPDAG | The same, read in one member DAG. Every member implies it. |
-| ADMG, or a DAG with `latent=` nodes | Independent given the parents of both when that set separates them in the graph. Otherwise a minimal set of the pair's observed ancestors. |
+| ADMG, or a DAG with `latent=` or `selection=` nodes | Independent given the parents of both when that set separates them in the graph. Otherwise a minimal set drawn from the observed ancestors of the pair and of the selection nodes. |
+| MAG | The same, with undirected edges followed back as well. |
 | PAG | The same, read in one member MAG. Every member implies it. |
 
-Every conditioning set is checked against the graph's own separation rule before any
-data are touched. With a hidden common cause, some pairs without an edge still can't be
-separated by any set of observed variables. Those pairs carry no claim and appear in
-`untestable`. Fisher's C is an approximation for these graphs, because the claims'
-tests needn't be independent, so lean on the Holm decisions there.
+With `selection=` nodes, every claim is read given the selection nodes too, because
+the data were sampled given them. Every conditioning set is checked against the
+graph's own separation rule before any data are touched. With a hidden common cause or
+selection, some pairs without an edge still can't be separated by any set of observed
+variables. Those pairs carry no claim and appear in `untestable`. Fisher's C is an
+approximation for these graphs, because the claims' tests needn't be independent.
 
 ## Choose the test
 
 `test=None` picks the test from the columns of the graph's observed variables, as
 `discover` does: partial correlation when all are continuous, G squared when all are
-discrete, and the degenerate-Gaussian test when they mix. Pass a name such as
-`test="gcm"` or an unbound test such as `test=GCM(learner="knn")` to choose another.
-[Choose a method and test](choose-a-method.md) describes each one. A test already bound
-to data is refused, so the rows come from one place.
+discrete, and the degenerate-Gaussian test when they mix. Pass a name or an unbound
+test to choose another; [Choose a method and test](choose-a-method.md) describes each
+one. A test already bound to data is refused, so the rows come from one place.
+
+Only the partial-correlation test's size has been measured. Two others are known to
+reject true graphs too often, and the result carries a note when you use them:
+
+- `GCM` with its default nearest-neighbour learner rejected true linear-Gaussian graphs
+  about 30% of the time at `alpha = 0.05`. For near-linear data use
+  `test=GCM(learner="ols")`, or keep the default.
+- G squared, the default for discrete data, rejected true binary graphs about 10% of
+  the time with 200 rows (about 5% with 1,000).
 
 <details markdown="1"><summary>What if my table has more columns than the graph?</summary>
 

@@ -64,11 +64,28 @@ Planned as 0.3.0.
   observed set separates is reported in `untestable`. The result, a frozen
   `GraphTest`, carries the statistic, p-value, `k`, the test, `alpha`, notes, and the
   claims (`ImpliedIndependence`) ranked by p-value with Holm-adjusted p-values and
-  decisions; `to_dict()` and `to_frame()` export it. The p-value cannot separate
-  Markov-equivalent graphs and a pass does not confirm the graph; the new guide
-  "Test a graph against data" says so. Over 3,000 seeded six-variable linear-Gaussian
-  worlds the true graph was rejected at `alpha = 0.05` in 5.5% of worlds with 200
-  rows and 4.6% with 1,000.
+  decisions; `to_dict()` and `to_frame()` export it. The combined p-value is the
+  level-`alpha` decision (`rejected`); the Holm decisions locate the failing claims.
+  Claims whose test has zero degrees of freedom go to `vacuous` and are left out of
+  `k`. An infinite value in an observed continuous column, or a non-finite p-value or
+  statistic from the test, raises instead of reading as a pass; missing rows are
+  dropped with a note. The result notes when the test's size has not been measured,
+  and specifically for `GCM` with a nearest-neighbour learner and for G squared with
+  fewer than 1,000 rows, both of which over-reject true graphs. The p-value cannot
+  separate Markov-equivalent graphs and a pass does not confirm the graph; the new
+  guide "Test a graph against data" says so. Over 3,000 seeded six-variable
+  linear-Gaussian worlds, with the default partial-correlation test, the true graph
+  was rejected at `alpha = 0.05` in 5.5% of worlds with 200 rows and 4.6% with 1,000.
+
+### Changed
+- The `Linear` (partial correlation) and `GCM` tests compute their two-sided normal
+  p-value with `erfc`, so it no longer underflows to exactly 0 once `|z|` passes about
+  8.3 (it now does only past about 38). Very strong dependences keep their order by
+  p-value. Every decision at a usual `alpha` is unchanged, but PCMCI's parent
+  screen, which ranks candidate parents by p-value, now orders strong parents by
+  strength instead of by name, so the number of tests it runs can change: the
+  "Discover from time series" guide's tiered run now skips to 37 tests from 47
+  rather than 49, with the same links.
 
 ### Changed
 - A decode with knowledge, hard-only knowledge included, now audits it: one extra
