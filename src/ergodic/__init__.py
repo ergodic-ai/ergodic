@@ -37,7 +37,9 @@ from .discovery import (
     GraphTest,
     decode,
     discover,
+    evaluate_graph,
     granger,
+    graph_posterior,
     test_graph,
 )
 
@@ -222,11 +224,13 @@ __all__ = [
     "estimate",
     "estimate_effect",
     "estimate_mediation",
+    "evaluate_graph",
     "event_log",
     "event_study",
     "forecast",
     "frontdoor_set",
     "granger",
+    "graph_posterior",
     "hts",
     "ida",
     "identify_distribution",
