@@ -4,8 +4,9 @@
 One run uploads the table, submits one Welt discovery job, reads the native result
 and its edge scores, and converts a declared native DAG with
 ``welt.CausalResult.to_ergodic()``. Nothing is thresholded, oriented or projected
-here: a result Welt does not declare a DAG is refused, with the native result
-attached so the paid run is not lost.
+here. A model known to return non-DAG graphs is refused before submitting, and a
+result Welt does not declare a DAG is refused with the native result attached so the
+paid run is not lost.
 """
 
 from __future__ import annotations
@@ -23,27 +24,79 @@ if TYPE_CHECKING:
     from ..knowledge import DomainKnowledge
 
 
-class WeltGraphNotDAGError(ValueError):
-    """A Welt model returned a native graph that is not a declared DAG.
+# Native graph types of the Welt causal models, as their adapters declare them
+# (welt-api causal-results contract). Used only when Welt's catalogue does not state
+# a model's native graph type itself; a model missing from both is submitted, and
+# the result's own declaration is checked afterwards.
+_KNOWN_NATIVE_GRAPH = {"arrow": "dag", "cdfm": "directed", "avici": "directed"}
 
-    ergodic converts only declared DAGs and never projects one into a DAG. The
-    paid result stays in your Welt workspace, and this error carries it.
+
+class WeltGraphNotDAGError(ValueError):
+    """A Welt model's native graph is not a declared DAG, so ergodic refuses it.
+
+    ergodic converts only declared DAGs and never projects or relabels a directed
+    graph as one. When the model is known to return such graphs, the refusal comes
+    before anything is uploaded or paid for, and ``result`` is ``None``. When a
+    finished result turns out not to be a declared DAG, the paid result stays in
+    your Welt workspace and this error carries it.
 
     Attributes:
-        result: The native ``welt.CausalResult`` (variables, edge marks, provenance).
-        scores: The edge-score matrix, rows the source and columns the target.
+        model: The Welt model id.
+        native_graph_type: The model's native graph type, for example ``"directed"``.
+        result: The native ``welt.CausalResult``, or ``None`` if nothing was submitted.
+        scores: Its edge-score matrix (rows the source, columns the target), or
+            ``None`` if nothing was submitted.
     """
 
-    def __init__(self, result: Any, scores: pd.DataFrame) -> None:
+    def __init__(
+        self,
+        model: str,
+        native_graph_type: str,
+        result: Any = None,
+        scores: pd.DataFrame | None = None,
+    ) -> None:
+        self.model = model
+        self.native_graph_type = native_graph_type
         self.result = result
         self.scores = scores
-        super().__init__(
-            f"Welt model returned a native {result.native_graph_type!r} graph, not a "
-            "declared DAG; ergodic does not project it. The result stays in your Welt "
-            f"workspace (job {result.job_id!r}); read it with "
-            f"welt.Client().causal_result({result.job_id!r}) or from this error's "
-            ".result and .scores"
+        direct = (
+            f"To read its native graph and scores, call welt.Client().discover(dataset_id, "
+            f"model={model!r}) and use the CausalResult and client.causal_scores directly"
         )
+        if result is None:
+            message = (
+                f"Welt model {model!r} returns native {native_graph_type!r} graphs, not "
+                "declared DAGs, and ergodic never projects one into a DAG; nothing was "
+                f"uploaded or submitted. {direct}"
+            )
+        else:
+            message = (
+                f"Welt model {model!r} returned a native {native_graph_type!r} graph, not "
+                "a declared DAG; ergodic does not project it. The result stays in your "
+                f"Welt workspace (job {result.job_id!r}): read it from this error's .result "
+                f"and .scores, or with welt.Client().causal_result({result.job_id!r})"
+            )
+        super().__init__(message)
+
+
+def native_graph_type(model: str, client: Any) -> str | None:
+    """The native graph type a Welt causal model returns, before running it.
+
+    Welt's catalogue entry wins when it states one (``native_graph_type`` on the
+    model or its ``causal_discovery`` task profile); otherwise the type the model's
+    adapter is known to declare; otherwise ``None`` (unknown).
+    """
+    entry = client.model(model)
+    profiles = [
+        profile
+        for profile in entry.get("task_profiles") or []
+        if profile.get("task") == "causal_discovery"
+    ]
+    for source in (*profiles, entry):
+        stated = source.get("native_graph_type")
+        if isinstance(stated, str) and stated:
+            return stated
+    return _KNOWN_NATIVE_GRAPH.get(model)
 
 
 def _score_frame(scores: dict[str, Any]) -> pd.DataFrame:
@@ -73,9 +126,11 @@ def discover(
     ``ergodic.discover(data, method="welt:<model>")`` calls this.
 
     Welt's models and limits come from its catalogue (``welt.Client().models()``).
-    Today ``arrow`` declares native DAGs; ``cdfm`` and ``avici`` return native
-    directed graphs that may hold cycles or reciprocal edges, which this refuses
-    with :class:`WeltGraphNotDAGError`.
+    Today ``arrow`` declares native DAGs. ``cdfm`` and ``avici`` return native
+    directed graphs that may hold cycles or reciprocal edges, so they are refused
+    with :class:`WeltGraphNotDAGError` before anything is uploaded or paid for
+    (the catalogue's stated graph type wins over that built-in list). A result
+    that is still not a declared DAG is refused too, with the paid result attached.
 
     Args:
         data: Observational rows; every variable must be continuous and complete.
@@ -99,7 +154,8 @@ def discover(
         TypeError: ``data`` is not tabular.
         ValueError: ``knowledge`` was given, or a variable is not continuous or has
             missing values. Nothing is uploaded.
-        WeltGraphNotDAGError: The model returned a graph that is not a declared DAG.
+        WeltGraphNotDAGError: The model's native graph is not a declared DAG, either
+            known before submitting (nothing is paid) or found in the result.
     """
     data = _require_tabular(data)
     if not isinstance(model, str) or not model:
@@ -121,13 +177,16 @@ def discover(
         raise ValueError(f"Welt discovery needs complete rows; {incomplete} have missing values")
     columns, rows = frame_rows(data.to_pandas()[variables])
     with using(client) as welt_client:
+        expected = native_graph_type(model, welt_client)
+        if expected is not None and expected != "dag":
+            raise WeltGraphNotDAGError(model, expected)
         dataset = welt_client.upload(
             columns=columns, rows=rows, name="ergodic discovery", target=None
         )
         result = welt_client.discover(dataset["id"], model=model, seed=seed, timeout=timeout)
         scores = _score_frame(welt_client.causal_scores(result.job_id))
     if result.native_graph_type != "dag":
-        raise WeltGraphNotDAGError(result, scores)
+        raise WeltGraphNotDAGError(model, result.native_graph_type, result, scores)
     graph = result.to_ergodic()
     diagnostics: dict[str, Any] = {
         "welt_job_id": result.job_id,

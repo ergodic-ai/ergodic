@@ -85,8 +85,13 @@ class WeltLearner:
     The learner and its clones share one budget of ``max_fits`` fits.
 
     Args:
-        model: Any Welt classification or regression model id; Welt's catalogue
-            (``welt.Client().models()``) lists them with their row and column limits.
+        model: Any Welt classification or regression model id; none is checked
+            here. The default follows what Welt serves: ``"tabicl-v2"`` is available
+            today, while ``"tabpfn-3.5-fast"`` is still planned. See which models run
+            now, with their row, column and prediction limits, with
+            ``[(m["id"], p["task"], p["limits"]) for m in welt.Client().models() for p
+            in m["task_profiles"] if p["execution_available"]]``, ``welt models list`` on
+            the command line, or the Models page of the Welt SDK docs.
         task: ``"regression"`` or ``"classification"``. Only a classification
             learner has ``predict_proba``.
         client: A ``welt.Client`` to use as is, shared with every clone. ``None``
