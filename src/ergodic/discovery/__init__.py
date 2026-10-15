@@ -28,7 +28,9 @@ data and a score (:class:`BGe` for linear-Gaussian data), into a posterior
 over DAGs under that method (:class:`GraphSamples`), exact by a subset
 recursion when it can be and by structure MCMC otherwise, and
 :func:`evaluate_graph` reads a candidate DAG, CPDAG, PAG or ADMG against it
-(:class:`GraphEvaluation`). Background
+(:class:`GraphEvaluation`); :func:`adjustment_probability` and
+:func:`average_effect` carry it to the effect level (:class:`AveragedEffect`).
+Background
 knowledge (including a skeleton restriction through ``restrict_to``) enters
 through :class:`ergodic.DomainKnowledge`.
 
@@ -42,6 +44,12 @@ rather than a graph.
 
 from __future__ import annotations
 
+from ._average import (
+    AdjustmentGroup,
+    AveragedEffect,
+    adjustment_probability,
+    average_effect,
+)
 from ._bootstrap import BootstrapResult, bootstrap
 from ._ci import CIResult, CITest, DSeparationOracle
 from ._decode import DECODERS, Decoder, DecodeResult, decode
@@ -85,6 +93,8 @@ __all__ = [
     "PCMCI",
     "RFCI",
     "AStar",
+    "AdjustmentGroup",
+    "AveragedEffect",
     "BDeu",
     "BGe",
     "BootstrapResult",
@@ -114,6 +124,8 @@ __all__ = [
     "PosteriorConvergenceWarning",
     "Score",
     "TimeSeriesDiscoveryResult",
+    "adjustment_probability",
+    "average_effect",
     "bootstrap",
     "decode",
     "discover",
