@@ -150,6 +150,13 @@ To be released together with welt-client 0.13.
   site is retired.
 
 ### Fixed
+- `SCM.sample`, `SCM.interventional` and `SCM.ate` read the fitted posterior on
+  every supported stack. With PyMC 5 and arviz 0.x (the
+  versions Python 3.11 resolves), 0.1.0 handed `sample_posterior_predictive` a
+  posterior it could not read, so every SCM parameter was silently drawn from its
+  prior. The merged posterior is now a plain `xarray.Dataset`, which PyMC 5 and 6
+  read the same way. If you used `ergodic.scm` on Python 3.11 (or with arviz below
+  1.0), rerun those results.
 - `estimate_mediation`: the total effect is now computed directly as
   `E[Y(1, M(1))] - E[Y(0, M(0))]`. It used to be the pure NDE plus the pure NIE,
   which drops the mediated interaction whenever the treatment interacts with the

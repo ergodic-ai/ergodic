@@ -72,9 +72,9 @@ Bayesian        5.30   6.00  0.29   3.46      1.00
 - **Step 4, continued.** `SeasonalNaive` repeats last year, so it misses a year of trend: its
   bands never contain the actuals.
 - **Step 5.** At most a divergent transition or two across both folds' 1,000 draws,
-  and only tens of effective draws for the worst parameter in each fold, well below
-  the 100 at which the fit warns. These diagnostics move from machine to machine at
-  this budget. Raise `draws` and `warmup`, or `chains`, for decisions.
+  and a few to a few tens of effective draws for the worst parameter in each fold,
+  well below the 100 at which the fit warns. These diagnostics move from machine to
+  machine at this budget. Raise `draws` and `warmup`, or `chains`, for decisions.
 
 ## Read the scores
 
