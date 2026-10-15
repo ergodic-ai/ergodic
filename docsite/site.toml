@@ -220,7 +220,6 @@ modules = [
     ["forecast", "Forecasting"],
     ["latent", "Hidden regimes"],
     ["datasets", "Datasets"],
-    ["welt", "Welt integration"],
 ]
 # Public modules that import an optional dependency: [module, label, import name].
 # Documented when the import is available; release CI requires it once published.
