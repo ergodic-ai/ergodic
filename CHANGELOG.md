@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 0.3.0.
+## [0.3.0] - Unreleased
+
+To be released together with welt-client 0.14 (API-164): decoding with domain knowledge
+(API-151), graph evaluation (API-152) and the Welt Chronos-2 forecaster (API-163).
 
 ### Added
 - Soft domain knowledge. `require`, `forbid`, `forbid_adjacency`, `forbid_between`,
@@ -940,7 +943,8 @@ inference, discovery, process, SCM, and forecast pillars.
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
 
-[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ergodic-ai/ergodic/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ergodic-ai/ergodic/compare/v0.1.0...v0.1.1

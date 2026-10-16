@@ -72,7 +72,7 @@ for module, use in optional.items():
 ```
 
 ```output from="install_check.py" lines="1"
-ergodic 0.2.1 writes ergodic.graph/1
+ergodic 0.3.0 writes ergodic.graph/1
 ```
 
 - **Step 1.** The version, and `ergodic.graph/1`: the format `MixedGraph.to_dict()`
@@ -104,7 +104,7 @@ xgboost yourself to use their models (the `welt` extra brings scikit-learn in).
 
 <details markdown="1"><summary>What are the neural and foundation extras?</summary>
 
-`neural` and `foundation` install PyTorch 2.2 or later. ergodic 0.2 has no
+`neural` and `foundation` install PyTorch 2.2 or later. ergodic 0.3 has no
 learner that uses it: asking `cate` for a neural or foundation-model learner raises
 `NotImplementedError`.
 

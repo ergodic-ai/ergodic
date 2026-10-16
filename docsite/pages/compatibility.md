@@ -21,7 +21,8 @@ Both packages pin the other from their own side:
   (`>=0.13` for ergodic 0.2). 0.14 is the release that serves forecasting with
   Chronos-2.
   On Python 3.14 the extra adds nothing, because welt-client does not support it.
-- `pip install "welt-client[ergodic]"` adds `ergodic>=0.2,<0.3`.
+- `pip install "welt-client[ergodic]"` adds `ergodic>=0.2,<0.4` from welt-client 0.14
+  (`ergodic>=0.2,<0.3` with welt-client 0.13).
 
 welt-client also brings numpy 2 and scikit-learn into your environment.
 
@@ -61,7 +62,7 @@ True
 ValueError: unsupported graph format 'ergodic.graph/2'; this version of ergodic reads 'ergodic.graph/1' (a dict without a 'format' field is read as 'ergodic.graph/1')
 ```
 
-- **Step 1.** ergodic 0.2 reads and writes `ergodic.graph/1`.
+- **Step 1.** ergodic 0.2 and 0.3 read and write `ergodic.graph/1`.
 - **Step 2.** The dict holds the format, the kind, the nodes and one entry per edge,
   with a mark at each end: `tail` or `arrow` for a DAG.
 - **Step 3.** The round trip gives back an equal graph.
@@ -77,7 +78,7 @@ Only a graph that Welt declares a native DAG converts. `CausalResult.to_ergodic(
 in welt-client keeps every variable, unconnected ones included, and the native
 edge directions. It never projects, thresholds or relabels a graph into a DAG.
 
-| Welt model | Native graph | In ergodic 0.2 |
+| Welt model | Native graph | In ergodic 0.2 and 0.3 |
 | --- | --- | --- |
 | `arrow` | DAG | Converts. `ergodic.welt.discover` returns it as a `DiscoveryResult`. |
 | `cdfm` | Directed, may hold cycles | Refused before paying by default. With an explicit `decoder=`, its scores are decoded locally into a DAG labelled decoded. |
