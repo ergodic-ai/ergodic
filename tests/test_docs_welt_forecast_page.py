@@ -23,7 +23,7 @@ httpx = pytest.importorskip("httpx")
 import welt  # noqa: E402
 from scripts.docsite.config import load_site  # noqa: E402
 from scripts.docsite.examples import programs_of  # noqa: E402
-from tests.test_welt_forecast import FakeChronos  # noqa: E402
+from tests.test_welt_forecast import MEASURED_CORNERS, FakeChronos  # noqa: E402
 
 
 def _run(
@@ -55,6 +55,7 @@ def test_the_forecast_and_backtest_program_runs_against_the_fake(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fake = FakeChronos()
+    assert fake.envelopes == MEASURED_CORNERS  # the published API-160 envelope
     lines = _run("welt_forecast.py", fake, monkeypatch, tmp_path)
 
     # Step 2: one series, 14 steps, 1,000 draws; the versions and the 21 levels.
@@ -80,6 +81,7 @@ def test_the_reconcile_program_runs_against_the_fake(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fake = FakeChronos()
+    assert fake.envelopes == MEASURED_CORNERS
     lines = _run("welt_reconcile.py", fake, monkeypatch, tmp_path)
 
     assert lines[0] == "ForecastResult(draws: 3 series [total, north, south], horizon=14, S=1000)"
@@ -93,3 +95,25 @@ def test_the_reconcile_program_runs_against_the_fake(
         "north",
         "south",
     }
+
+
+def test_both_programs_fit_a_measured_corner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """F3: every request the page sends lies inside a published corner, by shape."""
+    for name, series, variates in (("welt_forecast.py", 1, 2), ("welt_reconcile.py", 3, 1)):
+        fake = FakeChronos()
+        _run(name, fake, monkeypatch, tmp_path)
+        for body in fake.forecasts:
+            rows = body["history"]["table"]["rows"]
+            ids = {row[1] for row in rows}
+            assert len(ids) == series
+            assert 1 + len(body["past_covariates"]) + len(body["future_covariates"]) == variates
+            context = len(rows) // series
+            assert any(
+                16 <= context <= c["max_context"]
+                and variates <= c["max_variates"]
+                and series <= c["max_series"]
+                and body["horizon"] <= c["max_horizon"]
+                for c in MEASURED_CORNERS
+            )

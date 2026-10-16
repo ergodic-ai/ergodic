@@ -37,15 +37,21 @@ from ergodic.welt import (  # noqa: E402
     WeltForecaster,
 )
 
+# The pre-qualification corner (DEC-085 §3), kept to test the refusal path.
 _ONE_CORNER = [{"max_context": 512, "max_variates": 1, "max_series": 1, "max_horizon": 64}]
-_WIDE = [
-    {"max_context": 512, "max_variates": 1, "max_series": 1, "max_horizon": 64},
-    {
-        "max_context": 2000,
-        "max_variates": 10,
-        "max_series": 20,
-        "max_horizon": 256,
-    },
+#: The measured and accepted Chronos-2 corners (API-160), what the catalogue publishes
+#: as forecast_envelopes; min_context is 16. FakeChronos serves exactly these.
+MEASURED_CORNERS = [
+    {"max_context": c, "max_variates": v, "max_series": s, "max_horizon": h}
+    for c, v, s, h in (
+        (8000, 50, 1, 1024),
+        (8000, 5, 8, 1024),
+        (4000, 10, 8, 1024),
+        (2000, 20, 8, 1024),
+        (2000, 5, 32, 256),
+        (1000, 50, 8, 256),
+        (512, 20, 32, 256),
+    )
 ]
 
 
@@ -69,7 +75,7 @@ class FakeChronos(FakeWelt):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.envelopes = _WIDE if envelopes is None else envelopes
+        self.envelopes = MEASURED_CORNERS if envelopes is None else envelopes
         self.beta = beta
         self.rearranged_steps = rearranged_steps
         self.fail = fail
@@ -889,3 +895,32 @@ def test_the_refusal_names_the_calendar_to_declare_and_a_declared_one_is_trusted
     # Documented: a declared calendar is trusted as given, even when the rows disagree.
     trusted = timeseries(frame, time="day", freq="B")
     assert _time_plan(trusted) == ("steps-as-days", {"unit": "day", "every": 1})
+
+
+@pytest.mark.parametrize(
+    ("shape", "admitted"),
+    [
+        ({"context": 8000, "variates": 50, "series": 1, "horizon": 1024}, True),
+        ({"context": 8000, "variates": 5, "series": 8, "horizon": 1024}, True),
+        ({"context": 512, "variates": 20, "series": 32, "horizon": 256}, True),
+        ({"context": 1000, "variates": 50, "series": 8, "horizon": 256}, True),
+        ({"context": 8001, "variates": 1, "series": 1, "horizon": 1}, False),
+        ({"context": 2000, "variates": 21, "series": 8, "horizon": 256}, False),
+        ({"context": 513, "variates": 20, "series": 32, "horizon": 256}, False),
+        ({"context": 2000, "variates": 5, "series": 32, "horizon": 257}, False),
+        ({"context": 15, "variates": 1, "series": 1, "horizon": 1}, False),
+    ],
+)
+def test_the_measured_corners_admit_exactly_what_they_dominate(
+    shape: dict[str, int], admitted: bool
+) -> None:
+    """F3: the accepted API-160 envelope; no interpolation between corners."""
+    from ergodic.welt._forecast import _admit
+
+    meta = FakeChronos()._metadata()
+    assert meta["forecast_envelopes"] == MEASURED_CORNERS
+    if admitted:
+        _admit(meta, "chronos-2", **shape)
+    else:
+        with pytest.raises(ValueError, match="no measured envelope"):
+            _admit(meta, "chronos-2", **shape)

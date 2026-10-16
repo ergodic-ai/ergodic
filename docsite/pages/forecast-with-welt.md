@@ -194,10 +194,26 @@ print("paid forecasts:", models[0].forecasts_used)
 ```
 
 The first forecast reads the model's catalogue entry, which is free, and checks the
-request against its measured limits: history length, variates, series and
-horizon. A request outside every measured limit raises before anything is sent.
-`max_context=512` sends only the last 512 rows. Run `welt models list` to see the
-limits Welt serves today.
+request against its measured limits: history length (context), variates (targets
+plus covariates per series), series and horizon. A request must fit inside one
+measured corner on all four; nothing between corners is assumed. Chronos-2's
+measured corners, with a context of at least 16 rows:
+
+| Context | Variates | Series | Horizon |
+|---|---|---|---|
+| 8,000 | 50 | 1 | 1,024 |
+| 8,000 | 5 | 8 | 1,024 |
+| 4,000 | 10 | 8 | 1,024 |
+| 2,000 | 20 | 8 | 1,024 |
+| 2,000 | 5 | 32 | 256 |
+| 1,000 | 50 | 8 | 256 |
+| 512 | 20 | 32 | 256 |
+
+The first program sends one series of at most 120 rows with 2 variates (sales and
+promo), inside the first corner. The second sends three series of 90 rows with 1
+variate each, inside the second. A request outside every corner raises before anything is sent; `max_context=512`
+sends only the last 512 rows. Run `welt models list` to see the limits Welt
+serves today.
 
 The first job's model and configuration versions are then required of every later
 job, so the folds of one backtest all run the same Chronos-2. Build a new
