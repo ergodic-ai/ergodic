@@ -11,12 +11,15 @@ needs to become an ergodic graph. The link between them is a versioned graph for
 
 | ergodic | welt-client | Graph format | Python for the Welt link |
 | --- | --- | --- | --- |
+| 0.3.x | 0.14 or later | `ergodic.graph/1` | 3.11, 3.12, 3.13 |
 | 0.2.x | 0.13 or later | `ergodic.graph/1` | 3.11, 3.12, 3.13 |
 | 0.1.x | none | none | none |
 
 Both packages pin the other from their own side:
 
-- `pip install "ergodic[welt]"` adds `welt-client>=0.13` on Python 3.11 to 3.13.
+- `pip install "ergodic[welt]"` adds `welt-client>=0.14` on Python 3.11 to 3.13
+  (`>=0.13` for ergodic 0.2). 0.14 is the release that serves forecasting with
+  Chronos-2.
   On Python 3.14 the extra adds nothing, because welt-client does not support it.
 - `pip install "welt-client[ergodic]"` adds `ergodic>=0.2,<0.3`.
 

@@ -17,13 +17,19 @@ last one, so the fold that scores the freshest data is always in the report even
 when the stride does not divide the span evenly. ``single`` mode keeps the last
 origin only. Training is always the whole prefix ``[0, cutoff)``, so later folds
 see more history, never a sliding window.
+
+A model that names ``future_covariates`` (a
+:class:`~ergodic.forecast.CovariateForecastModel`) gets, at each origin, those
+columns over the window it forecasts as ``forecast(..., future=...)``: the true
+values of covariates whose future is known by assumption, never a target. Every
+other model is called exactly as before.
 """
 
 from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -36,7 +42,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import pandas as pd
 
-    from ._protocol import ForecastModel
+    from ._protocol import CovariateForecastModel, ForecastModel
     from ._result import ForecastResult
 
 __all__ = ["BacktestFold", "BacktestReport", "FoldDiagnostics", "backtest"]
@@ -154,6 +160,9 @@ class BacktestReport:
     nodes: tuple[str, ...]
     metrics: tuple[str, ...]
     nodes_unscored: tuple[str, ...] = ()
+    #: The known-future covariates the model was handed at each origin, empty for
+    #: a model that reads none.
+    future_covariates: tuple[str, ...] = ()
 
     @property
     def cutoffs(self) -> tuple[int, ...]:
@@ -306,7 +315,9 @@ def backtest(
     ----------
     model
         An unfitted model satisfying :class:`~ergodic.forecast.ForecastModel`.
-        It is deep-copied per fold, so it comes back untouched.
+        It is deep-copied per fold, so it comes back untouched. When it names
+        ``future_covariates``, each fold's ``forecast`` also gets those columns
+        over the held-out window as ``future=``, and nothing else from it.
     data
         The history, as a :class:`~ergodic.data.TimeSeriesData` or a
         :class:`~ergodic.data.HierarchicalTSData`. Rows are already in time
@@ -349,6 +360,7 @@ def backtest(
     cutoffs = _cutoffs(data.n_rows, mode, test_size, n_splits, min_train_size)
 
     columns = set(data.variables)
+    known = _future_covariates(model, columns)
     folds: list[BacktestFold] = []
     unscored: list[str] = []
     for index, cutoff in enumerate(cutoffs):
@@ -356,7 +368,20 @@ def backtest(
         forecast_seed = seed + 1000 + index
         train = data.take(np.arange(cutoff, dtype=np.int64))
         fitted = copy.deepcopy(model).fit(train, seed=fit_seed)
-        result = fitted.forecast(test_size, seed=forecast_seed)
+        if known:
+            future = _future_window(data, cutoff, test_size, known)
+            reader = cast("CovariateForecastModel", fitted)
+            result = reader.forecast(test_size, seed=forecast_seed, future=future)
+        else:
+            result = fitted.forecast(test_size, seed=forecast_seed)
+        # The last line of defence for a model that does not name its targets: it
+        # runs after the first fold's forecast, so such a model has run once.
+        leaked = sorted(set(result.nodes) & set(known))
+        if leaked:
+            raise ValueError(
+                f"{leaked} are both forecast and declared future covariates; a column "
+                "whose future the model is handed cannot also be scored as a forecast"
+            )
 
         scored = [node for node in result.nodes if node in columns]
         skipped = tuple(node for node in result.nodes if node not in columns)
@@ -404,6 +429,58 @@ def backtest(
         nodes=nodes,
         metrics=tuple(names),
         nodes_unscored=tuple(unscored),
+        future_covariates=known,
+    )
+
+
+def _future_covariates(model: Any, columns: set[str]) -> tuple[str, ...]:
+    """The columns ``model`` says it knows the future of, checked before any fit.
+
+    Read duck-typed: a model without the attribute reads no future covariates. A
+    model that also names its ``targets`` is checked against them here, before
+    anything is fitted or forecast (and so before a paying model pays); one that
+    does not is checked on the first fold's result instead.
+    """
+    raw = getattr(model, "future_covariates", None) or ()
+    if isinstance(raw, str):
+        raise TypeError(
+            f"future_covariates must be a sequence of column names, got the string {raw!r}; "
+            f"write ({raw!r},)"
+        )
+    declared = tuple(str(name) for name in raw)
+    missing = sorted(set(declared) - columns)
+    if missing:
+        raise ValueError(
+            f"the model reads future covariates {missing} that are not columns of the data "
+            f"{sorted(columns)}"
+        )
+    targets = getattr(model, "targets", None)
+    if declared and targets is not None and not isinstance(targets, str):
+        leaked = sorted(set(declared) & {str(name) for name in targets})
+        if leaked:
+            raise ValueError(
+                f"{leaked} are both forecast targets and declared future covariates; a "
+                "column whose future the model is handed cannot also be scored as a forecast"
+            )
+    return declared
+
+
+def _future_window(
+    data: TimeSeriesData, cutoff: int, size: int, names: tuple[str, ...]
+) -> TimeSeriesData:
+    """The known covariates over ``[cutoff, cutoff + size)``, and nothing else.
+
+    The time index plus the named columns only, as a plain
+    :class:`~ergodic.data.TimeSeriesData` (a hierarchy's tree does not apply to
+    covariates), so no target value of the scored window can reach the model.
+    """
+    window = data.take(np.arange(cutoff, cutoff + size, dtype=np.int64)).select(names)
+    return TimeSeriesData(
+        schema=window.schema,
+        n_rows=window.n_rows,
+        _store=dict(window._store),
+        time=data.time,
+        freq=data.freq,
     )
 
 
