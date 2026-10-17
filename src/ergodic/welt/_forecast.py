@@ -84,8 +84,8 @@ class WeltForecastDiagnostics:
         node: The forecast series.
         model: The Welt model id, for example ``"chronos-2"``.
         model_version: The exact model version Welt ran.
-        configuration: The resolved configuration version, for example
-            ``"chronos-2-forecast-v1"``.
+        configuration: The resolved configuration version Welt ran, as the job
+            result reports it.
         job_id: The Welt job id.
         quantile_levels: The levels requested and returned.
         quantiles: Welt's quantiles for this node, ``(H, K)``, read-only.

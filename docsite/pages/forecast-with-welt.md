@@ -265,6 +265,6 @@ into draws.
 
 - [Backtest a forecast](backtest-a-forecast.md): folds, metrics and the report.
 - [Reconcile a hierarchy](reconcile-a-hierarchy.md): every strategy and its options.
-- [Python reference](reference-welt.md): `WeltForecaster` and every option.
+- [Python reference](reference.md): `WeltForecaster` and every option, under the Welt bridge.
 
 </div>
