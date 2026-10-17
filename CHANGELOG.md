@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-10-17
 
 To be released together with welt-client 0.14 (API-164): decoding with domain knowledge
 (API-151), graph evaluation (API-152) and the Welt Chronos-2 forecaster (API-163).
