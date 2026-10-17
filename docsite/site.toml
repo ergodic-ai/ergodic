@@ -31,7 +31,7 @@ commands = [
 
 [versions]
 # Published versions older than this build that stay in the picker (v<version>/), oldest first.
-previous = ["0.2.0"]
+previous = ["0.2.0", "0.2.1"]
 
 [[products]]
 name = "ergodic"
@@ -143,6 +143,7 @@ pages = [
     ["Backtest a forecast", "backtest-a-forecast"],
     ["Reconcile a hierarchy", "reconcile-a-hierarchy"],
     ["Run scenarios", "run-scenarios"],
+    ["Forecast with Welt's Chronos-2", "forecast-with-welt"],
 ]
 
 [[groups]]

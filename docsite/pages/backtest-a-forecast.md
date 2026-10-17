@@ -128,8 +128,14 @@ and the model you pass in is never changed.
 <details markdown="1"><summary>Which models can I backtest?</summary>
 
 Anything with `fit(data, *, seed=0)`, returning a fitted copy, and
-`forecast(horizon, *, seed=0)`, returning a `ForecastResult`. The baselines and
-`forecast_model(...)` both qualify, and so can your own model.
+`forecast(horizon, *, seed=0)`, returning a `ForecastResult`. The baselines,
+`forecast_model(...)` and Welt's Chronos-2 (`ergodic.welt.WeltForecaster`) all
+qualify, and so can your own model.
+
+A model with a `future_covariates` attribute also gets, at each cut, those columns
+over the held-out window as `forecast(..., future=...)`: their true values, and
+nothing else from that window. See
+[Forecast with Welt's Chronos-2](forecast-with-welt.md#give-it-covariates).
 
 `forecast_model(name=..., **options)` takes every keyword of `forecast` except
 `data` and `horizon`. A keyword `forecast` doesn't take raises at once, not at the
@@ -147,6 +153,7 @@ lists it in `nodes_unscored`.
 
 - [Forecast with causal drivers](forecast-with-drivers.md): add drivers to the forecaster you just tested.
 - [Reconcile a hierarchy](reconcile-a-hierarchy.md): forecasts that add up across levels.
+- [Forecast with Welt's Chronos-2](forecast-with-welt.md): backtest a hosted foundation model.
 - [Python reference](reference-forecast.md): every metric and baseline.
 
 </div>

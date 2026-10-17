@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 0.3.0.
+## [0.3.0] - 2026-10-17
+
+To be released together with welt-client 0.14 (API-164): decoding with domain knowledge
+(API-151), graph evaluation (API-152) and the Welt Chronos-2 forecaster (API-163).
 
 ### Added
 - Soft domain knowledge. `require`, `forbid`, `forbid_adjacency`, `forbid_between`,
@@ -81,6 +84,53 @@ Planned as 0.3.0.
   pre-registered replication on 2,000 fresh worlds per size gave 4.65% [3.77%, 5.67%]
   and 4.85% [3.95%, 5.88%], inside its [3.5%, 6.5%] band. Power against one missing
   edge of weight at least 0.5 is close to 1.
+- `ergodic.welt.WeltForecaster` (also importable as `ergodic.welt.Chronos`) runs
+  Welt's hosted Chronos-2 as an ergodic `ForecastModel` (API-163, DEC-087). `fit`
+  checks the columns and keeps the window locally; each `forecast(horizon, *, seed,
+  future=None)` is one paid `POST /v1/forecasts` job (DEC-085), sent with
+  `welt.Client.submit_forecast` and read with the SDK's `Job.result`. Every target column
+  is one series of a panel by default (`cross_learning=False`), or the targets of one
+  series with `multivariate=True`. `past_covariates=` and `future_covariates=` map to
+  Welt's covariate roles, categorical by the dataset's schema (cells sent as strings
+  or integers, `True` as `1`; other cells as finite numbers, a boolean as 0.0/1.0);
+  future covariates need `future=` (a dataframe or `TimeSeriesData`, only those
+  columns are read). A
+  `HierarchicalTSData` is forecast at every node (an aggregate without a column from
+  its children's summed history, a node left out of `targets=` from its children's
+  draws), and `reconcile=` reconciles inside `forecast`. The first forecast reads the
+  catalogue entry (free) and refuses, before paying, a model without the `forecast`
+  operation or a request outside every measured `forecast_envelopes` corner;
+  `max_context=` sends only the most recent rows. Tables always go inline, as
+  welt-client sends them, and a request over `welt.forecast.MAX_REQUEST_BYTES`
+  (the API's 10 MiB limit) is refused before sending. The first job's model and
+  configuration versions are required of every later job of the forecaster and its
+  copies (and checked against each result), which also share one client and one
+  `max_forecasts` budget (10) of jobs Welt accepted. Each node's
+  `WeltForecastDiagnostics` records the job id, versions, quantile levels, Welt's own
+  quantiles, `context_length` and `rearranged_steps`. A numeric time index, or a
+  datetime index on a calendar Welt has no unit for (`B`, `C`, `BME`, `SME` and the
+  like, declared or inferred by pandas; a declared one is trusted as given), is sent as
+  consecutive days from 2000-01-01; any other irregular datetime index
+  (daily data with missing days, say) is refused with a hint to reindex and leave
+  the gaps as NaN. `NATIVE_QUANTILE_LEVELS` lists the 21 levels requested by default.
+- `ergodic.forecast.quantile_draws(levels, quantiles, *, draws, seed)` turns
+  per-step quantiles into `(S, H)` draws by inverse-CDF sampling: rows sorted
+  (monotone rearrangement), linear between levels, exponential tails matched to the
+  density at the outer levels, each step sampled independently. The draws reproduce
+  the per-step marginals only, so sums over steps or series, and the intervals,
+  coverage and CRPS of a `bottom_up` or `mint` reconciliation, treat the errors as
+  independent.
+- `ergodic.forecast.CovariateForecastModel`: a `ForecastModel` that names
+  `future_covariates` and takes their values over the horizon as
+  `forecast(..., future=...)`. `backtest` hands such a model, at each origin, those
+  columns over the held-out window and nothing else, and records them in
+  `BacktestReport.future_covariates`. It refuses, before any fit, a declared
+  covariate that is not a column, a string in place of a sequence, and one the model
+  names among its `targets`; a model that forecasts a declared covariate without
+  naming it is refused on the first fold's result. Models without the attribute are called
+  exactly as before.
+- New guide "Forecast with Welt's Chronos-2": forecast with a known promotion
+  calendar, backtest against baselines, and reconcile a hierarchy.
 
 - A posterior over DAGs under a method (API-152, DEC-082). `graph_posterior(probabilities)`
   weighs each DAG by its pair log score (the pair states the decoders read) plus the
@@ -171,6 +221,9 @@ Planned as 0.3.0.
 - Pickles of `DomainKnowledge` from 0.2.x load, with no soft statements. A pair the
   pickle forbids in both directions becomes an adjacency ban (`nonadjacent`), its
   0.2 meaning, so it still rules out a bidirected edge.
+- The `welt` extra requires `welt-client>=0.14`, the release that serves Chronos-2
+  forecasting (DEC-085): `WeltForecaster` submits through
+  `welt.Client.submit_forecast` and waits with the SDK's `Job.result`.
 
 ## [0.2.1] - 2026-10-15
 
@@ -890,7 +943,8 @@ inference, discovery, process, SCM, and forecast pillars.
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
 
-[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ergodic-ai/ergodic/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ergodic-ai/ergodic/compare/v0.1.0...v0.1.1

@@ -128,6 +128,7 @@ strategies without sampling again.
 
 - [Backtest a forecast](backtest-a-forecast.md): score each level on held-out months.
 - [Forecast with causal drivers](forecast-with-drivers.md): add drivers to the series.
+- [Forecast with Welt's Chronos-2](forecast-with-welt.md): reconcile Chronos-2's draws the same way.
 - [Python reference](reference-forecast.md): `reconcile`, `hts` and every option.
 
 </div>
