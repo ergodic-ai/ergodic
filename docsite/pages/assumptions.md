@@ -54,7 +54,7 @@ Identification(not identifiable, ['mbsmoke'] -> ['bweight'])
 - **Step 2.** With all 17 confounders in the graph, smoking lowers birthweight by
   about 220 g.
 - **Step 3.** With none, the estimate is the raw difference, about 275 g. Nothing in
-  the data says which graph is right; the 53 g gap is your assumption at work.
+  the data says which graph is right; the 56 g gap is your assumption at work.
 - **Step 4.** With an unmeasured cause `U` of both smoking and birthweight, and no
   mediator or instrument to route around it, the effect is not identifiable. ergodic
   says so instead of returning a number.

@@ -186,10 +186,14 @@ print(f"adjusted effect  : {est.value:+.3f}   CI [{lo:.3f}, {hi:.3f}]")
 print(f"truth            : {true_effect:+.3f}")
 
 # %% [markdown]
-# The sign flips. The naive plus 22 points becomes minus 11, interval minus 12.4 to minus 10.2,
+# The sign flips. The naive plus 22 points becomes minus 13.1, interval minus 15.6 to minus 10.6,
 # straddling the planted minus 12.2. Once the comparison holds risk fixed, the offer cuts churn by
-# about 11 points, close to the truth. The program the quarterly numbers condemned is preventing
+# about 13 points, close to the truth. The program the quarterly numbers condemned is preventing
 # real departures, not causing them. The naive table had it exactly backwards.
+#
+# The fit also warns about limited overlap: 28.4% of propensity estimates are in the
+# tails outside [0.01, 0.99], and 1.9% require clipping. Treat the estimate cautiously;
+# adjustment does not create comparisons where the data provides little support.
 #
 # ## Where the data runs out
 #
@@ -361,7 +365,7 @@ print(f"placebo (mean) : {ref.refuted_value:+.3f}   p = {ref.p_value:.3f}   pass
 # tests the pipeline, not the assumption.
 #
 # Two readings of the same quarter. The naive table said the save program triples churn and should
-# die. Holding risk fixed, the program cuts churn by about 11 points and should grow, aimed at the
+# die. Holding risk fixed, the program cuts churn by about 13 points and should grow, aimed at the
 # customers it can move rather than the ones most likely to leave. The companion
 # [lifetime-value study](06-clv.py) tells the mirror-image story on a continuous outcome, where the
 # trap is targeting the valuable instead of the movable. For the methods, see

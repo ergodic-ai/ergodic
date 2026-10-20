@@ -171,7 +171,7 @@ adjusted
 # reads the number.
 #
 # The number is about -220 g, with a 95 percent interval that runs roughly -271 to -168. So
-# closing the back door moved the estimate by some 55 g, from -275 toward zero. That 55 g was
+# closing the back door moved the estimate by some 56 g, from -275 toward zero. That 56 g was
 # the imbalance from the balance table: the part of the raw gap that was really the mothers
 # differing, not the smoking. What's left, -220 g, is the effect of smoking with those
 # differences held fixed.

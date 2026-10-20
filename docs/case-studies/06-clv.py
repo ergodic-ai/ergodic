@@ -54,7 +54,7 @@ print(f"true average effect  : ${tau.mean():.2f} per customer   (serving cost ${
 # and it raises the odds the team hands them the perk. That double role is what makes it a
 # confounder. The perk's true effect lives in a separate variable, headroom, which has nothing to
 # do with how valuable a customer already is. Average that effect over everyone and it comes to
-# about 23 dollars, below the 25 it costs to serve. On average, the perk loses money. Hold that
+# about 24 dollars, below the 25 it costs to serve. The point estimate suggests a loss. Hold that
 # thought, because it isn't the end of the story.
 #
 # ## The record looks great, and the record is confounded
@@ -168,9 +168,10 @@ lo, hi = ate.interval()
 print(f"adjusted effect: ${ate.value:.2f}   CI [{lo:.1f}, {hi:.1f}]   truth ${tau.mean():.2f}")
 
 # %% [markdown]
-# The adjusted effect lands at 23.65 dollars, interval 22.4 to 24.9, right on the planted 23.39. The
-# confounding is gone, and the honest read of the average perk is now in front of us: it costs 25
-# and returns 23, so rolled out to everyone it loses a little money on every customer. A team that
+# The adjusted effect lands at 23.87 dollars, interval 22.4 to 25.3, close to the planted 23.39.
+# It costs 25 and returns about 24: the point estimate suggests a small average loss, but the
+# interval includes break-even. Under the graph assumptions, adjustment removes the measured
+# confounding; it does not prove the assumptions. A team that
 # stopped here would kill the program. That would be a mistake, and the reason is the second error.
 #
 # ## Predicted value is not movable value
@@ -345,7 +346,7 @@ print(f"real effect    : ${ref.estimand_value:.2f}")
 print(f"placebo (mean) : ${ref.refuted_value:.2f}   p = {ref.p_value:.3f}   passed: {ref.passed}")
 
 # %% [markdown]
-# Scrambled, the effect collapses to roughly zero, far from the real 23.65, and the placebo runs
+# Scrambled, the effect collapses to roughly zero, far from the real 23.87, and the placebo runs
 # almost never reach it. That rules out a leak firing on noise. It says nothing about an unmeasured
 # trait, some loyalty the columns don't capture, that pushes a customer toward both the perk and a
 # fat balance.

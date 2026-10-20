@@ -121,7 +121,7 @@ naive = estimate_effect(dag([f"{ds.treatment} -> {ds.outcome}"]), ds.data, ds.tr
 print(f"naive gap: ${naive.value:,.0f}")
 
 # %% [markdown]
-# About $19,559, the headline. The balance table already told us why it's too big. Higher
+# About $19,560, the headline. The balance table already told us why it's too big. Higher
 # earners are both more often eligible and wealthier, so the contrast sweeps the income gap
 # into the effect and reports the sum. The single arrow is a claim, that nothing else moves
 # both eligibility and wealth, and the table is nine counts against it. Income alone, an SMD
