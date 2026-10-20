@@ -87,10 +87,10 @@ def test_dml_handles_continuous_treatment() -> None:
     assert abs(est.value - 1.5) < 0.1
 
 
-def test_pliv_recovers_late_analytically() -> None:
+def test_pliv_recovers_linear_iv_analytically() -> None:
     data, graph = _instrument()
     est = estimate_effect(graph, data, "A", "Y", strategy="pliv")
-    assert est.target is EffectTarget.LATE
+    assert est.target is EffectTarget.LINEAR_IV
     assert est.kind == "analytic"
     assert abs(est.value - 1.5) < 0.2
 

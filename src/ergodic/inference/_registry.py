@@ -110,7 +110,7 @@ _BY_NAME: dict[str, type[CausalEstimator]] = {
 _DEFAULT_TARGET: dict[str, EffectTarget] = {
     ADJUSTMENT: EffectTarget.ATE,
     FRONTDOOR: EffectTarget.ATE,
-    IV: EffectTarget.LATE,
+    IV: EffectTarget.LINEAR_IV,
     NULL: EffectTarget.ATE,
 }
 

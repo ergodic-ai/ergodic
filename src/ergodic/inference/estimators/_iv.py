@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import warnings
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from ...data import TabularData
     from ...identification import Identification
     from .._learner import Learner
+    from .._result import EffectEstimate
 
 
 def _two_sls(
@@ -45,19 +48,120 @@ def _two_sls(
     return beta, np.asarray(influence, dtype=np.float64)
 
 
-class TwoStageLeastSquares(_IVBase):
+def _first_stage_diagnostics(
+    a: npt.NDArray[np.float64],
+    zi: npt.NDArray[np.float64],
+    w: npt.NDArray[np.float64],
+) -> dict[str, float]:
+    """Classical partial F and R-squared; descriptive, not weak-IV robust inference."""
+    a = a.reshape(-1)
+    base = np.column_stack([np.ones(a.size), w])
+    full = np.column_stack([base, zi])
+    q = int(np.linalg.matrix_rank(full) - np.linalg.matrix_rank(base))
+    df = int(a.size - np.linalg.matrix_rank(full))
+    restricted = a - base @ np.linalg.lstsq(base, a, rcond=None)[0]
+    residual = a - full @ np.linalg.lstsq(full, a, rcond=None)[0]
+    rss0, rss1 = float(restricted @ restricted), float(residual @ residual)
+    if q <= 0 or df <= 0 or rss0 <= 0:
+        raise ValueError(
+            "first stage has no identified instrument variation or residual degrees of freedom"
+        )
+    improvement = max(0.0, rss0 - rss1)
+    f = improvement / q / (rss1 / df) if rss1 > 0 else float("inf")
+    if f < 10:
+        warnings.warn(
+            "weak first stage (classical partial F < 10); ordinary normal IV intervals "
+            "can be unreliable. This diagnostic does not establish instrument validity "
+            "or replace weak-IV robust inference.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return {
+        "first_stage_partial_r2": improvement / rss0,
+        "first_stage_f": f,
+        "first_stage_numerator_df": float(q),
+        "first_stage_residual_df": float(df),
+        "weak_first_stage": float(f < 10),
+    }
+
+
+class _IVInferenceBase(_IVBase):
+    def __init__(
+        self, learners: Any = None, *, late_assumptions: bool = False, **kwargs: Any
+    ) -> None:
+        super().__init__(learners, **kwargs)
+        if not isinstance(late_assumptions, bool):
+            raise TypeError("late_assumptions must be a boolean acknowledgement")
+        self.late_assumptions = late_assumptions
+
+    def _pick_target(self, target: EffectTarget | str | None) -> EffectTarget:
+        chosen = super()._pick_target(EffectTarget.LINEAR_IV if target is None else target)
+        if chosen is EffectTarget.LATE:
+            a, zi = self._state.arrays["A"], self._state.arrays["Zi"]
+            if not self.late_assumptions:
+                raise ValueError(
+                    "target='late' requires late_assumptions=True: acknowledge instrument "
+                    "exogeneity, exclusion, relevance and monotonicity"
+                )
+            if (
+                set(np.unique(a).tolist()) != {0.0, 1.0}
+                or zi.shape[1] != 1
+                or set(np.unique(zi).tolist()) != {0.0, 1.0}
+            ):
+                raise ValueError(
+                    "qualified LATE requires binary treatment and one binary instrument"
+                )
+            if self._state.arrays["W"].shape[1]:
+                raise ValueError(
+                    "qualified LATE currently requires an unconditional binary instrument; "
+                    "use linear_iv for covariate-adjusted IV"
+                )
+        return chosen
+
+    def effect(self, *, target: EffectTarget | str | None = None) -> EffectEstimate:
+        result = super().effect(target=target)
+        assumptions: tuple[str, ...] = (
+            "Instrument exogeneity and exclusion are substantive assumptions, not verified "
+            "by the graph or first-stage statistic.",
+            "Instrument relevance is required; ordinary normal intervals are not weak-IV robust.",
+        )
+        if result.target is EffectTarget.LATE:
+            assumptions += (
+                "Binary instrument and treatment, monotonicity (no defiers), consistency "
+                "and no interference: LATE for instrument-induced compliers; asserted by "
+                "the caller.",
+            )
+        else:
+            assumptions += (
+                "Linear IV coefficient under the stated linear/partially linear structural "
+                "model; no automatic complier-LATE interpretation.",
+            )
+        return replace(result, identification=self._identification, assumptions=assumptions)
+
+
+class TwoStageLeastSquares(_IVInferenceBase):
     """Two-stage least squares. OLS in both stages, robust standard errors.
 
     The first stage regresses the treatment on the instruments and any
     conditioning covariates; the second regresses the outcome on the fitted
-    treatment. Reports the local average treatment effect (LATE).
+    treatment. Reports a linear IV coefficient by default. An unconditional binary
+    instrument and treatment can report ``target="late"`` only with caller-asserted
+    ``late_assumptions=True`` (exogeneity, exclusion, relevance and monotonicity).
     """
 
     name = "two_stage_least_squares"
-    targets = frozenset({EffectTarget.LATE})
+    targets = frozenset({EffectTarget.LINEAR_IV, EffectTarget.LATE})
 
     def __init__(self, learners: Any = None, **kwargs: Any) -> None:
         super().__init__(learners, **kwargs)
+
+    def fit(self, identification: Identification, data: TabularData) -> Self:
+        super().fit(identification, data)
+        arrays = self._state.arrays
+        self._state.diagnostics.update(
+            _first_stage_diagnostics(arrays["A"], arrays["Zi"], arrays["W"])
+        )
+        return self
 
     def _design(
         self, arrays: dict[str, npt.NDArray[np.float64]]
@@ -109,13 +213,13 @@ class Wald(TwoStageLeastSquares):
         return instruments, conditioning
 
 
-class PLIV(_IVBase):
+class PLIV(_IVInferenceBase):
     """Orthogonal instrumental variables (the partially linear IV model).
 
     Residualize the outcome, treatment, and instrument against the covariates with
     cross-fitting, then the IV moment on the residuals. The flexible-learner
-    instrument estimator that two-stage least squares is not. Reports LATE with an
-    analytic standard error.
+    instrument estimator that two-stage least squares is not. Reports a partially
+    linear IV coefficient with an analytic standard error, never an automatic LATE.
     """
 
     name = "pliv"
@@ -124,7 +228,7 @@ class PLIV(_IVBase):
         Slot("treatment", Task.REGRESSION),
         Slot("instrument", Task.REGRESSION),
     )
-    targets = frozenset({EffectTarget.LATE})
+    targets = frozenset({EffectTarget.LINEAR_IV})
 
     def __init__(self, learners: Any = None, *, n_folds: int = 5, **kwargs: Any) -> None:
         super().__init__(learners, **kwargs)
@@ -163,6 +267,11 @@ class PLIV(_IVBase):
         self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
     ) -> tuple[float, npt.NDArray[np.float64]]:
         res_y, res_t, res_z = self._residualize(arrays, make)
+        if arrays is self._state.arrays:
+            self._state.diagnostics.update(
+                _first_stage_diagnostics(res_t, res_z, np.empty((res_t.size, 0), dtype=np.float64))
+            )
+            self._state.diagnostics["first_stage_residualized"] = 1.0
         beta, influence = _two_sls(res_y, res_t.reshape(-1, 1), res_z)
         return float(beta[0]), influence[:, 0]
 

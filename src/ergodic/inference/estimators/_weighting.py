@@ -9,6 +9,7 @@ import numpy as np
 
 from .._estimator import Slot, Task, _AdjustmentBase
 from .._learner import _mean_predict
+from .._overlap import _propensity_diagnostics, _validate_overlap
 from .._target import EffectTarget
 
 if TYPE_CHECKING:
@@ -19,7 +20,31 @@ if TYPE_CHECKING:
     from .._learner import Learner
 
 
-class IPW(_AdjustmentBase):
+class _PropensityBase(_AdjustmentBase):
+    clip: float
+    overlap: str
+    overlap_threshold: float
+
+    def _propensity(
+        self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
+    ) -> npt.NDArray[np.float64]:
+        a, z = arrays["A"], arrays["Z"]
+        model = make["propensity"]().fit(z, a)
+        raw = _mean_predict(model, z)
+        original = arrays is self._state.arrays
+        diagnostics = _propensity_diagnostics(
+            a,
+            raw,
+            clip=self.clip,
+            overlap=self.overlap if original else "ignore",
+            threshold=self.overlap_threshold,
+        )
+        if original:
+            self._state.diagnostics.update(diagnostics)
+        return np.clip(raw, self.clip, 1.0 - self.clip)
+
+
+class IPW(_PropensityBase):
     """Weight by the inverse propensity of treatment.
 
     ``scheme="hajek"`` (the default) self-normalizes the weights; ``scheme="ht"``
@@ -32,22 +57,23 @@ class IPW(_AdjustmentBase):
     targets = frozenset({EffectTarget.ATE, EffectTarget.ATT})
 
     def __init__(
-        self, learners: Any = None, *, scheme: str = "hajek", clip: float = 1e-3, **kwargs: Any
+        self,
+        learners: Any = None,
+        *,
+        scheme: str = "hajek",
+        clip: float = 1e-3,
+        overlap: str = "warn",
+        overlap_threshold: float = 0.01,
+        **kwargs: Any,
     ) -> None:
         super().__init__(learners, **kwargs)
         if scheme not in ("hajek", "ht"):
             raise ValueError(f"scheme must be 'hajek' or 'ht', got {scheme!r}")
+        _validate_overlap(clip, overlap, overlap_threshold)
         self.scheme = scheme
         self.clip = clip
-
-    def _propensity(
-        self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
-    ) -> npt.NDArray[np.float64]:
-        a = arrays["A"]
-        z = arrays["Z"]
-        model = make["propensity"]().fit(z, a)
-        e = _mean_predict(model, z)
-        return np.clip(e, self.clip, 1.0 - self.clip)
+        self.overlap = overlap
+        self.overlap_threshold = overlap_threshold
 
     def _point(
         self,
@@ -77,7 +103,7 @@ class IPW(_AdjustmentBase):
         return float(np.mean(a * y / e - (1.0 - a) * y / (1.0 - e)))
 
 
-class Stratification(_AdjustmentBase):
+class Stratification(_PropensityBase):
     """Propensity stratification: bin on the propensity and difference within strata.
 
     The estimate is the stratum-size-weighted (ATE) or treated-size-weighted (ATT)
@@ -89,13 +115,23 @@ class Stratification(_AdjustmentBase):
     targets = frozenset({EffectTarget.ATE, EffectTarget.ATT})
 
     def __init__(
-        self, learners: Any = None, *, n_strata: int = 5, clip: float = 1e-3, **kwargs: Any
+        self,
+        learners: Any = None,
+        *,
+        n_strata: int = 5,
+        clip: float = 1e-3,
+        overlap: str = "warn",
+        overlap_threshold: float = 0.01,
+        **kwargs: Any,
     ) -> None:
         super().__init__(learners, **kwargs)
         if n_strata < 2:
             raise ValueError(f"n_strata must be >= 2, got {n_strata}")
+        _validate_overlap(clip, overlap, overlap_threshold)
         self.n_strata = n_strata
         self.clip = clip
+        self.overlap = overlap
+        self.overlap_threshold = overlap_threshold
 
     def _point(
         self,
@@ -105,8 +141,7 @@ class Stratification(_AdjustmentBase):
     ) -> float:
         a = arrays["A"]
         y = arrays["Y"]
-        z = arrays["Z"]
-        e = np.clip(_mean_predict(make["propensity"]().fit(z, a), z), self.clip, 1.0 - self.clip)
+        e = self._propensity(arrays, make)
         edges = np.quantile(e, np.linspace(0.0, 1.0, self.n_strata + 1))
         bins = np.searchsorted(edges[1:-1], e, side="right")
         total = 0.0
@@ -117,8 +152,13 @@ class Stratification(_AdjustmentBase):
             control = here & (a == 0.0)
             n_treated = int(np.sum(treated))
             n_control = int(np.sum(control))
-            if n_treated == 0 or n_control == 0:
+            if not np.any(here):
                 continue
+            if n_treated == 0 or n_control == 0:
+                raise ValueError(
+                    "an occupied propensity stratum lacks a treatment arm; refusing to "
+                    "silently trim rows or change the estimand"
+                )
             diff = float(np.mean(y[treated]) - np.mean(y[control]))
             weight = (
                 float(n_treated) if target is EffectTarget.ATT else float(n_treated + n_control)

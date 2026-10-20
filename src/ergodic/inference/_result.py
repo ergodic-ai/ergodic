@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
+    from ..identification import Identification
+
 
 @dataclass(frozen=True)
 class EffectEstimate:
@@ -31,7 +33,9 @@ class EffectEstimate:
 
     Built by a :class:`CausalEstimator`. Either ``_point``/``_std_error`` are set
     (an analytic result) or ``_draws`` is set (bootstrap or posterior), and the
-    accessors read whichever is present.
+    accessors read whichever is present. ``identification`` retains the graph
+    identification record when available; ``assumptions`` states additional
+    estimator or caller-asserted interpretation conditions.
     """
 
     target: EffectTarget
@@ -40,6 +44,8 @@ class EffectEstimate:
     n: int
     kind: str  # "analytic", "bootstrap", "posterior", "point", or "placebo"
     diagnostics: Mapping[str, float] = field(default_factory=dict)
+    identification: Identification | None = field(default=None, kw_only=True)
+    assumptions: tuple[str, ...] = field(default=(), kw_only=True)
     _point: float | None = None
     _std_error: float | None = None
     _draws: npt.NDArray[np.float64] | None = field(default=None, repr=False)

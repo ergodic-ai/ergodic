@@ -235,6 +235,10 @@ def test_dr_posterior_recovers_ate() -> None:
     ident = identify_effect(graph, "A", "Y")
     est = AIPW({"outcome": _BayesLinear(), "propensity": _BayesLogit()}).fit(ident, data).effect()
     assert est.kind == "posterior"
+    assert est.diagnostics["cross_fitted"] == 0
+    assert est.diagnostics["bayesian_in_sample"] == 1
+    assert "in-sample model posterior" in " ".join(est.assumptions)
+    assert "posterior_draw_clipped_fraction" in est.diagnostics
     assert est.draws is not None
     assert abs(est.value - 1.0) < 0.25
     assert est.std_error is not None
@@ -290,7 +294,37 @@ def test_mixed_slots_do_not_take_the_posterior_path() -> None:
     # returns its analytic ATE (one fit), not a posterior.
     est = AIPW({"outcome": _BayesLinear(), "propensity": "logistic"}).fit(ident, data).effect()
     assert est.kind == "analytic"
+    assert est.diagnostics["cross_fitted"] == 0
+    assert est.diagnostics["bayesian_in_sample"] == 1
+    assert "propensity_min" in est.diagnostics
     assert abs(est.value - 1.0) < 0.25
+
+
+def test_aipw_reports_posterior_draw_clipping_separately_from_mean() -> None:
+    class ExtremeDraws(_BayesLogit):
+        def predict_proba_draws(self, X: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            draws = np.zeros((self.n_draws, X.shape[0]), dtype=np.float64)
+            draws[self.n_draws // 2 :] = 1.0
+            return draws
+
+    data, graph, _ = _hetero()
+    result = (
+        AIPW({"outcome": _BayesLinear(), "propensity": ExtremeDraws()})
+        .fit(identify_effect(graph, "A", "Y"), data)
+        .effect()
+    )
+    assert result.diagnostics["propensity_clipped_fraction"] == 0
+    assert result.diagnostics["posterior_draw_clipped_fraction"] == 1
+    assert result.diagnostics["posterior_draw_tail_fraction"] == 1
+
+
+def test_aipw_explicit_crossfit_refuses_bayesian_slots() -> None:
+    data, graph, _ = _hetero()
+    ident = identify_effect(graph, "A", "Y")
+    with pytest.raises(ValueError, match="does not implement Bayesian posteriors"):
+        AIPW({"outcome": _BayesLinear(), "propensity": _BayesLogit()}, mode="cross_fitted").fit(
+            ident, data
+        )
 
 
 # -- the real PyMC backend (skipped without pymc or a C compiler) ------------

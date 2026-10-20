@@ -10,13 +10,16 @@ class EffectTarget(Enum):
     """Which effect a :class:`CausalEstimator` reports.
 
     The estimators return ``ATE`` and ``ATT`` for the adjustment and front-door
-    families and ``LATE`` for instruments; ``CATE`` and ``ITE`` tag the per-unit
+    families and ``LINEAR_IV`` for generic instrument coefficients; ``LATE``
+    requires an explicitly qualified binary-instrument complier interpretation;
+    ``CATE`` and ``ITE`` tag the per-unit
     results' summaries. ``ATC`` is reserved and no estimator returns it.
     """
 
     ATE = "ate"
     ATT = "att"
     ATC = "atc"
+    LINEAR_IV = "linear_iv"
     LATE = "late"
     CATE = "cate"
     ITE = "ite"

@@ -88,6 +88,74 @@ ordinary least squares for a continuous outcome, as here, and logistic regressio
 for a binary one. Pass `learner=` (an alias, a learner, or a mapping from slot to
 learner) to use other models.
 
+## Cross-fitting and overlap
+
+AIPW now defaults to `mode="auto"`: frequentist nuisances use held-out predictions
+from five shuffled, treatment-stratified folds. Set `n_folds=` and `random_state=`
+explicitly for a recorded protocol. If no seed is supplied, AIPW uses seed 0 for
+the split. Diagnostics report `n_folds_requested`, the number of nonempty folds
+actually used as `n_folds`, and `crossfit_seed`. Both arms need at least two rows;
+fold counts must be integers from 2 through the number of rows.
+
+Cross-fitting prevents evaluating nuisance residuals on their own fitting rows.
+It does not make every learner safe: valid ATE intervals also need overlap,
+suitable nuisance convergence rates and independent observations. An unrestricted
+decision-tree propensity model can predict only 0 and 1 even on held-out rows;
+the default guard refuses that fit. This remains AIPW, with its counterfactual
+outcome regressions and propensity residual corrections, rather than a partially
+linear DML model. See [Chernozhukov et al.](https://arxiv.org/abs/1608.00060).
+
+`mode="in_sample"` selects the old parametric fitting path explicitly. Its
+influence-score interval needs appropriate parametric or empirical-process
+conditions; unrestricted interpolating learners are not qualified. With any
+Bayesian nuisance, `auto` preserves the in-sample posterior or posterior-mean
+fallback without repeatedly fitting a sampler. `cross_fitted=0` and
+`bayesian_in_sample=1` report that choice. Explicit `mode="cross_fitted"` refuses
+Bayesian slots because cross-fitted posterior inference is not implemented.
+
+Inspect `estimate.diagnostics`: `propensity_min`, `propensity_max`, and the
+`propensity_q01`, `q05`, `median`, `q95` and `q99` entries use raw predictions,
+before clipping. `propensity_clipped_fraction` records clipping;
+`treated_effective_n`, `control_effective_n`, and each arm's `weight_max` and
+`weight_q99` describe the clipped ATE inverse weights. `att_control_effective_n`
+and `att_control_weight_max` describe ATT odds weights. For a Bayesian posterior,
+these summaries use the posterior mean propensity; `posterior_draw_clipped_fraction`
+and `posterior_draw_tail_fraction` separately summarize all propensity draw cells.
+
+AIPW, IPW and stratification accept `overlap="warn"` (default), `"raise"`, or
+`"ignore"`, plus `overlap_threshold=0.01` and `clip=0.001`. The default warns when
+at least 10% of raw predictions lie outside `[0.01, 0.99]`, or an arm's effective
+size falls below 10% of its observed count. It refuses when at least 50% require
+clipping. `raise` also refuses moderate warnings; `ignore` explicitly overrides
+these diagnostic guards, but invalid probabilities always fail. These thresholds
+are diagnostic choices, not a test of population positivity. A result below the
+thresholds is not a certificate of valid inference. Clipping cannot restore
+missing support. No rows are trimmed; stratification refuses an occupied stratum
+with a missing arm instead of dropping it and changing the estimand.
+
+## Instrumental-variable targets
+
+Instrument estimators now default to `target="linear_iv"`, including continuous
+treatment and PLIV. This replaces the old automatic `late` label. The numerical
+coefficient is unchanged; consumers checking `EffectTarget.LATE` should migrate to
+`EffectTarget.LINEAR_IV` when they mean the generic linear IV coefficient.
+
+A complier LATE requires additional assumptions. For one unconditional binary
+instrument and a binary treatment, 2SLS or Wald accepts `target="late"` only with
+`late_assumptions=True`. This asserts exogeneity, exclusion, relevance,
+monotonicity, consistency and no interference; it does not verify them. Adjusted
+or multivariate instruments and PLIV retain the generic linear IV target.
+See [Angrist, Imbens and Rubin](https://doi.org/10.1080/01621459.1996.10476902).
+
+Scalar results retain `identification`; IV results also state `assumptions`.
+Their `first_stage_partial_r2`, `first_stage_f` and degrees of freedom describe
+first-stage strength. PLIV computes them on its cross-fitted residuals, marked by
+`first_stage_residualized=1`. The classical F statistic is descriptive, assumes a
+homoskedastic linear first stage for its usual interpretation, and does not test
+exclusion or exogeneity. Values below 10 warn; larger values do not establish
+instrument validity. Ordinary normal IV intervals can be unreliable with weak
+instruments; weak-IV robust intervals are not implemented here.
+
 ## Next steps
 
 <div class="cards" markdown="1">

@@ -404,6 +404,7 @@ class CausalEstimator(ABC):
             return EffectEstimate(
                 target=chosen,
                 estimator=self.name,
+                identification=self._identification,
                 learners=dict(state.learner_names),
                 n=state.n,
                 kind="analytic",
@@ -422,6 +423,7 @@ class CausalEstimator(ABC):
         return EffectEstimate(
             target=chosen,
             estimator=self.name,
+            identification=self._identification,
             learners=dict(state.learner_names),
             n=state.n,
             kind="bootstrap",
@@ -453,6 +455,7 @@ class CausalEstimator(ABC):
             return EffectEstimate(
                 target=target,
                 estimator=self.name,
+                identification=self._identification,
                 learners=dict(state.learner_names),
                 n=state.n,
                 kind="posterior",
@@ -467,6 +470,7 @@ class CausalEstimator(ABC):
             return EffectEstimate(
                 target=target,
                 estimator=self.name,
+                identification=self._identification,
                 learners=dict(state.learner_names),
                 n=state.n,
                 kind="analytic",
@@ -478,6 +482,7 @@ class CausalEstimator(ABC):
         return EffectEstimate(
             target=target,
             estimator=self.name,
+            identification=self._identification,
             learners=dict(state.learner_names),
             n=state.n,
             kind="point",
