@@ -54,7 +54,7 @@ print(f"true average effect  : ${tau.mean():.2f} per customer   (serving cost ${
 # and it raises the odds the team hands them the perk. That double role is what makes it a
 # confounder. The perk's true effect lives in a separate variable, headroom, which has nothing to
 # do with how valuable a customer already is. Average that effect over everyone and it comes to
-# about 24 dollars, below the 25 it costs to serve. The point estimate suggests a loss. Hold that
+# about 23 dollars, below the 25 it costs to serve. On average, the perk loses money. Hold that
 # thought, because it isn't the end of the story.
 #
 # ## The record looks great, and the record is confounded
