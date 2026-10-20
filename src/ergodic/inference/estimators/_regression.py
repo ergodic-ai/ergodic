@@ -30,6 +30,8 @@ class OutcomeRegression(_MetaLearnerBase):
     feature (the S-learner / g-formula). With ``per_arm=True`` a separate model is
     fit on each arm (the T-learner). A Bayesian outcome learner flows its posterior
     into the per-unit CATE result and into ``cate_draws``/``cate_interval``.
+    Predictions on new rows retain the fitted covariate types and category
+    vocabulary; unknown categories and incompatible types raise ``ValueError``.
     """
 
     name = "outcome_regression"

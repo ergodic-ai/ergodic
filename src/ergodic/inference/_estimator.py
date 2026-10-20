@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
     from ..data import TabularData
+    from ..data._schema import ColumnType
     from ..identification import Identification
     from ._learner import Learner
     from ._perunit import CATEResult
@@ -162,19 +163,35 @@ def _outcome_vector(data: TabularData, name: str) -> tuple[npt.NDArray[np.float6
 
 
 def _covariate_matrix(
-    data: TabularData, names: frozenset[str] | list[str]
+    data: TabularData,
+    names: frozenset[str] | list[str],
+    *,
+    fitted_columns: tuple[ColumnType, ...] | None = None,
 ) -> npt.NDArray[np.float64]:
-    """A float design for the covariates: continuous as is, discrete one-hot (drop first)."""
+    """A float design, using the training types and vocabulary when supplied."""
+    from ..data._schema import _encode
+
     chosen = sorted(names)
+    missing = sorted(set(chosen) - set(data.schema.names))
+    if missing:
+        raise ValueError(f"CATE prediction is missing fitted covariate columns: {missing}")
+    _require_complete(data, set(chosen))
+    columns = {col.name: col for col in fitted_columns} if fitted_columns is not None else {}
     if not chosen:
         return np.empty((data.n_rows, 0), dtype=np.float64)
     blocks: list[npt.NDArray[np.float64]] = []
     for name in chosen:
-        col = data.schema[name]
+        current = data.schema[name]
+        col = columns.get(name, current)
+        if current.kind is not col.kind:
+            raise ValueError(
+                f"covariate {name!r} has type {current.kind.value!r}; "
+                f"the fitted type is {col.kind.value!r}"
+            )
         if col.is_continuous or col.is_datetime:
             blocks.append(np.asarray(data.matrix([name]), dtype=np.float64))
         elif col.is_discrete:
-            codes = data.codes(name)
+            codes = _encode(data.column(name), col.categories, col.ordered, name)
             width = col.cardinality or 0
             onehot = (codes[:, None] == np.arange(width)[None, :]).astype(np.float64)
             if onehot.shape[1] > 1:
@@ -256,6 +273,7 @@ class CausalEstimator(ABC):
         self._treated = treated
         self._fit_state: _FitState | None = None
         self._covariates: tuple[str, ...] = ()
+        self._covariate_schema: tuple[ColumnType, ...] = ()
         self._identification: Identification | None = None
         self._treatment_name: str = ""
         self._outcome_name: str = ""
@@ -324,6 +342,7 @@ class CausalEstimator(ABC):
             )
         self._identification = identification
         arrays, y_binary, diagnostics = self._extract(identification, data)
+        self._covariate_schema = tuple(data.schema[name] for name in self._covariates)
         make, learner_names, bayesian = self._resolve(y_binary)
         self._fit_state = _FitState(
             arrays=arrays,
@@ -345,7 +364,9 @@ class CausalEstimator(ABC):
         """The covariate design for CATE prediction: in-sample, or extracted from ``data``."""
         if data is None:
             return self._state.arrays["Z"]
-        return _covariate_matrix(data, list(self._covariates))
+        return _covariate_matrix(
+            data, list(self._covariates), fitted_columns=self._covariate_schema
+        )
 
     def _treatment_vector(
         self, data: TabularData, name: str, *, allow_continuous: bool = False
@@ -751,9 +772,9 @@ class _MetaLearnerBase(_AdjustmentBase):
         a, y, z = state.arrays["A"], state.arrays["Y"], state.arrays["Z"]
         try:
             mu0, mu1, e = self._dr_nuisances(state.arrays, state.make)
-            tau_hat = self._crossfit_tau_hat(state.arrays, state.make)
         except (ValueError, np.linalg.LinAlgError):
             return None
+        tau_hat, ranking_error = self._crossfit_tau_hat(state.arrays, state.make)
         return DRScores(
             scores=_scores_fn(a, y, mu0, mu1, e),
             mu0=mu0,
@@ -765,36 +786,38 @@ class _MetaLearnerBase(_AdjustmentBase):
             covariate_names=self._covariate_columns,
             covariate_variables=self._covariate_variables,
             tau_hat=tau_hat,
+            ranking_error=ranking_error,
         )
 
     def _crossfit_tau_hat(
         self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]
-    ) -> npt.NDArray[np.float64] | None:
+    ) -> tuple[npt.NDArray[np.float64] | None, str | None]:
         """Out-of-fold predicted effects: a fixed proxy ranking for honest explainability.
 
         The literature's honesty recipe needs the ranking proxy fixed on data not used
         for the summary. Fitting the CATE model on each train fold and predicting the
         held-out fold gives an out-of-fold ``tau_hat`` that does not share rows with the
         scores it is later sorted against, so GATES, RATE, and the calibration test do
-        not pick up the in-sample fit's spurious self-correlation. ``None`` (the
-        in-sample fit is used) when a fold refit fails.
+        not pick up the in-sample fit's spurious self-correlation. A failed fold
+        returns no proxy and its diagnostic; ranking-based inference must refuse it.
         """
         a, z = arrays["A"], arrays["Z"]
         n = a.shape[0]
         n_folds = int(getattr(self, "n_folds", 5))
         tau = np.empty(n, dtype=np.float64)
         rng = np.random.default_rng(self._random_state)
+        _fold = 0
         try:
-            for test in _folds(n, n_folds, rng, stratify=a):
+            for _fold, test in enumerate(_folds(n, n_folds, rng, stratify=a), start=1):
                 train = _train_mask(n, test)
                 sub = {key: arr[train] for key, arr in arrays.items()}
                 model = self._fit_cate(sub, make)
                 tau[test] = self._predict_cate(model, z[test])
-        except (ValueError, np.linalg.LinAlgError, TypeError):
-            return None
+        except (ValueError, np.linalg.LinAlgError, TypeError) as exc:
+            return None, f"cross-fit ranking fold {_fold}: {type(exc).__name__}: {exc}"
         if not np.all(np.isfinite(tau)):
-            return None
-        return tau
+            return None, "cross-fit ranking produced non-finite predictions"
+        return tau, None
 
     def _dr_nuisances(
         self, arrays: dict[str, npt.NDArray[np.float64]], make: dict[str, Callable[[], Learner]]

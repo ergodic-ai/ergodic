@@ -376,11 +376,12 @@ def test_dml_cate_is_constant_and_explains() -> None:
     assert isinstance(res, CATEResult)
     assert float(np.std(res.values)) == pytest.approx(0.0, abs=1e-9)  # homogeneous
     assert abs(res.ate().value - 1.0) < 0.15
-    # DML's tau_hat is constant, so the tau_hat-ranked calibration test honestly
-    # cannot detect heterogeneity (no usable ranking). The BLP regresses the DR
+    # DML supplies no out-of-fold ranking, so ranked inference must refuse it.
+    # The BLP regresses the DR
     # scores on the covariates directly, so it still detects what DML assumes away.
     h = res.explain()
-    assert not h.calibration_test().rejects()  # degenerate ranking -> no detection
+    with pytest.raises(RuntimeError, match="DML assumes a homogeneous effect"):
+        h.calibration_test()
     blp_z = h.blp().frame()["Z"]
     assert blp_z["ci_low"] > 0.0  # the covariate projection still finds the gradient
 

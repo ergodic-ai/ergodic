@@ -214,13 +214,13 @@ def select_cate(
             random_state=random_state,
             n_boot=n_boot,
         )
-        # the candidate's out-of-fold proxy ranking when cached (the honest choice),
-        # else its in-sample fit. Scored against the shared Gamma.
+        # The candidate must have an out-of-fold proxy. Falling back to its
+        # in-sample fit would also contaminate the aggregate's explainability.
         cached = result._scores
-        if cached is not None and cached.tau_hat is not None:
-            tau = np.asarray(cached.tau_hat, dtype=np.float64)
-        else:
-            tau = np.asarray(result.values, dtype=np.float64)
+        if cached is None or cached.tau_hat is None:
+            detail = cached.ranking_error if cached is not None else "no cross-fit scores"
+            raise RuntimeError(f"candidate {method!r} has no out-of-fold CATE proxy: {detail}")
+        tau = np.asarray(cached.tau_hat, dtype=np.float64)
         fitted[method] = result
         tau_hats[method] = tau
         scored.append(CandidateScore(method=method, tau_risk=_tau_risk(gamma, tau)))

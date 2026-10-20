@@ -55,6 +55,8 @@ class DRScores:
     ``mu1``, and ``propensity`` are the cross-fit out-of-fold nuisances, kept so the
     calibration and projection tools reuse them without refitting. ``treatment``,
     ``outcome``, and ``covariates`` carry the design back to the result.
+    ``ranking_error`` retains a failed cross-fit proxy diagnostic. Without
+    ``tau_hat``, covariate projections remain available but ranking summaries refuse.
     """
 
     scores: npt.NDArray[np.float64]
@@ -67,6 +69,7 @@ class DRScores:
     covariate_names: tuple[str, ...]
     tau_hat: npt.NDArray[np.float64] | None = None
     covariate_variables: tuple[str, ...] = ()
+    ranking_error: str | None = None
 
     def __post_init__(self) -> None:
         width = np.asarray(self.covariates).shape[1] if np.ndim(self.covariates) == 2 else 0
