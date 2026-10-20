@@ -43,7 +43,7 @@ Alarm --> MaryCalls
 Alarm <-- Burglary
 Alarm <-- Earthquake
 Identification(adjustment: P(JohnCalls | do(Burglary)) = sum_z P(JohnCalls | Burglary, z) P(z), with z = {Earthquake})
-EffectEstimate(aipw, analytic: ate=0.7982, se=0.0333, 95% CI [0.733, 0.863], n=10000)
+EffectEstimate(aipw, analytic: ate=0.7997, se=0.0337, 95% CI [0.734, 0.866], n=10000)
 ```
 
 The true effect, from the network's own tables, is 0.793: inside the interval. The

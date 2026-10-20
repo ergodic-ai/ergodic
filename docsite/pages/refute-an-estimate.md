@@ -54,18 +54,18 @@ print(check)
 ```
 
 ```output from="refute_effect.py"
-EffectEstimate(aipw, analytic: ate=-222.3, se=25.8, 95% CI [-273, -172], n=4642)
-Refutation(placebo_treatment: estimate=-222.3, under perturbation=4.981, p=0.0099, passed, n=100)
-  spread of the perturbed estimates: 21.7 g
-Refutation(random_common_cause: estimate=-222.3, under perturbation=-222.1, passed, n=100)
-  spread of the perturbed estimates: 0.8 g
-Refutation(data_subset: estimate=-222.3, under perturbation=-219, passed, n=100)
-  spread of the perturbed estimates: 13.8 g
-Refutation(placebo_treatment: estimate=-275.3, under perturbation=4.529, p=0.0099, passed, n=100)
+EffectEstimate(aipw, analytic: ate=-219.5, se=26.3, 95% CI [-271, -168], n=4642)
+Refutation(placebo_treatment: estimate=-219.5, under perturbation=4.747, p=0.0099, passed, n=100)
+  spread of the perturbed estimates: 21.5 g
+Refutation(random_common_cause: estimate=-219.5, under perturbation=-219.3, passed, n=100)
+  spread of the perturbed estimates: 1.0 g
+Refutation(data_subset: estimate=-219.5, under perturbation=-218.7, passed, n=100)
+  spread of the perturbed estimates: 14.2 g
+Refutation(placebo_treatment: estimate=-275.3, under perturbation=4.526, p=0.0099, passed, n=100)
 ```
 
 - **Placebo treatment.** With the smoking column shuffled, the effect drops from
-  −222 g to a few grams. In none of the 100 shuffles was the placebo effect as large
+  −220 g to a few grams. In none of the 100 shuffles was the placebo effect as large
   in size as the real one, so `p` is the smallest value 100 runs can give: 1/101.
 - **Random common cause.** Adding an independent random confounder to the graph
   leaves the estimate where it was, within a gram.

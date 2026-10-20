@@ -46,13 +46,13 @@ print(identify_effect(hidden, smoking, weight))
 ```
 
 ```output from="assumptions_demo.py"
-17 confounders: EffectEstimate(aipw, analytic: ate=-222.3, se=25.8, 95% CI [-273, -172], n=4642)
+17 confounders: EffectEstimate(aipw, analytic: ate=-219.5, se=26.3, 95% CI [-271, -168], n=4642)
 no confounders: EffectEstimate(aipw, analytic: ate=-275.3, se=21.2, 95% CI [-317, -234], n=4642)
 Identification(not identifiable, ['mbsmoke'] -> ['bweight'])
 ```
 
 - **Step 2.** With all 17 confounders in the graph, smoking lowers birthweight by
-  about 222 g.
+  about 220 g.
 - **Step 3.** With none, the estimate is the raw difference, about 275 g. Nothing in
   the data says which graph is right; the 53 g gap is your assumption at work.
 - **Step 4.** With an unmeasured cause `U` of both smoking and birthweight, and no

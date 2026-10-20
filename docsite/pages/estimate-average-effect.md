@@ -45,14 +45,14 @@ print(f"95% interval: {low:.0f} g to {high:.0f} g")
 ```output from="average_effect.py"
 mbsmoke -> bweight with 17 confounders
 raw difference: -275.3 g
-EffectEstimate(aipw, analytic: ate=-222.3, se=25.8, 95% CI [-273, -172], n=4642)
-95% interval: -273 g to -172 g
+EffectEstimate(aipw, analytic: ate=-219.5, se=26.3, 95% CI [-271, -168], n=4642)
+95% interval: -271 g to -168 g
 ```
 
 - Babies of smokers weigh 275 g less on average. Part of that gap comes from the
   confounders, not from smoking.
-- Adjusted for the confounders, smoking lowers birthweight by about 222 g. The 95%
-  interval runs from 273 g to 172 g lower. The Stata treatment-effects manual's
+- Adjusted for the confounders, smoking lowers birthweight by about 220 g. The 95%
+  interval runs from 271 g to 168 g lower. The Stata treatment-effects manual's
   doubly robust estimate on the same extract is −231 g (standard error 26 g), well
   inside that interval; `births.target` records it with its source.
 - `aipw` is the augmented inverse-probability-weighted estimator. It combines an

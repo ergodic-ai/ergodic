@@ -440,10 +440,10 @@ print(round(result.zero_effect_mass, 3), result.unidentified_mass, result.trunca
 0.811
 0.404
        adjustment_set   mass  n_dags  estimate  std_error
-0                   c  0.757       3     1.969      0.066
+0                   c  0.757       3     1.970      0.066
 1             (empty)  0.156       6     3.563      0.072
 2  (no directed path)  0.087      16     0.000      0.000
-2.046 0.857
+2.047 0.857
 0.087 0.0 0.0
 ```
 

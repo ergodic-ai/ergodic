@@ -170,10 +170,10 @@ adjusted
 # [estimating effects](../learn/03-estimating-effects.py); this page trusts the default and
 # reads the number.
 #
-# The number is about -222 g, with a 95 percent interval that runs roughly -273 to -172. So
-# closing the back door moved the estimate by some 50 g, from -275 toward zero. That 50 g was
+# The number is about -220 g, with a 95 percent interval that runs roughly -271 to -168. So
+# closing the back door moved the estimate by some 55 g, from -275 toward zero. That 55 g was
 # the imbalance from the balance table: the part of the raw gap that was really the mothers
-# differing, not the smoking. What's left, -222 g, is the effect of smoking with those
+# differing, not the smoking. What's left, -220 g, is the effect of smoking with those
 # differences held fixed.
 
 # %%
@@ -190,8 +190,8 @@ summary.round(1)
 # %% [markdown]
 # The published adjusted figure on this same extract is about -231 g: the doubly robust (AIPW)
 # estimate in the Stata treatment-effects manual, with a standard error of 26 g. Our
-# adjustment lands at -222 g, well inside that interval. We started 44 g away from the
-# published number and ended 9 g away, having moved in the right direction for the right
+# adjustment lands at -220 g, well inside that interval. We started 44 g away from the
+# published number and ended 12 g away, having moved in the right direction for the right
 # reason. The remaining gap is down to which confounders enter and how each model is fit (the
 # manual's own estimators range from about -210 to -240 g), and the published interval and
 # ours overlap heavily. This is what a closed back door looks like on real data: not the
@@ -200,7 +200,7 @@ summary.round(1)
 #
 # ## What we had to assume
 #
-# Be exact about the claim. The -222 g holds if the 17 measured confounders close every back
+# Be exact about the claim. The -220 g holds if the 17 measured confounders close every back
 # door between smoking and birthweight. That is an assumption about the world, and no amount
 # of data inside this table can prove it. If something we didn't measure moves both smoking
 # and birthweight, say a genetic factor, or diet, or stress, then a path is still open and
@@ -234,7 +234,7 @@ print(f"placebo estimate: {ref.refuted_value:+.1f} g  (mean over 20 scrambles)")
 print(f"verdict: {'passed' if ref.passed else 'FAILED'}")
 
 # %% [markdown]
-# The real estimate is -222 g; the placebo, averaged over 20 random shuffles, is about +3 g,
+# The real estimate is -220 g; the placebo, averaged over 20 random shuffles, is about +2 g,
 # a rounding error next to the real effect. The pipeline finds nothing when there's nothing
 # to find. That's a green light, and it's worth being clear about what color of green. It
 # rules out one failure mode, a bug or a quirk manufacturing an effect from noise. It says
@@ -243,7 +243,7 @@ print(f"verdict: {'passed' if ref.passed else 'FAILED'}")
 # fire inspection.
 #
 # That's the case, end to end. A balance table that showed the bias before any model ran, a
-# naive -275 g that the imbalance inflated, an adjusted -222 g that landed on the published
+# naive -275 g that the imbalance inflated, an adjusted -220 g that landed on the published
 # neighborhood, and a placebo check that came back clean. The one input the data couldn't
 # supply was the graph: the arrows that said which 17 variables to adjust for and which arrow
 # to measure. Here we knew them from how the records are collected. When you don't, you can
