@@ -383,3 +383,77 @@ def test_gcm_with_no_conditioning_is_a_covariance_test() -> None:
     rng = np.random.default_rng(8)
     independent = tabular({"X": rng.normal(size=500), "Y": rng.normal(size=500)})
     assert GCM(independent).test("X", "Y").p_value > 0.05
+
+
+@pytest.mark.parametrize("dependent", [False, True])
+def test_gcm_refuses_interpolating_trees(dependent: bool) -> None:
+    pytest.importorskip("sklearn")
+    from sklearn.tree import DecisionTreeRegressor
+
+    rng = np.random.default_rng(73)
+    z = rng.normal(size=300)
+    x = z**2 + rng.normal(size=300)
+    y = z**2 + rng.normal(size=300) + (x if dependent else 0.0)
+    data = tabular({"X": x, "Y": y, "Z": z})
+    test = GCM(data, learner=DecisionTreeRegressor(random_state=0))
+    with pytest.raises(ValueError, match=r"residual variance.*interpolate"):
+        test.test("X", "Y", ["Z"])
+    # Failure cannot be cached as a p=1 independence decision.
+    with pytest.raises(ValueError, match="residual variance"):
+        test.independent("Y", "X", ["Z"], alpha=0.05)
+    assert test.diagnostics()["n_ci_tests"] == 0.0
+
+
+@pytest.mark.parametrize("exact_endpoint", ["X", "Y"])
+def test_gcm_refuses_an_exact_fit_of_either_endpoint(exact_endpoint: str) -> None:
+    rng = np.random.default_rng(74)
+    z = rng.normal(size=300)
+    endpoints = {"X": z + rng.normal(size=300), "Y": z + rng.normal(size=300)}
+    endpoints[exact_endpoint] = z.copy()
+    data = tabular({**endpoints, "Z": z})
+    with pytest.raises(ValueError, match="numerically degenerate residual variance"):
+        GCM(data, learner=OLS()).test("X", "Y", ["Z"])
+
+
+@pytest.mark.parametrize("given", [[], ["Z"]])
+@pytest.mark.parametrize("constant_endpoint", ["X", "Y"])
+def test_gcm_refuses_constant_endpoints(given: list[str], constant_endpoint: str) -> None:
+    rng = np.random.default_rng(75)
+    endpoints = {"X": rng.normal(size=100), "Y": rng.normal(size=100)}
+    endpoints[constant_endpoint] = np.ones(100)
+    data = tabular({**endpoints, "Z": rng.normal(size=100)})
+    with pytest.raises(ValueError, match=r"endpoint .* is constant"):
+        GCM(data, learner=OLS()).test("X", "Y", given)
+
+
+@pytest.mark.parametrize(
+    ("x", "y"),
+    [
+        ([1.0, -1.0, 1.0, -1.0], [1.0, -1.0, 1.0, -1.0]),
+        ([1.0, -1.0, 0.0, 0.0], [0.0, 0.0, 1.0, -1.0]),
+    ],
+)
+def test_gcm_refuses_constant_residual_products(x: list[float], y: list[float]) -> None:
+    # Each endpoint varies, but their centered product is constant (one or zero).
+    with pytest.raises(ValueError, match="residual product has zero"):
+        GCM(tabular({"X": x, "Y": y})).test("X", "Y")
+
+
+@pytest.mark.parametrize("given", [[], ["Z"]])
+@pytest.mark.parametrize("scale", [1e-100, 1e-6, 1e100])
+def test_gcm_statistic_does_not_depend_on_measurement_units(given: list[str], scale: float) -> None:
+    rng = np.random.default_rng(76)
+    z = rng.normal(size=300)
+    x = z + rng.normal(size=300)
+    y = z + 0.2 * x + rng.normal(size=300)
+    reference = GCM(tabular({"X": x, "Y": y, "Z": z}), learner=OLS()).test("X", "Y", given)
+    scaled = GCM(tabular({"X": scale * x, "Y": scale * y, "Z": z}), learner=OLS()).test(
+        "X", "Y", given
+    )
+    assert scaled.statistic == pytest.approx(reference.statistic)
+    assert scaled.p_value == pytest.approx(reference.p_value)
+
+
+def test_gcm_refuses_a_single_observation() -> None:
+    with pytest.raises(ValueError, match="at least two complete observations"):
+        GCM(tabular({"X": [1.0], "Y": [2.0]})).test("X", "Y")
