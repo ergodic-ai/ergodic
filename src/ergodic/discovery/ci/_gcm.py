@@ -36,7 +36,8 @@ if TYPE_CHECKING:
     from ...data import TabularData
     from ...inference._learner import Learner
 
-_VAR_FLOOR = 1e-12
+# Refuse residuals indistinguishable from an exact fit at floating-point precision.
+_DEGENERACY_RTOL = 100.0 * np.finfo(np.float64).eps
 
 
 class GCM(CITest):
@@ -47,7 +48,11 @@ class GCM(CITest):
     ``sqrt(n) * mean(R) / sd(R)`` against the standard normal, two-sided.
     Residuals are in-sample, as in the paper's basic form. With an empty
     conditioning set the endpoints are centered instead, so the statistic is
-    a plain covariance test.
+    a plain covariance test. Constant endpoints, exact or numerically exact
+    fits, and constant residual products raise ``ValueError``: the normal
+    reference statistic is undefined, so no independence decision is returned.
+    An in-sample learner must leave nondegenerate residual variation; this
+    check alone does not establish calibration for an arbitrary learner.
 
     Args:
         data: The dataset to bind, or ``None`` for a reusable config.
@@ -78,15 +83,29 @@ class GCM(CITest):
                 "one-hot block, use Mixed for categorical endpoints"
             )
         n = x.shape[0]
+        if n < 2:
+            raise ValueError("GCM needs at least two complete observations")
         if z.shape[1] == 0:
             rx = x[:, 0] - float(np.mean(x[:, 0]))
             ry = y[:, 0] - float(np.mean(y[:, 0]))
         else:
             rx = self._residual(z, x[:, 0])
             ry = self._residual(z, y[:, 0])
+        rx = _checked_residual(rx, x[:, 0], "x")
+        ry = _checked_residual(ry, y[:, 0], "y")
         product = rx * ry
+        product_scale = float(np.max(np.abs(product)))
+        if product_scale == 0.0:
+            raise ValueError("GCM residual product has zero variance; no valid p-value")
+        # Positive rescaling leaves the statistic unchanged and avoids a
+        # variance floor that depends on the endpoints' measurement units.
+        product = product / product_scale
         mean_r = float(np.mean(product))
-        var_r = max(float(np.var(product)), _VAR_FLOOR)
+        var_r = float(np.var(product))
+        if var_r <= _DEGENERACY_RTOL**2:
+            raise ValueError(
+                "GCM residual product has zero or numerically degenerate variance; no valid p-value"
+            )
         stat = math.sqrt(n) * mean_r / math.sqrt(var_r)
         p = 2.0 * (1.0 - _norm_cdf(abs(stat)))
         return stat, p, None
@@ -108,3 +127,28 @@ class GCM(CITest):
         model.fit(z, target.ravel())
         prediction = np.asarray(model.predict(z), dtype=np.float64).reshape(-1)
         return np.asarray(target.ravel() - prediction, dtype=np.float64)
+
+
+def _checked_residual(
+    residual: npt.NDArray[np.float64], target: npt.NDArray[np.float64], endpoint: str
+) -> npt.NDArray[np.float64]:
+    """Check residual variation and rescale without changing the GCM statistic."""
+    if not np.all(np.isfinite(residual)) or not np.all(np.isfinite(target)):
+        raise ValueError(f"GCM endpoint {endpoint} and its residuals must be finite")
+    target_scale = float(np.max(np.abs(target - np.mean(target))))
+    if target_scale == 0.0:
+        raise ValueError(f"GCM endpoint {endpoint} is constant; no valid p-value")
+    residual_scale = float(np.max(np.abs(residual)))
+    if residual_scale <= _DEGENERACY_RTOL * target_scale:
+        raise ValueError(
+            f"GCM endpoint {endpoint} has zero or numerically degenerate residual variance; "
+            "the in-sample learner may interpolate the training targets. "
+            "Use a less flexible learner that leaves residual variation; no valid p-value"
+        )
+    scaled = residual / residual_scale
+    if float(np.var(scaled)) <= _DEGENERACY_RTOL**2:
+        raise ValueError(
+            f"GCM endpoint {endpoint} has zero or numerically degenerate residual variance; "
+            "no valid p-value"
+        )
+    return np.asarray(scaled, dtype=np.float64)

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-20
+
+Correctness and inference safeguards from the pre-release audit (API-179 through
+API-182). No new model families or hosted capabilities are added.
+
+### Fixed
+- Fitted CATE predictors reuse their training category vocabulary. Reordering
+  categorical metadata no longer swaps predictions; unknown categories and
+  incompatible prediction schemas fail explicitly.
+- `estimate_effect(strategy="t_learner")` selects separate treatment-arm models,
+  consistently with `cate(method="t_learner")`. Contradictory alias settings fail.
+- GCM refuses constant endpoints, interpolating nuisance fits and degenerate
+  residual products rather than returning a misleading independence p-value.
+- Failed cross-fitted heterogeneity rankings no longer fall back to in-sample
+  rankings for inferential summaries or CATE model selection.
+  DML has no honest out-of-fold ranking proxy, so its GATES, CLAN, RATE and
+  calibration summaries now refuse too; BLP and descriptive effects remain available.
+
+### Changed
+- Frequentist AIPW uses cross-fitting by default. Explicit in-sample mode remains
+  available; Bayesian nuisance fits retain their documented in-sample posterior
+  path. Results report the resolved mode and propensity diagnostics.
+- Poor estimated overlap triggers diagnostics and warnings; severely degenerate
+  propensity fits fail by default. An explicit override does not certify valid
+  inference, and no rows are silently trimmed.
+- Generic instrumental-variable estimates are labeled `linear_iv`. A binary
+  complier `late` interpretation requires explicit assumptions and the supported
+  treatment/instrument configuration. Scalar results retain identification.
+
+### Migration
+
+Point estimates and intervals can change because of corrected fitting and method
+selection. Set seeds explicitly when comparing runs. To request the old parametric
+AIPW recipe, use `mode="in_sample"`; this does not make arbitrary interpolating
+learners valid. Inspect overlap diagnostics rather than suppressing failures.
+Existing code that reads the IV target string must accept `linear_iv` for generic
+IV coefficients. See the effect-estimation and heterogeneous-effect guides for
+precise modes, assumptions and failure behavior.
+
 ## [0.3.0] - 2026-10-17
 
 To be released together with welt-client 0.14 (API-164): decoding with domain knowledge
@@ -943,7 +982,8 @@ inference, discovery, process, SCM, and forecast pillars.
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
 
-[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/ergodic-ai/ergodic/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ergodic-ai/ergodic/compare/v0.1.1...v0.2.0

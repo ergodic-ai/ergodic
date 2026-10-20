@@ -168,9 +168,10 @@ lo, hi = ate.interval()
 print(f"adjusted effect: ${ate.value:.2f}   CI [{lo:.1f}, {hi:.1f}]   truth ${tau.mean():.2f}")
 
 # %% [markdown]
-# The adjusted effect lands at 23.65 dollars, interval 22.4 to 24.9, right on the planted 23.39. The
-# confounding is gone, and the honest read of the average perk is now in front of us: it costs 25
-# and returns 23, so rolled out to everyone it loses a little money on every customer. A team that
+# The adjusted effect lands at 23.87 dollars, interval 22.4 to 25.3, close to the planted 23.39.
+# It costs 25 and returns about 24: the point estimate suggests a small average loss, but the
+# interval includes break-even. Under the graph assumptions, adjustment removes the measured
+# confounding; it does not prove the assumptions. A team that
 # stopped here would kill the program. That would be a mistake, and the reason is the second error.
 #
 # ## Predicted value is not movable value
@@ -345,7 +346,7 @@ print(f"real effect    : ${ref.estimand_value:.2f}")
 print(f"placebo (mean) : ${ref.refuted_value:.2f}   p = {ref.p_value:.3f}   passed: {ref.passed}")
 
 # %% [markdown]
-# Scrambled, the effect collapses to roughly zero, far from the real 23.65, and the placebo runs
+# Scrambled, the effect collapses to roughly zero, far from the real 23.87, and the placebo runs
 # almost never reach it. That rules out a leak firing on noise. It says nothing about an unmeasured
 # trait, some loyalty the columns don't capture, that pushes a customer toward both the perk and a
 # fat balance.

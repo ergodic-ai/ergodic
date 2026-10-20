@@ -124,10 +124,15 @@ heuristic except A*, and GES returns the mode's equivalence class as a CPDAG.
 
 ## Give GCM a learner
 
-`GCM` turns any regression model into a test. `learner=` takes an alias (`"ols"`,
+`GCM` uses a regression model to form a residual covariance test. `learner=` takes an alias (`"ols"`,
 `"knn"`) or any scikit-learn regressor, such as
 `RandomForestRegressor(min_samples_leaf=20)`. The default is the built-in
-nearest-neighbours regressor.
+nearest-neighbours regressor. Fits and residuals use the same rows. A learner
+that interpolates its training targets, such as an unrestricted decision tree,
+leaves no residual variation and raises `ValueError`. Constant endpoints and
+constant residual products also raise: GCM cannot form a valid p-value in these
+cases. Use a less flexible learner when a fit removes all residual variation.
+Nonzero residual variation alone does not establish a learner's calibration.
 
 Give the data in one place. Inside `discover`, build the test without data, as in
 step 5:

@@ -42,15 +42,23 @@ class Heterogeneity:
     """Tier-B heterogeneity characterization on shared doubly-robust scores.
 
     Carries the cross-fit :class:`~ergodic.inference._scores.DRScores` and the fitted
-    per-unit ``tau_hat``. The honesty register: the rankings and proxies are fixed
-    (computed cross-fit), so the orthogonal summaries below inherit valid inference
-    while the CATE point predictions themselves never carry a confidence interval.
+    per-unit ``tau_hat``. Ranking summaries require a cross-fit proxy.
+    Without one, they raise with the
+    cached failure diagnostic; BLP still uses the covariates and scores directly.
     """
 
     scores: DRScores
-    tau_hat: npt.NDArray[np.float64]
+    tau_hat: npt.NDArray[np.float64] | None
     treatment: str
     outcome: str
+
+    def _ranking(self) -> npt.NDArray[np.float64]:
+        if self.tau_hat is None:
+            detail = self.scores.ranking_error or "no cross-fit ranking was cached"
+            raise RuntimeError(
+                "ranking-based inference requires an out-of-fold CATE proxy; " + detail
+            )
+        return self.tau_hat
 
     def blp(self, *, level: float = 0.9) -> BLPResult:
         """Best Linear Projection of the CATE on the covariates (HC3 inference)."""
@@ -63,21 +71,21 @@ class Heterogeneity:
 
     def gates(self, *, n_groups: int = 5, level: float = 0.9) -> GATESResult:
         """Sorted Group ATEs across ``n_groups`` predicted-effect quantiles."""
-        return gates(self.scores.scores, self.tau_hat, n_groups=n_groups, level=level)
+        return gates(self.scores.scores, self._ranking(), n_groups=n_groups, level=level)
 
     def clan(self, *, n_groups: int = 5, level: float = 0.9) -> CLANResult:
         """Covariate-mean differences between the most- and least-affected groups."""
         return clan(
             self.scores.covariates,
             self.scores.covariate_names,
-            self.tau_hat,
+            self._ranking(),
             n_groups=n_groups,
             level=level,
         )
 
     def calibration_test(self) -> CalibrationResult:
         """The omnibus calibration / heterogeneity test (one-sided HTE p-value)."""
-        return calibration_test(self.scores.scores, self.tau_hat)
+        return calibration_test(self.scores.scores, self._ranking())
 
     def rate(
         self, metric: str = "autoc", *, n_boot: int = 200, random_state: int | None = None
@@ -85,7 +93,7 @@ class Heterogeneity:
         """The Rank-Weighted ATE of the ``tau_hat`` ranking: ``"autoc"`` or ``"qini"``."""
         return rate(
             self.scores.scores,
-            self.tau_hat,
+            self._ranking(),
             metric=metric,
             n_boot=n_boot,
             random_state=random_state,

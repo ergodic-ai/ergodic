@@ -55,6 +55,8 @@ class DRScores:
     ``mu1``, and ``propensity`` are the cross-fit out-of-fold nuisances, kept so the
     calibration and projection tools reuse them without refitting. ``treatment``,
     ``outcome``, and ``covariates`` carry the design back to the result.
+    ``ranking_error`` retains a failed cross-fit proxy diagnostic. Without
+    ``tau_hat``, covariate projections remain available but ranking summaries refuse.
     """
 
     scores: npt.NDArray[np.float64]
@@ -67,6 +69,7 @@ class DRScores:
     covariate_names: tuple[str, ...]
     tau_hat: npt.NDArray[np.float64] | None = None
     covariate_variables: tuple[str, ...] = ()
+    ranking_error: str | None = None
 
     def __post_init__(self) -> None:
         width = np.asarray(self.covariates).shape[1] if np.ndim(self.covariates) == 2 else 0
@@ -116,6 +119,7 @@ def _crossfit_nuisances(
     n_folds: int,
     clip: float,
     random_state: int | None,
+    raw_propensity: npt.NDArray[np.float64] | None = None,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Out-of-fold ``mu0``, ``mu1``, ``e``: outcome on ``[a, z]``, propensity on ``z``.
 
@@ -124,11 +128,19 @@ def _crossfit_nuisances(
     to keep the inverse weights finite.
     """
     n = a.shape[0]
+    if isinstance(n_folds, bool) or not isinstance(n_folds, int) or not 2 <= n_folds <= n:
+        raise ValueError("n_folds must be an integer in [2, n_rows]")
+    if not 0.0 < clip < 0.5:
+        raise ValueError("clip must be in (0, 0.5)")
+    if set(np.unique(a).tolist()) != {0.0, 1.0} or min(np.sum(a == 0), np.sum(a == 1)) < 2:
+        raise ValueError("cross-fitting needs at least two observations in each treatment arm")
     mu0 = np.empty(n, dtype=np.float64)
     mu1 = np.empty(n, dtype=np.float64)
     e = np.empty(n, dtype=np.float64)
     rng = np.random.default_rng(random_state)
     for test in _folds(n, n_folds, rng, stratify=a):
+        if test.size == 0:
+            continue
         train = _train_mask(n, test)
         design = np.hstack([a[train].reshape(-1, 1), z[train]])
         outcome = make_outcome().fit(design, y[train])
@@ -137,7 +149,12 @@ def _crossfit_nuisances(
         mu1[test] = _mean_predict(outcome, np.hstack([ones, z[test]]))
         mu0[test] = _mean_predict(outcome, np.hstack([zeros, z[test]]))
         propensity = make_propensity().fit(z[train], a[train])
-        e[test] = np.clip(_mean_predict(propensity, z[test]), clip, 1.0 - clip)
+        predicted = _mean_predict(propensity, z[test])
+        if not np.all(np.isfinite(predicted)) or np.any((predicted < 0) | (predicted > 1)):
+            raise ValueError("propensity predictions must be finite probabilities in [0, 1]")
+        if raw_propensity is not None:
+            raw_propensity[test] = predicted
+        e[test] = np.clip(predicted, clip, 1.0 - clip)
     return mu0, mu1, e
 
 

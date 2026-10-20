@@ -202,6 +202,9 @@ class DML(_AdjustmentBase):
             outcome=y,
             covariate_names=self._covariate_columns,
             covariate_variables=self._covariate_variables,
+            ranking_error=(
+                "DML assumes a homogeneous effect and supplies no out-of-fold CATE ranking"
+            ),
         )
 
 

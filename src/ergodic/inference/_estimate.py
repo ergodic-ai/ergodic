@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..identification import identify_effect
-from ._registry import cate_estimator_for, cate_kwargs_for, default_target, estimator_for
+from ._registry import cate_estimator_for, default_target, estimator_for, method_kwargs_for
 from .estimators._plugin import plugin_estimate
 
 if TYPE_CHECKING:
@@ -45,7 +45,8 @@ def estimate(
     ``treated`` names the treatment level that codes to 1 for a two-level
     treatment (else level order decides, with a warning when the levels are not
     0/1). Extra keyword arguments pass to the estimator (``per_arm``, ``scheme``,
-    ``clip``).
+    ``clip``). The names ``t_learner`` and ``s_learner`` require ``per_arm=True``
+    and ``per_arm=False`` respectively; a contradictory override raises.
     """
     if not identification.identifiable:
         raise ValueError(f"effect is not identifiable: {identification.estimand}")
@@ -64,8 +65,9 @@ def estimate(
             n_boot=n_boot,
         )
     estimator_cls = estimator_for(identification, strategy)
+    method_kwargs = method_kwargs_for(strategy, kwargs)
     estimator = estimator_cls(
-        learner, random_state=random_state, n_boot=n_boot, treated=treated, **kwargs
+        learner, random_state=random_state, n_boot=n_boot, treated=treated, **method_kwargs
     )
     estimator.fit(identification, data)
     chosen = target if target is not None else default_target(identification)
@@ -155,7 +157,7 @@ def cate(
 
     from ._registry import HasCate
 
-    method_kwargs = {**cate_kwargs_for(method), **kwargs}
+    method_kwargs = method_kwargs_for(method, kwargs)
     estimator = estimator_cls(
         learner, random_state=random_state, n_boot=n_boot, treated=treated, **method_kwargs
     )

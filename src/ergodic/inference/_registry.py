@@ -30,6 +30,9 @@ from .estimators import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from typing import Any
+
     from ..data import TabularData
     from ..identification import Identification
     from ._perunit import CATEResult
@@ -107,7 +110,7 @@ _BY_NAME: dict[str, type[CausalEstimator]] = {
 _DEFAULT_TARGET: dict[str, EffectTarget] = {
     ADJUSTMENT: EffectTarget.ATE,
     FRONTDOOR: EffectTarget.ATE,
-    IV: EffectTarget.LATE,
+    IV: EffectTarget.LINEAR_IV,
     NULL: EffectTarget.ATE,
 }
 
@@ -134,9 +137,9 @@ _CATE_BY_NAME: dict[str, type[CausalEstimator]] = {
     "causalforest": CausalForest,
 }
 
-# Extra constructor knobs a CATE method name implies (the S/T-learner split is one
+# Extra constructor knobs a method name implies (the S/T-learner split is one
 # class with a flag, so the name carries the flag).
-_CATE_KWARGS: dict[str, dict[str, object]] = {
+_METHOD_KWARGS: dict[str, dict[str, object]] = {
     "t_learner": {"per_arm": True},
     "s_learner": {"per_arm": False},
 }
@@ -148,12 +151,13 @@ _CATE_NEURAL = ("tarnet", "dragonnet", "cfr", "drnet")
 _CATE_FOUNDATION = ("causal_pfn", "causalfm", "causal_pfm")
 
 
-def cate_kwargs_for(strategy: str | None = None) -> dict[str, object]:
-    """The extra constructor kwargs a CATE method name implies (e.g. the T-learner flag)."""
-    name = (strategy or _CATE_DEFAULT).lower()
-    if name in ("auto", ""):
-        name = _CATE_DEFAULT
-    return dict(_CATE_KWARGS.get(name, {}))
+def method_kwargs_for(method: str | None, kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve named-method settings for both facades, rejecting contradictions."""
+    implied = _METHOD_KWARGS.get((method or "").lower(), {})
+    for key, value in implied.items():
+        if key in kwargs and kwargs[key] != value:
+            raise ValueError(f"method {method!r} requires {key}={value!r}; got {kwargs[key]!r}")
+    return {**implied, **kwargs}
 
 
 def cate_estimator_for(strategy: str | None = None) -> type[CausalEstimator]:

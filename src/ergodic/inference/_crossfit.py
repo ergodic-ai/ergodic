@@ -2,8 +2,8 @@
 """K-fold cross-fitting for the orthogonal estimators.
 
 Fit each nuisance on the other folds and predict on the held-out fold. The
-out-of-fold predictions remove the bias from fitting and predicting on the same
-rows, so a flexible learner keeps valid inference.
+out-of-fold predictions separate fitting from score evaluation. Valid inference
+still requires overlap, suitable nuisance convergence rates and sampling assumptions.
 """
 
 from __future__ import annotations

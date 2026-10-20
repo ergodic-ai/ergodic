@@ -219,7 +219,7 @@ def test_frontdoor_recovers_the_effect() -> None:
 def test_iv_recovers_the_effect_analytically() -> None:
     data, graph = _instrument()
     est = estimate_effect(graph, data, "A", "Y")
-    assert est.target is EffectTarget.LATE
+    assert est.target is EffectTarget.LINEAR_IV
     assert est.kind == "analytic"
     assert abs(est.value - 1.5) < 0.15
 

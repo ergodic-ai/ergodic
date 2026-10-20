@@ -72,7 +72,7 @@ for module, use in optional.items():
 ```
 
 ```output from="install_check.py" lines="1"
-ergodic 0.3.0 writes ergodic.graph/1
+ergodic 0.3.1 writes ergodic.graph/1
 ```
 
 - **Step 1.** The version, and `ergodic.graph/1`: the format `MixedGraph.to_dict()`

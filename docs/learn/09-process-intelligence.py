@@ -193,7 +193,7 @@ lo_d, hi_d = disc.interval()
 print(f"discovered graph: {disc.value:+.2f} h   95% CI [{lo_d:+.2f}, {hi_d:+.2f}]")
 
 # %% [markdown]
-# Both routes print +4.89 with an interval covering the planted five, a long way from the
+# Both routes print +4.87 with an interval covering the planted five, a long way from the
 # variant table's 10.2. They agree to the printed digit because both graphs close the same
 # back door, adjusting for complexity; the hand graph adjusts for workload too, which is
 # unrelated to the review decision here and moves nothing visible. Discovery found the

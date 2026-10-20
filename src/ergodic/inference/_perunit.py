@@ -301,8 +301,9 @@ class CATEResult(PerUnitEffect):
         Builds a :class:`~ergodic.inference.explain.Heterogeneity` record whose
         methods (``blp``, ``gates``, ``clan``, ``calibration_test``, ``rate``) all
         consume the cached cross-fit scores, the covariate design, and the fitted
-        per-unit ``tau_hat``. Needs the scores; raises when they were not cached
-        (an estimator that does not build them, or a result without them).
+        per-unit ``tau_hat``. Needs the scores; raises when they were not cached.
+        Without a cross-fit ranking, covariate BLP remains available, while
+        GATES, CLAN, RATE and calibration raise with the ranking failure.
         """
         from .explain import Heterogeneity
 
@@ -312,12 +313,9 @@ class CATEResult(PerUnitEffect):
                 "explainability needs the cross-fit AIPW signal (the cate() facade "
                 "and the doubly-robust meta-learners cache it)"
             )
-        # the out-of-fold proxy ranking when available (the honesty recipe: the
-        # ranking is fixed on data not used for the summary), else the in-sample fit
-        tau_hat = self._scores.tau_hat if self._scores.tau_hat is not None else self.values
         return Heterogeneity(
             scores=self._scores,
-            tau_hat=np.asarray(tau_hat, dtype=np.float64),
+            tau_hat=self._scores.tau_hat,
             treatment=self.treatment,
             outcome=self.outcome,
         )

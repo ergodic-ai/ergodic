@@ -101,6 +101,9 @@ Demirer, Duflo and Fernández-Val, 2025; Yadlowsky and others, 2024).
 `method=` picks the learner. The default `"dr_learner"` is doubly robust. Other
 names: `"r_learner"`, `"x_learner"`, `"t_learner"`, `"s_learner"`, `"dml"` and
 `"causal_forest"`. `learner=` fills the nuisance models, as in `estimate_effect`.
+The same S/T names work with `estimate_effect(strategy=...)`: `t_learner` fits
+separate outcome models for each arm, and `s_learner` fits one pooled model.
+Passing a contradictory `per_arm=` flag raises an error in either facade.
 
 - The uncertainty depends on the method. The DR-learner with its default linear
   final model has analytic standard errors. `"causal_forest"` (Athey, Tibshirani
@@ -126,6 +129,17 @@ names: `"r_learner"`, `"x_learner"`, `"t_learner"`, `"s_learner"`, `"dml"` and
 - `explain()` describes the units the model was fit on. To score new rows, fit an
   estimator such as `DRLearner` with `fit(identification, data)`, then call its
   `cate(new_rows)`. That result has no scores, so its `explain()` raises.
+- New rows use the covariate types and category vocabulary saved during `fit`.
+  Column order and categorical metadata order can change, and a batch can omit
+  known category levels. Unknown values, missing required columns, changed
+  covariate types and missing covariate values raise an error. Treatment and
+  outcome columns are unnecessary when scoring new rows.
+- If a fold fails while building the out-of-fold effect proxy, `explain().blp()`
+  still projects the cross-fit scores on covariates. GATES, CLAN, RATE and calibration
+  refuse to return intervals or p-values and report the ranking failure. They
+  never substitute the fitted in-sample effects. `select_cate` also refuses a
+  candidate without an out-of-fold proxy. DML supplies constant effects with no
+  out-of-fold CATE ranking, so it also refuses these summaries while retaining BLP.
 - `effects.ate()` returns the average effect. With the DR-learner it is the mean of
   the doubly robust scores, whose standard error is valid (the per-unit standard
   errors share one fitted model, so they are never combined as if independent); for
