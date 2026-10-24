@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linear and GCM use `erfc` for normal tails: e.g. z=9 now gives approximately
   2.26e-19 instead of zero. Values below binary64 range still underflow (z=40);
   they are not floored or presented as accurately representable probabilities.
+  PCMCI can change its test count: the documented time-series fixture retains
+  all five links, while its unconstrained CI queries change from 49 to 47
+  (the knowledge-constrained run remains at 37).
 - `GraphSamples.top(k)` groups numerical weight ties at relative tolerance 1e-12,
   then log-target ties at absolute tolerance 1e-9, anchored at each group's largest
   value, and sorts final ties by named directed-edge tuples. Weights are unchanged.
