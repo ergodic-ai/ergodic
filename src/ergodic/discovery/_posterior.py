@@ -218,9 +218,47 @@ class GraphSamples:
         return _to_dag(self.variables, self.adjacency[index])
 
     def top(self, k: int = 5) -> list[tuple[MixedGraph, float]]:
-        """The ``k`` heaviest DAGs and their weights, heaviest first (ties by log target)."""
-        order = np.lexsort((-self.log_targets, -self.weights))[:k]
-        return [(self.graph(int(i)), float(self.weights[i])) for i in order]
+        """The ``k`` heaviest DAGs, with canonical ordering for numerical ties.
+
+        Weight ties span at most 1e-12 times their group's largest weight.
+        Within each weight group, log-target ties span at most 1e-9 (absolute).
+        Each group is anchored at its largest value, avoiding nontransitive
+        pairwise approximate comparisons. Final ties sort by the tuple of named
+        directed edges, independent of variable or storage order. Returned
+        weights are unchanged; sampled frequencies outside tolerance stay ranked.
+        """
+
+        def graph_key(i: int) -> tuple[tuple[str, str], ...]:
+            sources, targets = np.nonzero(self.adjacency[i])
+            return tuple(
+                sorted(
+                    (self.variables[s], self.variables[t])
+                    for s, t in zip(sources, targets, strict=True)
+                )
+            )
+
+        remaining = sorted(range(len(self.weights)), key=lambda i: -float(self.weights[i]))
+        order: list[int] = []
+        start = 0
+        while start < len(remaining):
+            anchor = float(self.weights[remaining[start]])
+            end = start + 1
+            while end < len(remaining) and anchor - self.weights[remaining[end]] <= 1e-12 * anchor:
+                end += 1
+            group = sorted(remaining[start:end], key=lambda i: -float(self.log_targets[i]))
+            log_start = 0
+            while log_start < len(group):
+                log_anchor = float(self.log_targets[group[log_start]])
+                log_end = log_start + 1
+                while log_end < len(group):
+                    value = float(self.log_targets[group[log_end]])
+                    if value != log_anchor and log_anchor - value > 1e-9:
+                        break
+                    log_end += 1
+                order.extend(sorted(group[log_start:log_end], key=graph_key))
+                log_start = log_end
+            start = end
+        return [(self.graph(i), float(self.weights[i])) for i in order[:k]]
 
     @property
     def best_graph(self) -> MixedGraph:

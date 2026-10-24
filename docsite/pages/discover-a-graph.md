@@ -150,3 +150,17 @@ decodes the model's edge probabilities locally. See
 - [Python reference](reference-discovery.md): every method and its options.
 
 </div>
+
+!!! caution "GCM learner calibration"
+    The default GCM learner remains KNN; it is not a generally calibrated CI test.
+    A paired 200-seed direct-CI diagnostic at alpha 0.05 found null rejection rates
+    of 9.5%/7.5% (linear), 12%/10% (quadratic), and 10%/9% (sine), at n=200/1000.
+    OLS gave 7.5%/5%, 100%/100%, and 99%/100%, respectively: replacing KNN with
+    OLS would fail badly for these nonlinear conditional means. Neither qualified
+    across all cells of the registered 2–8% investigation band, so the default
+    is unchanged. All cells used 200 trials with zero refusals; 95% Wilson intervals
+    for the KNN rates span roughly 4.6–17.2%. These are direct-CI results, distinct
+    from the earlier ~30% rejection of true graphs by Fisher's combined test.
+    Learner choice must match the conditional mean; these diagnostics do not
+    establish calibration for arbitrary data or guarantee detection of dependence.
+    The reproducible protocol is in `scripts/audits/qualify_gcm.py`.

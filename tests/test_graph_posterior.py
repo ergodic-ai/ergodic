@@ -371,3 +371,46 @@ def test_exact_refuses_where_it_does_not_apply() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert graph_posterior(probs, max_exact=6, samples=4000, seed=0).method == "mcmc"
+
+
+def test_top_numerical_ties_are_canonical_across_storage_and_variable_order() -> None:
+    from dataclasses import replace
+    from itertools import permutations
+
+    base = graph_posterior(_probs(3, 0))
+    adjacency = np.zeros((3, 3, 3), dtype=bool)
+    adjacency[0, 0, 1] = True  # A -> B
+    adjacency[1, 1, 0] = True  # B -> A
+    adjacency[2, 0, 2] = True  # A -> C
+    expected = [dag(["A -> B"], nodes=NAMES[:3]), dag(["A -> C"], nodes=NAMES[:3])]
+    for order in permutations(range(3)):
+        for variables in ((0, 1, 2), (2, 0, 1)):
+            for sign in (-1, 1):
+                weights = np.array([1 / 3, 1 / 3 + sign * 1e-14, 1 / 3 - sign * 1e-14])
+                logs = np.array([-2.0, -2.0 + sign * 1e-13, -2.0 - sign * 1e-13])
+                samples = replace(
+                    base,
+                    variables=tuple(NAMES[i] for i in variables),
+                    adjacency=adjacency[list(order)][:, list(variables)][:, :, list(variables)],
+                    weights=weights[list(order)],
+                    log_targets=logs[list(order)],
+                )
+                result = samples.top(2)
+                assert [g for g, _ in result] == expected
+                assert [w for _, w in result] == [weights[0], weights[2]]
+
+
+def test_top_preserves_distinct_weights_and_log_targets() -> None:
+    from dataclasses import replace
+
+    base = graph_posterior(_probs(3, 0))
+    weights = np.arange(1, len(base.weights) + 1, dtype=float)
+    weights /= weights.sum()
+    samples = replace(base, weights=weights)
+    assert samples.top(1)[0] == (samples.graph(len(weights) - 1), weights[-1])
+    equal = np.ones(len(weights)) / len(weights)
+    logs = np.arange(len(weights), dtype=float)
+    samples = replace(base, weights=equal, log_targets=logs)
+    assert samples.top(1)[0][0] == samples.graph(len(weights) - 1)
+    assert samples.top(0) == []
+    assert len(samples.top(len(weights) + 1)) == len(weights)

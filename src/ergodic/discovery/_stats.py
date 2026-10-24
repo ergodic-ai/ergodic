@@ -19,6 +19,15 @@ def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
+def _norm_two_sided(stat: float) -> float:
+    """Two-sided normal tail without CDF cancellation.
+
+    Tails below binary64's representable range still round to zero (e.g. |z|=40).
+    Unlike 2*(1-cdf), representable tails beyond |z|=8.3 remain positive.
+    """
+    return math.erfc(abs(stat) / math.sqrt(2.0))
+
+
 def _lower_series(s: float, x: float) -> float:
     """Regularized lower incomplete gamma P(s, x) by series; needs x < s + 1."""
     if x <= 0.0:

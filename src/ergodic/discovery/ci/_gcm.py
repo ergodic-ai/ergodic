@@ -28,7 +28,7 @@ import numpy as np
 from ...inference import KNNRegressor
 from ...inference._learner import _as_learner, _fresh
 from .._ci import CITest
-from .._stats import _norm_cdf
+from .._stats import _norm_two_sided
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -51,6 +51,11 @@ class GCM(CITest):
     a plain covariance test. Constant endpoints, exact or numerically exact
     fits, and constant residual products raise ``ValueError``: the normal
     reference statistic is undefined, so no independence decision is returned.
+    The default KNN learner is not generally calibrated: in a 200-seed
+    direct-CI diagnostic it rejected 7.5-12% of nulls at nominal 5% across
+    linear, quadratic and sine conditional means (n=200/1000). OLS was not
+    a safe general replacement. See the discovery guide for the protocol.
+
     An in-sample learner must leave nondegenerate residual variation; this
     check alone does not establish calibration for an arbitrary learner.
 
@@ -63,6 +68,7 @@ class GCM(CITest):
             first use.
     """
 
+    # Two-sided tails use erfc; below binary64 range (e.g. |z|=40), p is zero.
     name: ClassVar[str] = "gcm"
     needs: ClassVar[str] = "numeric"
 
@@ -107,7 +113,7 @@ class GCM(CITest):
                 "GCM residual product has zero or numerically degenerate variance; no valid p-value"
             )
         stat = math.sqrt(n) * mean_r / math.sqrt(var_r)
-        p = 2.0 * (1.0 - _norm_cdf(abs(stat)))
+        p = _norm_two_sided(stat)
         return stat, p, None
 
     # -- internals -----------------------------------------------------------

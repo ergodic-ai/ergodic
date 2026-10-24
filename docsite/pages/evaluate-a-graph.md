@@ -525,3 +525,10 @@ Nothing touches numpy's global random state, and the same `seed` gives the same 
 - [Python reference](reference-discovery.md): `graph_posterior`, `evaluate_graph`, `GraphSamples`.
 
 </div>
+
+`GraphSamples.top(k)` lists the heaviest DAGs first. Weight ties within 1e-12
+relative to the group's maximum are ordered by log target; log-target ties
+within absolute 1e-9 are ordered by sorted named directed edges. Groups are
+anchored at their maximum, not chained through approximate pairwise equality.
+This removes floating-point noise from equivalent-graph ordering without
+rounding returned masses or changing the posterior.
