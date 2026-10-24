@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-24
+
 ### Fixed
 - Linear and GCM use `erfc` for normal tails: e.g. z=9 now gives approximately
   2.26e-19 instead of zero. Values below binary64 range still underflow (z=40);
