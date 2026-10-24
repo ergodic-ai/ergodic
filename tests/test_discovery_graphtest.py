@@ -454,9 +454,9 @@ def test_zero_dof_claims_are_vacuous_and_left_out_of_k() -> None:
     assert len(result.to_dict()["vacuous"]) == 2
 
 
-def test_claims_that_underflow_to_zero_rank_by_their_statistic() -> None:
+@pytest.mark.parametrize("n", [1500, 40000])
+def test_strong_claims_rank_by_strength_even_when_tails_underflow(n: int) -> None:
     rng = np.random.default_rng(6)
-    n = 1500
     a = rng.normal(size=n)
     b = a + 2.0 * rng.normal(size=n)
     c = b + 3.0 * rng.normal(size=n)
@@ -464,8 +464,14 @@ def test_claims_that_underflow_to_zero_rank_by_their_statistic() -> None:
     result = test_graph(dag(["a -> b"], nodes=["c"]), tabular({"a": a, "b": b, "c": c}))
     p = [i.p_value for i in result.implications]
     stats = [abs(i.statistic) for i in result.implications]
-    # Both |z| are above 8.3, where Linear's p-value underflows to exactly 0.
-    assert p == [0.0, 0.0]
+    # Representable tails survive beyond z=8.3; true binary64 underflow still
+    # needs the graph-test statistic tie-break (above z=40 in the larger world).
+    if n == 1500:
+        assert all(value > 0.0 for value in p)
+        assert p == sorted(p)
+    else:
+        assert min(stats) > 40.0
+        assert p == [0.0, 0.0]
     assert min(stats) > 9.0
     assert stats == sorted(stats, reverse=True)
     top = result.implications[0]

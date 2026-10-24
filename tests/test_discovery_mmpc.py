@@ -182,3 +182,32 @@ def test_diagnostics_count_the_phases() -> None:
     assert d["n_backward_removed"] >= 0.0
     assert result.alpha == 0.05
     assert result.n == data.n_rows
+
+
+def test_mmpc_is_invariant_to_every_column_permutation() -> None:
+    from itertools import permutations
+
+    rng = np.random.default_rng(42)
+    a, ex, ey, ez = rng.normal(size=(4, 500))
+    frame = pd.DataFrame({"A": a, "B": a + ex, "C": a + ey, "D": a + ex + ez})
+    expected = MMPC().fit(tabular(frame)).graph
+    for columns in permutations(frame.columns):
+        assert MMPC().fit(tabular(frame[list(columns)])).graph == expected
+
+
+@pytest.mark.parametrize("small_tail", [0.0, 1e-30, 1e-16])
+def test_forward_numerical_ties_use_names_without_rounding_alpha(small_tail: float) -> None:
+    from ergodic.discovery._ci import CIResult, CITest
+    from ergodic.discovery.algorithms._mmpc import _parents_children
+
+    class TailOracle(CITest):
+        def test(self, x: str, y: str, given: object = ()) -> CIResult:
+            # A and B explain the same signal; whichever enters first excludes the other.
+            p = 1.0 if given else small_tail if x == "A" else 0.0
+            return CIResult(9.0, p)
+
+    result, _, _ = _parents_children(TailOracle(), "T", ["B", "A"], frozenset(), alpha=0.05, cap=3)
+    assert result == {"A"}
+    # A genuinely above alpha must not enter just because it is within tie tolerance.
+    result, _, _ = _parents_children(TailOracle(), "T", ["B", "A"], frozenset(), alpha=1e-32, cap=3)
+    assert result == ({"A"} if small_tail == 0.0 else {"B"})

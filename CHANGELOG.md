@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-24
+
+### Fixed
+- Linear and GCM use `erfc` for normal tails: e.g. z=9 now gives approximately
+  2.26e-19 instead of zero. Values below binary64 range still underflow (z=40);
+  they are not floored or presented as accurately representable probabilities.
+  PCMCI can change its test count: the documented time-series fixture retains
+  all five links, while its unconstrained CI queries change from 49 to 47
+  (the knowledge-constrained run remains at 37).
+- `GraphSamples.top(k)` groups numerical weight ties at relative tolerance 1e-12,
+  then log-target ties at absolute tolerance 1e-9, anchored at each group's largest
+  value, and sorts final ties by named directed-edge tuples. Weights are unchanged.
+- MMPC forward associations within absolute p-value distance 1e-15 now tie by
+  variable name; alpha decisions keep unrounded p-values. This stabilizes greedy
+  admission when tiny tails split, without claiming invariance to variable renaming.
+  On 150 registered seven-node worlds, the tie change alone changed no skeletons
+  (137 total skeleton errors before and after); PC/FCI/RFCI were also unchanged.
+
+### Documentation
+- GCM's default KNN remains uncalibrated. A registered direct-CI study (200 paired
+  seeds per family/sample size) found 7.5–12% null rejection at nominal 5%.
+  OLS failed on nonlinear conditional means, so neither qualified as a general
+  default. Discover and graph-testing guides now disclose the measured limits.
+
 ## [0.3.1] - 2026-10-20
 
 Correctness and inference safeguards from the pre-release audit (API-179 through
@@ -982,7 +1006,8 @@ inference, discovery, process, SCM, and forecast pillars.
   silently with single-graph semantics; it now dispatches on the face, and
   mixed graphs raise instead of being misread.
 
-[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/ergodic-ai/ergodic/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/ergodic-ai/ergodic/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/ergodic-ai/ergodic/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ergodic-ai/ergodic/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ergodic-ai/ergodic/compare/v0.2.0...v0.2.1

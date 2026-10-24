@@ -36,7 +36,7 @@ concurrency:
   group: docs-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
-  UV_VERSION: "0.9.5"
+  UV_VERSION: "0.12.8"
   # CI also runs page programs marked slow (make check skips them locally).
   DOCS_SLOW: "1"
   # Set only for a release or dispatch run; empty for check-only builds.

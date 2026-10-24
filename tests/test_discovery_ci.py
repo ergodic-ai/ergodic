@@ -457,3 +457,38 @@ def test_gcm_statistic_does_not_depend_on_measurement_units(given: list[str], sc
 def test_gcm_refuses_a_single_observation() -> None:
     with pytest.raises(ValueError, match="at least two complete observations"):
         GCM(tabular({"X": [1.0], "Y": [2.0]})).test("X", "Y")
+
+
+@pytest.mark.parametrize(
+    ("z", "expected"),
+    [
+        (8.0, 1.2441921148543568e-15),
+        (9.0, 2.2571768119076845e-19),
+        (20.0, 5.507248237212467e-89),
+        (30.0, 9.813427854296374e-198),
+        (38.0, 5.7708567e-316),
+        (40.0, 0.0),
+    ],
+)
+def test_normal_tail_preserves_representable_extreme_probabilities(
+    z: float, expected: float
+) -> None:
+    from ergodic.discovery._stats import _norm_two_sided
+
+    for sign in (-1, 1):
+        p = _norm_two_sided(sign * z)
+        assert p == pytest.approx(expected, rel=1e-7, abs=0.0)
+        assert (p > 0) == (z < 40)
+
+
+@pytest.mark.parametrize("test_class", [Linear, GCM])
+def test_ci_consumers_use_survival_tail_for_strong_signal(test_class: type) -> None:
+    import math
+
+    rng = np.random.default_rng(14)
+    x = rng.normal(size=400)
+    y = x + rng.normal(size=400)
+    stat, p, _ = test_class().statistic(x[:, None], y[:, None], np.empty((400, 0)))
+    assert 8.5 < abs(stat) < 38
+    assert p > 0.0
+    assert p == pytest.approx(math.erfc(abs(stat) / math.sqrt(2)), rel=1e-14, abs=0.0)

@@ -210,3 +210,23 @@ own variables, and they hold in the margin over those variables.
 - [Python reference](reference-discovery.md): `test_graph` and `GraphTest` in full.
 
 </div>
+
+!!! caution "GCM learner calibration"
+    The default GCM learner remains KNN; it is not a generally calibrated CI test.
+    A paired 200-seed direct-CI diagnostic at alpha 0.05 found null rejection rates
+    of 9.5%/7.5% (linear), 12%/10% (quadratic), and 10%/9% (sine), at n=200/1000.
+    OLS gave 7.5%/5%, 100%/100%, and 99%/100%, respectively: replacing KNN with
+    OLS would fail badly for these nonlinear conditional means. Neither qualified
+    across all cells of the registered 2–8% investigation band, so the default
+    is unchanged. All cells used 200 trials with zero refusals; 95% Wilson intervals
+    for the KNN rates span roughly 4.6–17.2%. These are direct-CI results, distinct
+    from the earlier ~30% rejection of true graphs by Fisher's combined test.
+    Learner choice must match the conditional mean; these diagnostics do not
+    establish calibration for arbitrary data or guarantee detection of dependence.
+    The reproducible protocol is in `scripts/audits/qualify_gcm.py`.
+
+Linear and GCM compute two-sided normal tails with `erfc`, so strong statistics
+such as z=9 retain their nonzero p-values (about 2.26e-19). Tails below binary64's
+representable range still become zero, for example z=40. Graph-test aggregation
+retains its existing safeguards for zero tails; no finite float can represent
+those smaller probabilities accurately.

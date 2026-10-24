@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 
 from .._ci import CITest
-from .._stats import _norm_cdf
+from .._stats import _norm_two_sided
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -40,9 +40,11 @@ class Linear(CITest):
     Residualizes x and y on ``[1, z]``, computes the correlation ``r`` of the
     residuals, and reports ``sqrt(n - dz - 3) * atanh(r)`` against the
     standard normal, two-sided. The sign of ``r`` survives in the statistic;
-    the p-value does not depend on it.
+    the p-value does not depend on it. Tails use erfc to avoid CDF subtraction
+    cancellation; below binary64 range (e.g. |z|=40), p still becomes zero.
     """
 
+    # Two-sided tails use erfc; below binary64 range (e.g. |z|=40), p is zero.
     name: ClassVar[str] = "linear"
     needs: ClassVar[str] = "numeric"
 
@@ -69,5 +71,5 @@ class Linear(CITest):
         r = float(rx @ ry) / denom if denom > 0.0 else 0.0
         r = min(_CLIP, max(-_CLIP, r))
         stat = math.sqrt(n - dz - 3) * math.atanh(r)
-        p = 2.0 * (1.0 - _norm_cdf(abs(stat)))
+        p = _norm_two_sided(stat)
         return stat, p, None

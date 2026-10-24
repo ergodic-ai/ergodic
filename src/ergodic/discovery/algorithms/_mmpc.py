@@ -69,6 +69,11 @@ class MMPC:
     sinks) do not constrain an undirected adjacency and are left to the
     search that runs inside the support.
 
+    Forward associations within absolute p-value distance 1e-15 of the
+    strongest eligible candidate tie and are admitted by variable name. The
+    significance decision uses the unrounded p-value. This stabilizes numerical
+    tails, but does not make the greedy search invariant to variable renaming.
+
     ``fit(data, knowledge)`` returns a :class:`DiscoveryResult` whose graph
     holds one tail-tail edge per surviving pair, with the ``mixed`` face.
     """
@@ -191,7 +196,8 @@ def _parents_children(
     never tested, never removed. Each forward round recomputes every
     remaining candidate's worst-case p-value against the current CPC (the
     oracle caches, so revisited subsets cost a lookup) and admits the
-    smallest, ties broken by name, while it stays at or below ``alpha``.
+    smallest, numerical ties within 1e-15 broken by name, while it stays
+    at or below ``alpha``.
     The backward phase is the classic single sweep in sorted order: a
     member leaves when some subset of the current CPC without it tests
     independent, and later members see the shrunken set.
@@ -200,15 +206,13 @@ def _parents_children(
     pool = sorted(candidates)
     n_added = 0
     while pool:
-        best_p = float("inf")
-        best_x: str | None = None
-        for x in pool:
-            worst = _worst_p(oracle, x, target, cpc, alpha=alpha, cap=cap)
-            if worst < best_p:
-                best_p = worst
-                best_x = x
-        if best_x is None or best_p > alpha:
+        associations = [(x, _worst_p(oracle, x, target, cpc, alpha=alpha, cap=cap)) for x in pool]
+        eligible = [(x, p) for x, p in associations if p <= alpha]
+        if not eligible:
             break
+        best_p = min(p for _, p in eligible)
+        # Anchor ties at the minimum: pairwise isclose comparisons are not transitive.
+        best_x = min(x for x, p in eligible if p - best_p <= 1e-15)
         cpc.add(best_x)
         pool.remove(best_x)
         n_added += 1
