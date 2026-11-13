@@ -46,11 +46,15 @@ class TreatmentDensity(Protocol):
     Objects must support fresh cloning (get_params or deepcopy), as learners do.
     """
 
-    def fit(self, X: npt.NDArray[np.float64], treatment: npt.NDArray[np.float64]) -> Any: ...
+    def fit(self, X: npt.NDArray[np.float64], treatment: npt.NDArray[np.float64]) -> Any:
+        """Fit conditional treatment density on training covariates and doses."""
+        ...
 
     def pdf(
         self, X: npt.NDArray[np.float64], treatment: npt.NDArray[np.float64]
-    ) -> npt.NDArray[np.float64]: ...
+    ) -> npt.NDArray[np.float64]:
+        """Return one conditional density per row, in inverse treatment units."""
+        ...
 
 
 class GaussianTreatmentDensity:
@@ -66,9 +70,11 @@ class GaussianTreatmentDensity:
         self._scale = 0.0
 
     def get_params(self, deep: bool = False) -> dict[str, Any]:
+        """Return constructor parameters for fresh sklearn-compatible cloning."""
         return {}
 
     def fit(self, X: npt.NDArray[np.float64], treatment: npt.NDArray[np.float64]) -> Self:
+        """Fit the OLS mean and residual Gaussian scale on a training fold."""
         self._model = None
         model = OLS().fit(X, treatment)
         residual = treatment - model.predict(X)
@@ -85,6 +91,7 @@ class GaussianTreatmentDensity:
     def pdf(
         self, X: npt.NDArray[np.float64], treatment: npt.NDArray[np.float64]
     ) -> npt.NDArray[np.float64]:
+        """Evaluate the fitted Gaussian density at each row's requested dose."""
         if self._model is None:
             raise RuntimeError("treatment density is not fitted")
         residual = (treatment - self._model.predict(X)) / self._scale
