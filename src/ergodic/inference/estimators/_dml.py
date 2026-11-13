@@ -195,7 +195,7 @@ class DML(_AdjustmentBase):
             treatment_value=value,
             treatment=self._treatment_name,
             outcome=self._outcome_name,
-            protocol="partially-linear-contrast-v1",
+            protocol="partially-linear-contrast_v1",
         )
 
     def effects(self, data: TabularData, *, baseline: float, value: float) -> DoseEffects:

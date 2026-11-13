@@ -296,7 +296,7 @@ class ContinuousDR(_AdjustmentBase):
             treatment_value=value,
             treatment=self._treatment_name,
             outcome=self._outcome_name,
-            protocol="continuous-dr-epanechnikov-v1",
+            protocol="continuous-dr-epanechnikov_v1",
         )
 
     def _query_design(self, data: TabularData) -> npt.NDArray[np.float64]:
@@ -368,7 +368,7 @@ class ContinuousDR(_AdjustmentBase):
             identification=self._identification,
             baseline=baseline,
             treatment_value=value,
-            protocol="continuous-dr-epanechnikov-v1",
+            protocol="continuous-dr-epanechnikov_v1",
         )
 
     def effect(self, *, target: EffectTarget | str | None = None) -> DoseContrast:
