@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ergodic.decision.decide`: graph-identified automatic per-variable contrasts,
+  multiarm doubly robust estimation and ranked population/query-row effects for
+  continuous, binary and multicategory treatments and targets.
 - Explicit numerical treatment contrasts through `estimate_contrast`,
   `DML.contrast` and `DML.effects`, without changing the existing unit-slope API.
 - `ContinuousDR`: cross-fitted kernel dose contrasts, pluggable treatment density,

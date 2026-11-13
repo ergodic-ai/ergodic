@@ -123,6 +123,7 @@ label = "Effects"
 pages = [
     ["Estimate an average effect", "estimate-average-effect"],
     ["Estimate effects of numerical changes", "continuous-treatments"],
+    ["Rank interventions", "decisions"],
     ["Refute an estimate", "refute-an-estimate"],
     ["Estimate heterogeneous effects", "heterogeneous-effects"],
     ["Target a policy", "target-a-policy"],
@@ -236,6 +237,7 @@ modules = [
     ["identification", "Identification"],
     ["discovery", "Discovery"],
     ["inference", "Effect estimation"],
+    ["decision", "Ranked decisions"],
     ["process", "Process intelligence"],
     ["scm", "Structural causal models"],
     ["forecast", "Forecasting"],
