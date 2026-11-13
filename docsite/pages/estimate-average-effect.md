@@ -166,3 +166,5 @@ instruments; weak-IV robust intervals are not implemented here.
 - [Python reference](reference-inference.md): every option of `estimate_effect`.
 
 </div>
+
+For explicit numerical changes, see [effects of numerical changes](continuous-treatments.md).

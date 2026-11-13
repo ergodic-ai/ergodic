@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from ._continuous import ContinuousDR, GaussianTreatmentDensity, TreatmentDensity
 from ._did import DiDEffect, EventTimeEffect, GroupTimeEffect, did, event_study
 from ._dml import DML, DRLearner
 from ._doubly_robust import AIPW
@@ -24,9 +25,11 @@ __all__ = [
     "IPW",
     "PLIV",
     "CausalForest",
+    "ContinuousDR",
     "DRLearner",
     "DiDEffect",
     "EventTimeEffect",
+    "GaussianTreatmentDensity",
     "GroupTimeEffect",
     "ITSEffect",
     "MediationEstimate",
@@ -35,6 +38,7 @@ __all__ = [
     "RLearner",
     "Stratification",
     "SyntheticControlEffect",
+    "TreatmentDensity",
     "TwoStageLeastSquares",
     "TwoStageRegression",
     "VariableImportance",

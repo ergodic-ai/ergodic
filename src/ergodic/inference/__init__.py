@@ -27,8 +27,9 @@ record and returns the same :class:`EffectEstimate` surface.
 
 from __future__ import annotations
 
+from ._contrast import DoseContrast, DoseEffects
 from ._design import Design
-from ._estimate import cate, estimate, estimate_effect
+from ._estimate import cate, estimate, estimate_contrast, estimate_effect
 from ._estimator import CausalEstimator, Slot, Task
 from ._learner import BayesianLearner, Learner
 from ._perunit import CATEResult, ITEResult, PerUnitEffect
@@ -44,9 +45,11 @@ from .estimators import (
     IPW,
     PLIV,
     CausalForest,
+    ContinuousDR,
     DiDEffect,
     DRLearner,
     EventTimeEffect,
+    GaussianTreatmentDensity,
     GroupTimeEffect,
     ITSEffect,
     MediationEstimate,
@@ -55,6 +58,7 @@ from .estimators import (
     RLearner,
     Stratification,
     SyntheticControlEffect,
+    TreatmentDensity,
     TwoStageLeastSquares,
     TwoStageRegression,
     VariableImportance,
@@ -86,13 +90,17 @@ __all__ = [
     "CATEResult",
     "CausalEstimator",
     "CausalForest",
+    "ContinuousDR",
     "DRLearner",
     "DRScores",
     "Design",
     "DiDEffect",
+    "DoseContrast",
+    "DoseEffects",
     "EffectEstimate",
     "EffectTarget",
     "EventTimeEffect",
+    "GaussianTreatmentDensity",
     "GroupTimeEffect",
     "Heterogeneity",
     "ITEResult",
@@ -116,6 +124,7 @@ __all__ = [
     "Stratification",
     "SyntheticControlEffect",
     "Task",
+    "TreatmentDensity",
     "TwoStageLeastSquares",
     "TwoStageRegression",
     "VariableImportance",
@@ -126,6 +135,7 @@ __all__ = [
     "did",
     "dr_scores",
     "estimate",
+    "estimate_contrast",
     "estimate_effect",
     "estimate_mediation",
     "event_study",
