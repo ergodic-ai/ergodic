@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from ..data import TabularData
     from ..graph import MixedGraph
     from ..identification import Identification
+    from ._contrast import DoseContrast
     from ._perunit import CATEResult
     from ._result import EffectEstimate
     from ._target import EffectTarget
@@ -163,3 +164,38 @@ def cate(
     )
     estimator.fit(identification, data)
     return cast("HasCate", estimator).cate(uncertainty=uncertainty)
+
+
+def estimate_contrast(
+    graph: MixedGraph,
+    data: TabularData,
+    treatment: str,
+    outcome: str,
+    *,
+    baseline: float,
+    value: float,
+    method: str,
+    learner: Any = None,
+    random_state: int | None = None,
+    **kwargs: Any,
+) -> DoseContrast:
+    """Identify and estimate one variable's explicit baseline-to-value effect.
+
+    ``method`` is ``partially_linear`` (homogeneous DML slope times dose change)
+    or ``continuous_dr`` (kernel DR point-dose contrast). It is explicit rather
+    than guessing a linearity assumption. Keyword options configure that method.
+    For repeated/new-row queries, fit DML or ContinuousDR directly and reuse it.
+    """
+    from .estimators import DML, ContinuousDR
+
+    classes = {"partially_linear": DML, "continuous_dr": ContinuousDR}
+    if method not in classes:
+        raise ValueError(f"unknown contrast method {method!r}; choose {sorted(classes)}")
+    identification = identify_effect(graph, treatment, outcome)
+    estimator: DML | ContinuousDR
+    if method == "partially_linear":
+        estimator = DML(learner, random_state=random_state, **kwargs)
+    else:
+        estimator = ContinuousDR(learner, random_state=random_state, **kwargs)
+    estimator.fit(identification, data)
+    return estimator.contrast(baseline=baseline, value=value)

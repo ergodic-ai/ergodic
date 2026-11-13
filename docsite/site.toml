@@ -122,6 +122,7 @@ pages = [
 label = "Effects"
 pages = [
     ["Estimate an average effect", "estimate-average-effect"],
+    ["Estimate effects of numerical changes", "continuous-treatments"],
     ["Refute an estimate", "refute-an-estimate"],
     ["Estimate heterogeneous effects", "heterogeneous-effects"],
     ["Target a policy", "target-a-policy"],

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Explicit numerical treatment contrasts through `estimate_contrast`,
+  `DML.contrast` and `DML.effects`, without changing the existing unit-slope API.
+- `ContinuousDR`: cross-fitted kernel dose contrasts, pluggable treatment density,
+  support diagnostics and cached query-row point estimates. The new continuous
+  treatment guide includes an executable example and the inference limitations.
+
+### Fixed
+- DML rejects non-finite inputs, invalid fold counts and absent residual treatment
+  variation. A failed refit cannot return stale estimates.
+
 ## [0.3.2] - 2026-10-24
 
 ### Fixed

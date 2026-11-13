@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .._contrast import DoseContrast, DoseEffects, _in_range, _levels
 from .._crossfit import _fit_predict, _folds, _train_mask
 from .._estimator import (
     Slot,
@@ -53,6 +54,9 @@ class DML(_AdjustmentBase):
         super().__init__(learners, **kwargs)
         self.n_folds = n_folds
         self._t_binary = False
+        self._contrast_treatment: npt.NDArray[np.float64] | None = None
+        self._dose_codes: dict[float, float] | None = None
+        self._outcome_categories: tuple[Any, ...] | None = None
         self._cache: (
             tuple[float, npt.NDArray[np.float64], npt.NDArray[np.float64], float] | None
         ) = None
@@ -66,11 +70,30 @@ class DML(_AdjustmentBase):
         _require_complete(data, {treatment, outcome, *covariates})
         self._covariates = tuple(sorted(covariates))
         self._covariate_columns, self._covariate_variables = _covariate_columns(data, covariates)
+        self._treatment_name, self._outcome_name = treatment, outcome
         a = self._treatment_vector(data, treatment, allow_continuous=True)
         y, y_binary = _outcome_vector(data, outcome)
         z = _covariate_matrix(data, covariates)
         self._t_binary = set(np.unique(a).tolist()) <= {0.0, 1.0}
+        self._outcome_categories = (
+            tuple(data.schema[outcome].categories or ())
+            if data.schema[outcome].is_discrete
+            else None
+        )
+        self._dose_codes = None
+        try:
+            self._contrast_treatment = np.asarray(data.column(treatment), dtype=np.float64)
+        except (TypeError, ValueError):
+            self._contrast_treatment = None
+        if self._contrast_treatment is not None and (
+            data.schema[treatment].is_discrete or self._treated is not None
+        ):
+            self._dose_codes = dict(zip(self._contrast_treatment.tolist(), a.tolist(), strict=True))
         arrays = {"A": a, "Y": y, "Z": z}
+        if any(not np.isfinite(arr).all() for arr in arrays.values()):
+            raise ValueError("dml needs finite treatment, outcome and covariates")
+        if len(np.unique(a)) < 2:
+            raise ValueError("dml needs treatment variation")
         diagnostics = {"n_covariates": float(z.shape[1]), "treatment_binary": float(self._t_binary)}
         return arrays, y_binary, diagnostics
 
@@ -101,16 +124,103 @@ class DML(_AdjustmentBase):
     ) -> tuple[float, npt.NDArray[np.float64], npt.NDArray[np.float64], float]:
         res_y, res_t = self._residuals(arrays, make)
         denom = float(np.sum(res_t * res_t))
-        if denom <= 0.0:
+        if not np.isfinite(res_y).all() or not np.isfinite(res_t).all():
+            raise ValueError("dml nuisance predictions must be finite")
+        if denom <= np.finfo(float).eps * max(
+            float(np.var(arrays["A"])), np.finfo(float).tiny
+        ) * len(res_t):
             raise ValueError("no treatment variation after residualizing")
         theta = float(np.sum(res_t * res_y) / denom)
         return theta, res_y, res_t, denom
 
     def fit(self, identification: Identification, data: TabularData) -> Self:
-        super().fit(identification, data)
-        state = self._state
-        self._cache = self._solve(state.arrays, state.make)
+        self._cache = None
+        self._fit_state = None
+        if (
+            isinstance(self.n_folds, bool)
+            or not isinstance(self.n_folds, int)
+            or not 2 <= self.n_folds <= data.n_rows
+        ):
+            raise ValueError("n_folds must be an integer between 2 and the number of rows")
+        if data.n_rows < 4:
+            raise ValueError("dml needs at least four context rows")
+        try:
+            super().fit(identification, data)
+            state = self._state
+            self._cache = self._solve(state.arrays, state.make)
+        except Exception:
+            self._fit_state = None
+            raise
         return self
+
+    def contrast(self, *, baseline: float, value: float) -> DoseContrast:
+        """Explicit dose change; ``effect()`` continues to report the unit slope.
+
+        The homogeneous partially linear model gives theta * (value-baseline).
+        Both doses must be in the observed treatment range. This range check
+        does not establish conditional positivity or the linearity assumption.
+        """
+        baseline, value = _levels(baseline, value)
+        _ = self._state
+        if self._contrast_treatment is None:
+            raise ValueError("explicit dose contrasts require numerical treatment labels")
+        _in_range(self._contrast_treatment, baseline, value)
+        if self._dose_codes is not None:
+            if baseline not in self._dose_codes or value not in self._dose_codes:
+                raise ValueError("requested dose is not an observed treatment category")
+            delta = self._dose_codes[value] - self._dose_codes[baseline]
+        elif self._t_binary and (baseline not in (0, 1) or value not in (0, 1)):
+            raise ValueError("binary treatment doses must be 0 or 1")
+        else:
+            delta = value - baseline
+        if self._outcome_categories is not None:
+            if set(self._outcome_categories) != {0, 1}:
+                raise ValueError("encode the desired binary outcome as 1 and the other as 0")
+            # Preserve legacy effect() coding, but give new contrasts an
+            # invariant event=1 meaning even for categories declared [1, 0].
+            if self._outcome_categories[1] == 0:
+                delta = -delta
+        slope = self.effect()
+        return DoseContrast(
+            target=EffectTarget.ATE,
+            estimator=self.name,
+            learners=dict(slope.learners),
+            n=slope.n,
+            kind=slope.kind,
+            diagnostics={**slope.diagnostics, "homogeneous_effect": 1.0},
+            _point=slope.value * delta,
+            _std_error=None if slope.std_error is None else slope.std_error * abs(delta),
+            _draws=None if slope.draws is None else slope.draws * delta,
+            baseline=baseline,
+            treatment_value=value,
+            treatment=self._treatment_name,
+            outcome=self._outcome_name,
+            protocol="partially-linear-contrast_v1",
+        )
+
+    def effects(self, data: TabularData, *, baseline: float, value: float) -> DoseEffects:
+        """Same homogeneous contrast for each query row, with shared uncertainty.
+
+        Covariate values do not change the slope under this model. Adding query
+        rows must not make its shared slope uncertainty artificially smaller.
+        """
+        effect = self.contrast(baseline=baseline, value=value)
+        return DoseEffects(
+            treatment=self._treatment_name,
+            outcome=self._outcome_name,
+            covariates=self._covariates,
+            n=data.n_rows,
+            kind=effect.kind,
+            source=self.name,
+            diagnostics=dict(effect.diagnostics),
+            identification=self._identification,
+            _values=np.full(data.n_rows, effect.value),
+            _std_error=None if effect.std_error is None else np.full(data.n_rows, effect.std_error),
+            baseline=effect.baseline,
+            treatment_value=effect.treatment_value,
+            protocol=effect.protocol,
+            _shared_effect=effect,
+        )
 
     def _point(
         self,
