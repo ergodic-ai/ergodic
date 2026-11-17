@@ -195,3 +195,25 @@ def test_reversed_contrast_probability_and_event() -> None:
     assert one["candidates"]["s"]["interval"] == pytest.approx(
         reverse["candidates"]["s"]["interval"]
     )
+
+
+@pytest.mark.parametrize("target_kind", ["continuous", "categorical"])
+def test_v2_preserves_other_target_defaults(target_kind: str) -> None:
+    d = world()
+    d["Y"] = 2 * d.A + d.X if target_kind == "continuous" else np.digitize(d.X, [-0.3, 0.3])
+    result = decide(
+        dag(["X -> Y", "A -> Y"]),
+        d,
+        target="Y",
+        target_kind=target_kind,
+        target_class=2 if target_kind == "categorical" else None,
+        interventions={"A": {"kind": "binary"}},
+        rows=pd.DataFrame({"X": [-0.5, 0.5]}),
+        protocol="decision-contrasts_v2",
+        n_folds=3,
+    )
+    assert not result["skipped"]
+    assert result["individual"][0]["interventions"][0]["method"] == "dr"
+    if target_kind == "categorical":
+        assert result["population"][0]["diagnostics"]["class_contrast_zero_sum_projection"] == 1
+        assert "binary_complement_derived" not in result["population"][0]["diagnostics"]
