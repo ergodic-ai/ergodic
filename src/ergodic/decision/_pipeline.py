@@ -95,7 +95,10 @@ class _Design:
 
 
 def _resolved(
-    series: pd.Series[Any], spec: Intervention, protocol: str = PROTOCOL
+    series: pd.Series[Any],
+    spec: Intervention,
+    protocol: str = PROTOCOL,
+    target_kind: str | None = None,
 ) -> tuple[str, Any, list[Any], str]:
     kind = spec.kind or _kind(series)
     if kind not in ("continuous", "binary", "categorical"):
@@ -129,7 +132,9 @@ def _resolved(
             else list(spec.values)
         )
         method = spec.method or (
-            "s" if kind == "binary" and protocol == "decision-contrasts_v2" else "dr"
+            "s"
+            if kind == "binary" and target_kind == "binary" and protocol == "decision-contrasts_v2"
+            else "dr"
         )
         allowed = ("dr", "s", "auto") if protocol == "decision-contrasts_v2" else ("dr",)
         if method not in allowed or (method == "auto" and kind != "binary"):
@@ -255,7 +260,7 @@ def decide(
             raise ValueError("target_class must name an observed event to optimize")
     elif target_class is not None:
         raise ValueError("continuous targets do not have target_class")
-    binary_event = v2 and len(classes) == 2
+    binary_event = v2 and target_kind == "binary"
     outcomes = [target_class] if binary_event else (classes or [None])
     # Freeze multiplicity before reading validation outcomes; include every attempted contrast.
     family_size = 3 * sum(
@@ -285,8 +290,8 @@ def decide(
         if spec.kind is not None and treatment in types and spec.kind != types[treatment]:
             raise ValueError("intervention kind conflicts with declared variable type")
         spec = replace(spec, kind=spec.kind or types.get(treatment))
-        kind, baseline, values, method = _resolved(context[treatment], spec, protocol)
-        binary_event = v2 and len(classes) == 2 and kind != "continuous"
+        kind, baseline, values, method = _resolved(context[treatment], spec, protocol, target_kind)
+        binary_event = v2 and target_kind == "binary" and kind != "continuous"
         outcomes = [target_class] if binary_event else (classes or [None])
         if validation is not None:
             if (
@@ -298,7 +303,7 @@ def decide(
                 raise ValueError("validation outcome contains unknown labels")
         slots_for_variable = dict(learners)
         slots_for_variable.update((learners_by_variable or {}).get(treatment, {}))
-        if v2 and len(classes) == 2 and kind != "continuous":
+        if v2 and target_kind == "binary" and kind != "continuous":
             from ._ranking import ProbabilityMean
 
             supplied = slots_for_variable.get("outcome")

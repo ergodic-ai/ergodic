@@ -97,10 +97,10 @@ working models, not a guarantee of correct nuisance specification.
 ## Candidate binary ranking protocol
 
 Explicit `protocol="decision-contrasts_v2"` keeps population DR estimation and
-uses S/treatment toggling as the default for binary-treatment query rankings.
+uses S/treatment toggling as the default for binary-treatment, binary-target query rankings.
 The original protocol remains the default when the argument is omitted. `method`
 is still per intervention: `s`, `dr`, or, with independent randomized validation,
-`auto`. Continuous and multicategory defaults are unchanged. S is a simple
+`auto`. All other treatment/target defaults are unchanged. S is a simple
 predeclared baseline, not an empirically proven universal winner.
 
 For discrete treatments and a binary target, v2 fits the selected event once and
