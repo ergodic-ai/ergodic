@@ -99,6 +99,7 @@ class ArmDR:
         if np.min(counts) < self.n_folds or len(x) < 2 * self.n_folds:
             raise ValueError("each treatment arm needs at least n_folds rows")
         scores = np.empty((len(x), len(arms)))
+        outcome_means = np.empty_like(scores)
         minimum = 1.0
         for held in _folds(len(x), self.n_folds, np.random.default_rng(self.seed), stratify=a):
             train = _train_mask(len(x), held)
@@ -124,18 +125,32 @@ class ArmDR:
                 selected = train & (a == arm)
                 outcome = _fresh(self.outcome).fit(x[selected], y[selected])
                 m = _prediction(outcome, x[held])
+                outcome_means[held, j] = m
                 scores[held, j] = m + (a[held] == arm) / p[:, j] * (y[held] - m)
         if not np.isfinite(scores).all():
             raise ValueError("nonfinite doubly robust scores")
         self._x = x.copy()
+        self._a, self._y = a.copy(), y.copy()
+        self._s_model = None
         self._scores = scores
         self.minimum_propensity_ = minimum
+        self.outcome_summary_ = [
+            {
+                "arm": int(j),
+                "mean": float(column.mean()),
+                "minimum": float(column.min()),
+                "maximum": float(column.max()),
+            }
+            for j, column in enumerate(outcome_means.T)
+        ]
         return self
 
     def contrast(
-        self, baseline: int, value: int, query: FloatArray | None = None
+        self, baseline: int, value: int, query: FloatArray | None = None, *, method: str = "dr"
     ) -> tuple[float, float, FloatArray | None]:
         """Return population mean, paired-score standard error and optional query effects."""
+        if method not in ("dr", "s"):
+            raise ValueError("ranking method must be s or dr")
         if self._scores is None:
             raise RuntimeError("ArmDR is not fitted")
         k = self._scores.shape[1]
@@ -165,8 +180,19 @@ class ArmDR:
                     or not np.allclose(probabilities.sum(axis=1), 1, atol=1e-7)
                 ):
                     raise ValueError("insufficient treatment overlap on query rows")
-            key = baseline, value
-            if key not in self._finals:
-                self._finals[key] = _fresh(self.final).fit(self._x, score)
-            predicted = _prediction(self._finals[key], query)
+            if method == "s":
+
+                def design(x: FloatArray, a: FloatArray) -> FloatArray:
+                    return np.column_stack([x] + [(a == j).astype(float) for j in range(1, k)])
+
+                if self._s_model is None:
+                    self._s_model = _fresh(self.outcome).fit(design(self._x, self._a), self._y)
+                predicted = _prediction(
+                    self._s_model, design(query, np.full(len(query), value))
+                ) - _prediction(self._s_model, design(query, np.full(len(query), baseline)))
+            else:
+                key = baseline, value
+                if key not in self._finals:
+                    self._finals[key] = _fresh(self.final).fit(self._x, score)
+                predicted = _prediction(self._finals[key], query)
         return float(score.mean()), float(score.std(ddof=1) / np.sqrt(len(score))), predicted

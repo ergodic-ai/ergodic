@@ -93,3 +93,44 @@ Pass regression learners in the `outcome` and `final` slots and a classifier
 with normalised arm probabilities in `propensity`. Each fold gets a fresh model.
 Welt's server uses its admitted native models; local ergodic defaults are simple
 working models, not a guarantee of correct nuisance specification.
+
+## Candidate binary ranking protocol
+
+Explicit `protocol="decision-contrasts_v2"` keeps population DR estimation and
+uses S/treatment toggling as the default for binary-treatment, binary-target query rankings.
+The original protocol remains the default when the argument is omitted. `method`
+is still per intervention: `s`, `dr`, or, with independent randomized validation,
+`auto`. All other treatment/target defaults are unchanged. S is a simple
+predeclared baseline, not an empirically proven universal winner.
+
+For discrete treatments and a binary target, v2 fits the selected event once and
+derives the opposite class contrast by negation. An outcome classifier supplies
+probability means, not labels; DR's final learner remains a regressor. Pass
+`learners_by_variable={"action": {"outcome": classifier, "final": regressor}}`
+to override the shared learner slots. Population `method="dr"` and query
+`method="s"` intentionally identify different estimators. The population ATE is
+not the average of the S model's query effects.
+
+Optional `validation` is a separate labeled dataframe with the context schema.
+Supply `unit_id` and `validation_design="independent_bernoulli"`; context and
+validation identifiers must be unique and disjoint, and are excluded from all
+learning. The declaration asserts independent noninterfering units, truthful IDs,
+pretreatment covariates and no validation-driven tuning or reuse. Merely renaming
+the same units does not satisfy it. No validation row fits a model or preprocessing.
+
+The initial gate supports binary treatment/outcome only. Each intervention supplies
+`validation_probability`, the known assignment probability of its requested value
+in the validation experiment, strictly between .01 and .99. It is not the learned
+context propensity. For a fixed top-20% targeting policy, fractional boundary ties
+preserve exactly 20% selected mass. Hoeffding bounds target the finite validation
+cohort, conditional on frozen models/features and binary potential outcomes.
+Three comparisons per prespecified contrast receive Bonferroni correction.
+
+Auto chooses DR only if both DR-minus-S and DR-minus-random targeting gains have
+strictly positive lower bounds; otherwise it chooses S and reports S's own evidence.
+`ranking_validation.status` is `supported`, `evidence_against`, `inconclusive`, or
+`not_assessed`. No failed gate silently zeroes estimates. Supported targeting means
+an advantage over random selection of the same fraction, not benefit versus treating
+nobody, accurate individual causal effects, a correct discovered graph, or future
+population performance. Repeated selection using the same validation cohort is
+outside the guarantee. Other assignment designs are not silently approximated.
