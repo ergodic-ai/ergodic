@@ -56,6 +56,8 @@ class ArmDR:
     Positivity failures raise instead of clipping weights. Population intervals
     are asymptotic and do not include graph selection or multiple-comparison error.
     Query predictions are conditional expectations with no individual intervals.
+    Every fold's arm outcome models are kept after ``fit`` for ``method="plugin"``
+    (n_folds x arms models), so memory grows with heavy learners.
     """
 
     def __init__(

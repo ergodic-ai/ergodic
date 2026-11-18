@@ -104,9 +104,10 @@ protocol remains the default when the argument is omitted. `method` is still per
 intervention: `plugin`, `s` (one outcome model with the treatment toggled), `dr`
 (a final regression on the paired DR scores) or, with independent randomized
 validation, `auto`. All other treatment/target defaults are unchanged. The
-default is a predeclared choice from benchmark evidence, not a proven universal
-winner: separate arm models are noisiest for units whose untreated outcome is
-already high, and `s` shrinks effects toward zero.
+default is a predeclared choice, not a proven universal winner. It is the
+classic variance trade-off: separately fitted arm models (`plugin`) have higher
+variance, which shows where the untreated outcome varies a lot, while one model
+with the treatment toggled (`s`) shrinks effects toward zero.
 
 For discrete treatments and a binary target, v2 fits the selected event once and
 derives the opposite class contrast by negation. An outcome classifier supplies
@@ -129,13 +130,18 @@ in the validation experiment, strictly between .01 and .99. It is not the learne
 context propensity. For a fixed top-20% targeting policy, fractional boundary ties
 preserve exactly 20% selected mass. Hoeffding bounds target the finite validation
 cohort, conditional on frozen models/features and binary potential outcomes.
-Five comparisons per prespecified contrast (three candidates against random and two
-paired differences against the default) receive Bonferroni correction.
+Every bound that may be reported receives Bonferroni correction, counted from the
+request before any validation outcome is read: five per `auto` contrast (three
+candidates against random and two paired differences against the default), one per
+validated explicit-method contrast.
 
 Auto evaluates `plugin`, `s` and `dr` and keeps `plugin` unless another candidate's
 paired gain over `plugin` and its own gain over random both have strictly positive
 lower bounds; among such candidates the largest paired lower bound wins. Otherwise
-it reports `plugin`'s own evidence.
+it reports `plugin`'s own evidence. Because `auto` chooses the ranking method
+from validation outcomes, that validation cohort is spent: the selected method's
+reported evidence holds within the simultaneous family, but reusing the cohort to
+judge the chosen ranking again falls outside the guarantee.
 `ranking_validation.status` is `supported`, `evidence_against`, `inconclusive`, or
 `not_assessed`. No failed gate silently zeroes estimates. Supported targeting means
 an advantage over random selection of the same fraction, not benefit versus treating

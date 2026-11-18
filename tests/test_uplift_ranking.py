@@ -337,3 +337,87 @@ def test_protocols_and_ranking_methods_are_exported() -> None:
 
     assert decision.PROTOCOLS == ("decision-contrasts_v1", "decision-contrasts_v2")
     assert decision.RANKING_METHODS == ("plugin", "s", "dr")
+
+
+def test_plugin_multiarm_reversed_refit_and_support() -> None:
+    from ergodic.decision._categorical import ArmDR
+    from ergodic.inference.learners import OLS
+
+    rng = np.random.default_rng(11)
+    n = 1500
+    x = rng.uniform(-1, 1, (n, 1))
+    a = rng.integers(0, 3, n).astype(float)
+    y = (a == 1) * 0.5 + (a == 2) * 2 * x[:, 0] + rng.normal(0, 0.1, n)
+    q = np.array([[-0.5], [0.5]])
+    est = ArmDR(outcome=OLS(), n_folds=3).fit(x, a, y)
+    assert len(est._outcomes) == 3 and all(len(m) == 3 for m in est._outcomes)
+    forward = est.contrast(0, 2, q, method="plugin")[2]
+    backward = est.contrast(2, 0, q, method="plugin")[2]
+    assert forward is not None and backward is not None
+    assert np.allclose(forward, 2 * q[:, 0], atol=0.1)
+    assert np.allclose(backward, -forward)
+    middle = est.contrast(2, 1, q, method="plugin")[2]
+    assert middle is not None and np.allclose(middle, 0.5 - 2 * q[:, 0], atol=0.1)
+    with pytest.raises(ValueError, match="outside observed context support"):
+        est.contrast(0, 2, np.array([[3.0]]), method="plugin")
+    est.n_folds = 4
+    est.fit(x, a, y)
+    assert len(est._outcomes) == 4
+
+
+def test_plugin_with_probability_means_gives_probability_differences() -> None:
+    from ergodic.decision._categorical import ArmDR
+
+    d = world(8, 800)
+    x, a, y = d[["X"]].to_numpy(), d.A.to_numpy(float), d.Y.to_numpy(float)
+    est = ArmDR(outcome=ProbabilityMean(), n_folds=3).fit(x, a, y)
+    effects = est.contrast(0, 1, np.array([[-0.8], [0.8]]), method="plugin")[2]
+    assert effects is not None
+    assert np.all(np.abs(effects) <= 1)
+    assert effects[1] > effects[0]  # the world's effect is +0.2 for x > 0 and -0.2 below
+
+
+def test_family_size_must_count_every_reported_bound() -> None:
+    x = np.linspace(-1, 1, 100)
+    a, y = np.arange(100) % 2, np.ones(100)
+    with pytest.raises(ValueError, match="every reported bound"):
+        assess_targeting({"plugin": x, "s": x, "dr": x}, a, y, probability=0.5, family_size=4)
+    one = assess_targeting({"plugin": x}, a, y, probability=0.5, family_size=1)
+    assert one["selected"] == "plugin" and one["paired_minus_default"] == {}
+
+
+@pytest.mark.parametrize(
+    "spec,family",
+    [
+        ({"kind": "binary", "method": "auto", "validation_probability": 0.5}, 5),
+        ({"kind": "binary", "validation_probability": 0.5}, 1),
+        ({"kind": "binary"}, 0),
+    ],
+)
+def test_family_counts_only_bounds_that_may_be_reported(spec: dict[str, Any], family: int) -> None:
+    d = world()
+    v = world(3, 300)
+    v["X"] = v.X.clip(d.X.min(), d.X.max())
+    d["unit"] = np.arange(len(d))
+    v["unit"] = np.arange(len(d), len(d) + len(v))
+    result = decide(
+        dag(["X -> Y", "A -> Y"]),
+        d,
+        target="Y",
+        target_kind="binary",
+        interventions={"A": spec},
+        rows=pd.DataFrame({"X": [-0.5, 0.5]}),
+        n_folds=3,
+        types={"X": "continuous"},
+        protocol="decision-contrasts_v2",
+        validation=v,
+        validation_design="independent_bernoulli",
+        unit_id="unit",
+    )
+    assert result["configuration"]["validation_family_size"] == family
+    quality = result["population"][0]["diagnostics"]["ranking_validation"]
+    if family == 1:
+        assert set(quality["candidates"]) == {"plugin"}
+        assert quality["paired_minus_default"] == {}
+    if family == 0:
+        assert quality["status"] == "not_assessed"

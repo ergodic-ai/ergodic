@@ -19,10 +19,11 @@ from ..inference.estimators import DML, ContinuousDR
 from ._categorical import ArmDR
 
 PROTOCOL = "decision-contrasts_v1"
-PROTOCOLS = (PROTOCOL, "decision-contrasts_v2")
-# Query-row ranking methods for discrete treatments under decision-contrasts_v2.
-RANKING_METHODS = ("plugin", "s", "dr")
 """Version of intervention defaults, class semantics and ranking policy."""
+PROTOCOLS = (PROTOCOL, "decision-contrasts_v2")
+"""Protocols ``decide`` accepts; v1 is the default."""
+RANKING_METHODS = ("plugin", "s", "dr")
+"""Query-row ranking methods for discrete treatments under decision-contrasts_v2."""
 
 
 def _label(value: Any) -> Any:
@@ -265,23 +266,23 @@ def decide(
         raise ValueError("continuous targets do not have target_class")
     binary_event = v2 and target_kind == "binary"
     outcomes = [target_class] if binary_event else (classes or [None])
-    # Freeze multiplicity before reading validation outcomes; include every attempted contrast.
-    # Per contrast: three candidate gains (plugin, s, dr) and two paired differences
-    # against the default, so up to five reported bounds.
-    family_size = 5 * sum(
-        len(
-            _resolved(
-                context[name],
-                replace(
-                    raw if isinstance(raw, Intervention) else Intervention(**raw),
-                    kind=(raw.kind if isinstance(raw, Intervention) else raw.get("kind"))
-                    or types.get(name),
-                ),
-                protocol,
-            )[2]
+
+    # Freeze multiplicity before reading validation outcomes, from the request alone: every
+    # bound that may be reported for any attempted contrast. An auto contrast reports three
+    # candidate gains (plugin, s, dr) and two paired differences against the default; a
+    # validated explicit method reports its own gain; anything else reports none.
+    def _bounds(name: str, raw: Intervention | Mapping[str, Any]) -> int:
+        spec = raw if isinstance(raw, Intervention) else Intervention(**raw)
+        kind, _, values, method = _resolved(
+            context[name], replace(spec, kind=spec.kind or types.get(name)), protocol, target_kind
         )
-        for name, raw in interventions.items()
-    )
+        if not v2 or target_kind != "binary" or kind != "binary":
+            return 0
+        if method == "auto":
+            return 5 * len(values)
+        return len(values) if spec.validation_probability is not None else 0
+
+    family_size = sum(_bounds(name, raw) for name, raw in interventions.items())
     candidates: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     query_candidates: list[list[dict[str, Any]]] = [

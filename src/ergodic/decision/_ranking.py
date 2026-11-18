@@ -93,7 +93,7 @@ def assess_targeting(
         or not np.isin(a, [0, 1]).all()
         or not np.isin(y, [0, 1]).all()
         or not 0.01 < probability < 0.99
-        or family_size < 3
+        or family_size < 1
         or direction not in (-1, 1)
     ):
         raise ValueError("validation needs >=20 binary rows and known assignment p in (.01,.99)")
@@ -115,6 +115,9 @@ def assess_targeting(
             "status": ("supported" if lo > 0 else "evidence_against" if hi < 0 else "inconclusive"),
         }
 
+    reported = len(weights) + (len(weights) - 1 if len(weights) > 1 else 0)
+    if family_size < reported:
+        raise ValueError("family_size must count every reported bound")
     report = {k: bound(h) for k, h in weights.items()}
     if len(predictions) == 1:
         selected, paired = next(iter(predictions)), {}
