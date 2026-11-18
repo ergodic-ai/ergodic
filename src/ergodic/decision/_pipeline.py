@@ -19,6 +19,9 @@ from ..inference.estimators import DML, ContinuousDR
 from ._categorical import ArmDR
 
 PROTOCOL = "decision-contrasts_v1"
+PROTOCOLS = (PROTOCOL, "decision-contrasts_v2")
+# Query-row ranking methods for discrete treatments under decision-contrasts_v2.
+RANKING_METHODS = ("plugin", "s", "dr")
 """Version of intervention defaults, class semantics and ranking policy."""
 
 
@@ -132,11 +135,11 @@ def _resolved(
             else list(spec.values)
         )
         method = spec.method or (
-            "s"
+            "plugin"
             if kind == "binary" and target_kind == "binary" and protocol == "decision-contrasts_v2"
             else "dr"
         )
-        allowed = ("dr", "s", "auto") if protocol == "decision-contrasts_v2" else ("dr",)
+        allowed = (*RANKING_METHODS, "auto") if protocol == "decision-contrasts_v2" else ("dr",)
         if method not in allowed or (method == "auto" and kind != "binary"):
             raise ValueError("unsupported discrete treatment ranking method for this protocol")
         if baseline not in labels or any(value not in labels for value in values):
@@ -178,7 +181,7 @@ def decide(
     unsupported candidates are returned in ``skipped`` with explicit reasons.
     Graph discovery/selection uncertainty is not included in intervals.
     """
-    if protocol not in (PROTOCOL, "decision-contrasts_v2"):
+    if protocol not in PROTOCOLS:
         raise ValueError("unsupported decision protocol")
     v2 = protocol == "decision-contrasts_v2"
     if not v2 and (validation is not None or learners_by_variable or unit_id):
@@ -263,7 +266,9 @@ def decide(
     binary_event = v2 and target_kind == "binary"
     outcomes = [target_class] if binary_event else (classes or [None])
     # Freeze multiplicity before reading validation outcomes; include every attempted contrast.
-    family_size = 3 * sum(
+    # Per contrast: three candidate gains (plugin, s, dr) and two paired differences
+    # against the default, so up to five reported bounds.
+    family_size = 5 * sum(
         len(
             _resolved(
                 context[name],
@@ -433,7 +438,7 @@ def decide(
                         diagnostic: dict[str, Any] = {"identification": "null"}
                         if v2:
                             diagnostic.update(
-                                ranking_method="s" if method == "auto" else method,
+                                ranking_method="plugin" if method == "auto" else method,
                                 population_method="identified_null",
                                 ranking_validation={
                                     "status": "not_assessed",
@@ -441,7 +446,7 @@ def decide(
                                 },
                             )
                     elif kind != "continuous":
-                        ranking_method = "s" if method == "auto" else method
+                        ranking_method = "plugin" if method == "auto" else method
                         point, se, predictions = estimator.contrast(
                             labels.index(baseline),
                             labels.index(value),
@@ -464,12 +469,13 @@ def decide(
 
                                 predictions_by_method = {ranking_method: predictions}
                                 if method == "auto":
-                                    predictions_by_method["dr"] = estimator.contrast(
-                                        labels.index(baseline),
-                                        labels.index(value),
-                                        evaluation_q,
-                                        method="dr",
-                                    )[2]
+                                    for alternative in ("s", "dr"):
+                                        predictions_by_method[alternative] = estimator.contrast(
+                                            labels.index(baseline),
+                                            labels.index(value),
+                                            evaluation_q,
+                                            method=alternative,
+                                        )[2]
                                 evaluation = assess_targeting(
                                     {k: v[n_query:] for k, v in predictions_by_method.items()},
                                     (validation[treatment] == value).to_numpy(float),
@@ -477,6 +483,7 @@ def decide(
                                     probability=spec.validation_probability,
                                     family_size=family_size,
                                     direction=1 if objective == "maximize" else -1,
+                                    default=ranking_method,
                                 )
                                 if method == "auto":
                                     ranking_method = evaluation["selected"]

@@ -34,10 +34,11 @@ def test_zero_policy_difference_has_exact_zero_bound() -> None:
         np.ones(100),
         probability=0.5,
         family_size=3,
+        default="s",
     )
-    assert r["paired_dr_minus_s"]["interval"] == [0, 0]
+    assert r["paired_minus_default"]["dr"]["interval"] == [0, 0]
     assert r["selected"] == "s"
-    assert r["paired_dr_minus_s"]["status"] == "inconclusive"
+    assert r["paired_minus_default"]["dr"]["status"] == "inconclusive"
 
 
 def test_null_outcomes_never_promote_positive_targeting() -> None:
@@ -50,6 +51,7 @@ def test_null_outcomes_never_promote_positive_targeting() -> None:
             np.zeros(200),
             probability=0.5,
             family_size=3,
+            default="s",
         )
         assert r["selected"] == "s"
         assert all(v["status"] == "inconclusive" for v in r["candidates"].values())
@@ -73,7 +75,7 @@ def test_v2_defaults_and_complement_preserve_legacy() -> None:
     assert v2["population"][0]["method"] == "dr"
     for row in v2["individual"]:
         item = row["interventions"][0]
-        assert item["method"] == "s"
+        assert item["method"] == "plugin"
         assert sum(c["effect"] for c in item["class_effects"]) == 0
         assert item["diagnostics"]["ranking_validation"]["status"] == "not_assessed"
     assert v2["population"][0]["diagnostics"]["binary_complement_derived"]
@@ -131,12 +133,12 @@ def test_gate_support_against_and_minimize() -> None:
     x = np.linspace(-1, 1, n)
     a = rng.binomial(1, 0.5, n)
     y = a * (x > 0.6)
-    good = assess_targeting({"s": -x, "dr": x}, a, y, probability=0.5, family_size=3)
+    good = assess_targeting({"s": -x, "dr": x}, a, y, probability=0.5, family_size=3, default="s")
     assert good["selected"] == "dr"
     assert good["candidates"]["dr"]["status"] == "supported"
     assert good["candidates"]["s"]["status"] == "evidence_against"
     reverse = assess_targeting(
-        {"s": -x, "dr": x}, a, y, probability=0.5, family_size=3, direction=-1
+        {"s": -x, "dr": x}, a, y, probability=0.5, family_size=3, direction=-1, default="s"
     )
     assert reverse["candidates"]["s"]["status"] == "evidence_against"
 
@@ -179,7 +181,7 @@ def test_null_graph_resolves_auto_without_false_validation() -> None:
         rows=pd.DataFrame({"X": [0.0]}),
     )
     item = result["individual"][0]["interventions"][0]
-    assert item["method"] == "s"
+    assert item["method"] == "plugin"
     assert item["effect"] == 0
     assert item["diagnostics"]["ranking_validation"]["status"] == "not_assessed"
 
@@ -217,3 +219,121 @@ def test_v2_preserves_other_target_defaults(target_kind: str) -> None:
     if target_kind == "categorical":
         assert result["population"][0]["diagnostics"]["class_contrast_zero_sum_projection"] == 1
         assert "binary_complement_derived" not in result["population"][0]["diagnostics"]
+
+
+def test_plugin_is_the_fold_averaged_arm_model_difference() -> None:
+    from ergodic.decision._categorical import ArmDR
+    from ergodic.inference.learners import OLS
+
+    d = world(5, 400)
+    x, a, y = d[["X"]].to_numpy(), d.A.to_numpy(float), d.Y.to_numpy(float)
+    q = np.array([[-0.5], [0.0], [0.5]])
+    est = ArmDR(outcome=OLS(), n_folds=4).fit(x, a, y)
+    point, se, plugin = est.contrast(0, 1, q, method="plugin")
+    expected = np.mean([m[1].predict(q) - m[0].predict(q) for m in est._outcomes], axis=0)
+    assert plugin is not None
+    assert np.allclose(plugin, expected)
+    assert len(est._outcomes) == 4
+    # Only the query effects change with the method; the population estimate is the DR mean.
+    assert est.contrast(0, 1, q, method="dr")[:2] == (point, se)
+    assert est.contrast(0, 1, q, method="s")[:2] == (point, se)
+    with pytest.raises(ValueError, match="plugin, s or dr"):
+        est.contrast(0, 1, q, method="toggle")
+
+
+def test_plugin_ranks_heterogeneous_effects() -> None:
+    from scipy.stats import spearmanr
+
+    rng = np.random.default_rng(7)
+    n = 3000
+    x = rng.uniform(-1, 1, n)
+    a = rng.binomial(1, 0.5, n)
+    y = rng.binomial(1, np.clip(0.4 + a * 0.3 * x, 0, 1))
+    grid = pd.DataFrame({"X": np.linspace(-0.9, 0.9, 19)})
+    result = decide(
+        dag(["X -> Y", "A -> Y"]),
+        pd.DataFrame({"X": x, "A": a, "Y": y}),
+        target="Y",
+        target_kind="binary",
+        target_class=1,
+        interventions={"A": {"kind": "binary"}},
+        rows=grid,
+        n_folds=3,
+        types={"X": "continuous"},
+        protocol="decision-contrasts_v2",
+    )
+    effects = [r["interventions"][0]["effect"] for r in result["individual"]]
+    assert all(r["interventions"][0]["method"] == "plugin" for r in result["individual"])
+    assert spearmanr(effects, grid.X).statistic > 0.9
+
+
+def test_auto_keeps_default_unless_another_method_is_proven_better() -> None:
+    rng = np.random.default_rng(3)
+    n = 20000
+    x = np.linspace(-1, 1, n)
+    a = rng.binomial(1, 0.5, n)
+    y = a * (x > 0.6)
+    noise = rng.normal(size=n)
+    kept = assess_targeting(
+        {"plugin": x, "s": -x, "dr": noise}, a, y, probability=0.5, family_size=5
+    )
+    assert kept["default"] == "plugin" and kept["selected"] == "plugin"
+    assert set(kept["paired_minus_default"]) == {"s", "dr"}
+    switched = assess_targeting(
+        {"plugin": -x, "s": noise, "dr": x}, a, y, probability=0.5, family_size=5
+    )
+    assert switched["selected"] == "dr"
+    assert switched["paired_minus_default"]["dr"]["interval"][0] > 0
+    # Two qualifying alternatives: the larger paired lower bound wins.
+    both = assess_targeting(
+        {"plugin": -x, "s": x + 0.3 * noise, "dr": x}, a, y, probability=0.5, family_size=5
+    )
+    assert both["selected"] == "dr"
+    with pytest.raises(ValueError, match="default ranking method"):
+        assess_targeting({"s": x, "dr": x}, a, y, probability=0.5, family_size=5)
+
+
+def test_v2_auto_reports_all_three_candidates_and_family_size() -> None:
+    graph = dag(["X -> Y", "A -> Y"])
+    d = world()
+    v = world(3, 300)
+    v["X"] = v.X.clip(d.X.min(), d.X.max())
+    d["unit"] = np.arange(len(d))
+    v["unit"] = np.arange(len(d), len(d) + len(v))
+    result = decide(
+        graph,
+        d,
+        target="Y",
+        target_kind="binary",
+        interventions={"A": {"kind": "binary", "method": "auto", "validation_probability": 0.5}},
+        rows=pd.DataFrame({"X": [-0.5, 0.5]}),
+        n_folds=3,
+        types={"X": "continuous"},
+        protocol="decision-contrasts_v2",
+        validation=v,
+        validation_design="independent_bernoulli",
+        unit_id="unit",
+    )
+    quality = result["population"][0]["diagnostics"]["ranking_validation"]
+    assert set(quality["candidates"]) == {"plugin", "s", "dr"}
+    assert quality["default"] == "plugin"
+    assert quality["family_size"] == 5
+    assert result["individual"][0]["interventions"][0]["method"] == quality["selected"]
+
+
+def test_plugin_requires_v2() -> None:
+    with pytest.raises(ValueError, match="ranking method for this protocol"):
+        decide(
+            dag(["X -> Y", "A -> Y"]),
+            world(),
+            target="Y",
+            target_kind="binary",
+            interventions={"A": {"kind": "binary", "method": "plugin"}},
+        )
+
+
+def test_protocols_and_ranking_methods_are_exported() -> None:
+    from ergodic import decision
+
+    assert decision.PROTOCOLS == ("decision-contrasts_v1", "decision-contrasts_v2")
+    assert decision.RANKING_METHODS == ("plugin", "s", "dr")

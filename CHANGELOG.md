@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Explicit decision v2: per-variable S/DR ranking, DR population estimates,
-  binary event/complement coherence, separate learner slots and conservative
-  independent randomized validation with disjoint unit IDs. v1 remains the
-  implicit protocol; these semantics do not establish a universal quality winner.
+- Explicit decision v2: per-variable plugin/S/DR ranking with `plugin` (fold-averaged
+  difference of the cross-fit arm outcome models) as the binary-treatment,
+  binary-target default, DR population estimates, binary event/complement
+  coherence, separate learner slots and conservative independent randomized
+  validation with disjoint unit IDs; `auto` keeps `plugin` unless S or DR is
+  proven better on validation. v1 remains the implicit protocol; these semantics
+  do not establish a universal quality winner.
 - `ergodic.decision.decide`: graph-identified automatic per-variable contrasts,
   multiarm doubly robust estimation and ranked population/query-row effects for
   continuous, binary and multicategory treatments and targets.

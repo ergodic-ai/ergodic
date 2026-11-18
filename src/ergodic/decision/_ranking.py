@@ -73,12 +73,18 @@ def assess_targeting(
     probability: float,
     family_size: int,
     direction: int = 1,
+    default: str = "plugin",
 ) -> dict[str, Any]:
     """Finite-cohort Hoeffding bounds under explicitly declared Bernoulli assignment.
 
     Binary potential outcomes, independent assignments with constant known p,
     frozen models and pretreatment validation covariates. Not population policy
     intervals, calibrated individual-effect intervals, or evidence across reuse.
+
+    Selection keeps ``default`` unless another candidate's paired gain over the
+    default and its own gain over random both have a positive lower bound; among
+    such candidates the largest paired lower bound wins. ``family_size`` must
+    count every bound that may be reported (candidates plus paired differences).
     """
     a, y = np.asarray(a, float), np.asarray(y, float)
     if (
@@ -110,19 +116,22 @@ def assess_targeting(
         }
 
     report = {k: bound(h) for k, h in weights.items()}
-    difference = bound(weights["dr"] - weights["s"]) if {"s", "dr"} <= weights.keys() else None
-    selected = (
-        "dr"
-        if difference is not None
-        and difference["interval"][0] > 0
-        and report["dr"]["interval"][0] > 0
-        else "s"
-    )
     if len(predictions) == 1:
-        selected = next(iter(predictions))
+        selected, paired = next(iter(predictions)), {}
+    else:
+        if default not in weights:
+            raise ValueError("the default ranking method must be among the candidates")
+        paired = {k: bound(h - weights[default]) for k, h in weights.items() if k != default}
+        better = {
+            k: b["interval"][0]
+            for k, b in paired.items()
+            if b["interval"][0] > 0 and report[k]["interval"][0] > 0
+        }
+        selected = max(better, key=lambda k: better[k]) if better else default
     return {
         "candidates": report,
-        "paired_dr_minus_s": difference,
+        "default": default if len(predictions) > 1 else selected,
+        "paired_minus_default": paired,
         "selected": selected,
         "protocol": "finite-cohort-bernoulli-hoeffding_v1",
         "fraction": 0.2,

@@ -97,19 +97,24 @@ working models, not a guarantee of correct nuisance specification.
 ## Candidate binary ranking protocol
 
 Explicit `protocol="decision-contrasts_v2"` keeps population DR estimation and
-uses S/treatment toggling as the default for binary-treatment, binary-target query rankings.
-The original protocol remains the default when the argument is omitted. `method`
-is still per intervention: `s`, `dr`, or, with independent randomized validation,
-`auto`. All other treatment/target defaults are unchanged. S is a simple
-predeclared baseline, not an empirically proven universal winner.
+uses `plugin` as the default for binary-treatment, binary-target query rankings:
+each query effect is the difference between the cross-fitted arm outcome models
+(the same nuisances that build the DR scores), averaged over folds. The original
+protocol remains the default when the argument is omitted. `method` is still per
+intervention: `plugin`, `s` (one outcome model with the treatment toggled), `dr`
+(a final regression on the paired DR scores) or, with independent randomized
+validation, `auto`. All other treatment/target defaults are unchanged. The
+default is a predeclared choice from benchmark evidence, not a proven universal
+winner: separate arm models are noisiest for units whose untreated outcome is
+already high, and `s` shrinks effects toward zero.
 
 For discrete treatments and a binary target, v2 fits the selected event once and
 derives the opposite class contrast by negation. An outcome classifier supplies
 probability means, not labels; DR's final learner remains a regressor. Pass
 `learners_by_variable={"action": {"outcome": classifier, "final": regressor}}`
 to override the shared learner slots. Population `method="dr"` and query
-`method="s"` intentionally identify different estimators. The population ATE is
-not the average of the S model's query effects.
+`method="plugin"` or `"s"` intentionally identify different estimators. The
+population ATE is not the average of the query effects.
 
 Optional `validation` is a separate labeled dataframe with the context schema.
 Supply `unit_id` and `validation_design="independent_bernoulli"`; context and
@@ -124,10 +129,13 @@ in the validation experiment, strictly between .01 and .99. It is not the learne
 context propensity. For a fixed top-20% targeting policy, fractional boundary ties
 preserve exactly 20% selected mass. Hoeffding bounds target the finite validation
 cohort, conditional on frozen models/features and binary potential outcomes.
-Three comparisons per prespecified contrast receive Bonferroni correction.
+Five comparisons per prespecified contrast (three candidates against random and two
+paired differences against the default) receive Bonferroni correction.
 
-Auto chooses DR only if both DR-minus-S and DR-minus-random targeting gains have
-strictly positive lower bounds; otherwise it chooses S and reports S's own evidence.
+Auto evaluates `plugin`, `s` and `dr` and keeps `plugin` unless another candidate's
+paired gain over `plugin` and its own gain over random both have strictly positive
+lower bounds; among such candidates the largest paired lower bound wins. Otherwise
+it reports `plugin`'s own evidence.
 `ranking_validation.status` is `supported`, `evidence_against`, `inconclusive`, or
 `not_assessed`. No failed gate silently zeroes estimates. Supported targeting means
 an advantage over random selection of the same fraction, not benefit versus treating
