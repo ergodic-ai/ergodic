@@ -21,7 +21,7 @@ from ._categorical import ArmDR
 PROTOCOL = "decision-contrasts_v1"
 """Version of intervention defaults, class semantics and ranking policy."""
 PROTOCOLS = (PROTOCOL, "decision-contrasts_v2")
-"""Protocols ``decide`` accepts; v1 is the default."""
+"""Protocols ``decide`` accepts; the first, PROTOCOL, is the default."""
 RANKING_METHODS = ("plugin", "s", "dr")
 """Query-row ranking methods for discrete treatments under decision-contrasts_v2."""
 
