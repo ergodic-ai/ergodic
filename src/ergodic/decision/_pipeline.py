@@ -388,6 +388,7 @@ def decide(
                             n_folds=n_folds,
                             seed=seed,
                             min_propensity=min_propensity,
+                            keep_outcome_models=v2 and method in ("plugin", "auto"),
                         ).fit(x, a, y)
                     )
                 else:
@@ -622,7 +623,6 @@ def decide(
                             "baseline": baseline,
                             "value": value,
                             "method": diagnostics[selected].get("ranking_method", method),
-                            **({"diagnostics": diagnostics[selected]} if v2 else {}),
                             "effect": float(per_row[selected][index]),
                             "class_effects": [
                                 {"label": c, "effect": float(v[index])}

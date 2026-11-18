@@ -77,7 +77,9 @@ def test_v2_defaults_and_complement_preserve_legacy() -> None:
         item = row["interventions"][0]
         assert item["method"] == "plugin"
         assert sum(c["effect"] for c in item["class_effects"]) == 0
-        assert item["diagnostics"]["ranking_validation"]["status"] == "not_assessed"
+        # Contrast diagnostics live once on the population entry, not on every query row.
+        assert "diagnostics" not in item
+    assert v2["population"][0]["diagnostics"]["ranking_validation"]["status"] == "not_assessed"
     assert v2["population"][0]["diagnostics"]["binary_complement_derived"]
 
 
@@ -183,7 +185,8 @@ def test_null_graph_resolves_auto_without_false_validation() -> None:
     item = result["individual"][0]["interventions"][0]
     assert item["method"] == "plugin"
     assert item["effect"] == 0
-    assert item["diagnostics"]["ranking_validation"]["status"] == "not_assessed"
+    quality = result["population"][0]["diagnostics"]["ranking_validation"]
+    assert quality["status"] == "not_assessed"
 
 
 def test_reversed_contrast_probability_and_event() -> None:
@@ -421,3 +424,48 @@ def test_family_counts_only_bounds_that_may_be_reported(spec: dict[str, Any], fa
         assert quality["paired_minus_default"] == {}
     if family == 0:
         assert quality["status"] == "not_assessed"
+
+
+def test_outcome_models_are_kept_only_when_plugin_can_be_used() -> None:
+    from ergodic.decision._categorical import ArmDR
+
+    kept: list[bool] = []
+    original = ArmDR.fit
+
+    def spy(self: ArmDR, x: Any, a: Any, y: Any) -> ArmDR:
+        result = original(self, x, a, y)
+        kept.append(bool(self._outcomes))
+        return result
+
+    graph = dag(["X -> Y", "A -> Y"])
+    kwargs: dict[str, Any] = {
+        "target": "Y",
+        "target_kind": "binary",
+        "rows": pd.DataFrame({"X": [0.0]}),
+        "n_folds": 3,
+        "types": {"X": "continuous"},
+    }
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ArmDR, "fit", spy)
+        decide(graph, world(), interventions={"A": {"kind": "binary"}}, **kwargs)
+        decide(
+            graph,
+            world(),
+            interventions={"A": {"kind": "binary", "method": "s"}},
+            protocol="decision-contrasts_v2",
+            **kwargs,
+        )
+        decide(
+            graph,
+            world(),
+            interventions={"A": {"kind": "binary"}},
+            protocol="decision-contrasts_v2",
+            **kwargs,
+        )
+    # v1 fits both binary classes (two ArmDRs); v2 fits the event once.
+    assert kept == [False, False, False, True]
+    est = ArmDR(n_folds=3, keep_outcome_models=False).fit(
+        world()[["X"]].to_numpy(), world().A.to_numpy(float), world().Y.to_numpy(float)
+    )
+    with pytest.raises(ValueError, match="keep_outcome_models"):
+        est.contrast(0, 1, np.array([[0.0]]), method="plugin")

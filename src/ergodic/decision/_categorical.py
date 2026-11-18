@@ -56,8 +56,9 @@ class ArmDR:
     Positivity failures raise instead of clipping weights. Population intervals
     are asymptotic and do not include graph selection or multiple-comparison error.
     Query predictions are conditional expectations with no individual intervals.
-    Every fold's arm outcome models are kept after ``fit`` for ``method="plugin"``
-    (n_folds x arms models), so memory grows with heavy learners.
+    With ``keep_outcome_models`` (the default) every fold's arm outcome models are
+    kept after ``fit`` for ``method="plugin"`` (n_folds x arms models), so memory
+    grows with heavy learners; ``decide`` keeps them only when plugin ranking can be used.
     """
 
     def __init__(
@@ -69,6 +70,7 @@ class ArmDR:
         n_folds: int = 5,
         seed: int = 0,
         min_propensity: float = 0.01,
+        keep_outcome_models: bool = True,
     ) -> None:
         if isinstance(n_folds, bool) or not isinstance(n_folds, int) or n_folds < 2:
             raise ValueError("n_folds must be an integer >= 2")
@@ -80,6 +82,7 @@ class ArmDR:
         if hasattr(self.outcome, "predict_proba") or hasattr(self.final, "predict_proba"):
             raise ValueError("outcome and final slots require regression means, not classifiers")
         self.n_folds, self.seed, self.min_propensity = n_folds, seed, min_propensity
+        self.keep_outcome_models = keep_outcome_models
         self._scores: FloatArray | None = None
         self._finals: dict[tuple[int, int], Any] = {}
         self._propensities: list[Any] = []
@@ -135,7 +138,8 @@ class ArmDR:
                 m = _prediction(outcome, x[held])
                 outcome_means[held, j] = m
                 scores[held, j] = m + (a[held] == arm) / p[:, j] * (y[held] - m)
-            self._outcomes.append(fold_outcomes)
+            if self.keep_outcome_models:
+                self._outcomes.append(fold_outcomes)
         if not np.isfinite(scores).all():
             raise ValueError("nonfinite doubly robust scores")
         self._x = x.copy()
@@ -204,6 +208,8 @@ class ArmDR:
                     self._s_model, design(query, np.full(len(query), value))
                 ) - _prediction(self._s_model, design(query, np.full(len(query), baseline)))
             elif method == "plugin":
+                if not self._outcomes:
+                    raise ValueError("plugin ranking needs keep_outcome_models=True at fit")
                 # Arm j's model is fold_outcomes[j]; the same arm-specific nuisances
                 # that built the DR scores, averaged over folds.
                 predicted = np.asarray(
