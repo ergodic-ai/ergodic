@@ -93,3 +93,58 @@ Pass regression learners in the `outcome` and `final` slots and a classifier
 with normalised arm probabilities in `propensity`. Each fold gets a fresh model.
 Welt's server uses its admitted native models; local ergodic defaults are simple
 working models, not a guarantee of correct nuisance specification.
+
+## Candidate binary ranking protocol
+
+Explicit `protocol="decision-contrasts_v2"` keeps population DR estimation and
+uses `plugin` as the default for binary-treatment, binary-target query rankings:
+each query effect is the difference between the cross-fitted arm outcome models
+(the same nuisances that build the DR scores), averaged over folds. The original
+protocol remains the default when the argument is omitted. `method` is still per
+intervention: `plugin`, `s` (one outcome model with the treatment toggled), `dr`
+(a final regression on the paired DR scores) or, with independent randomized
+validation, `auto`. All other treatment/target defaults are unchanged. The
+default is a predeclared choice, not a proven universal winner. It is the
+classic variance trade-off: separately fitted arm models (`plugin`) have higher
+variance, which shows where the untreated outcome varies a lot, while one model
+with the treatment toggled (`s`) shrinks effects toward zero.
+
+For discrete treatments and a binary target, v2 fits the selected event once and
+derives the opposite class contrast by negation. An outcome classifier supplies
+probability means, not labels; DR's final learner remains a regressor. Pass
+`learners_by_variable={"action": {"outcome": classifier, "final": regressor}}`
+to override the shared learner slots. Population `method="dr"` and query
+`method="plugin"` or `"s"` intentionally identify different estimators. The
+population ATE is not the average of the query effects.
+
+Optional `validation` is a separate labeled dataframe with the context schema.
+Supply `unit_id` and `validation_design="independent_bernoulli"`; context and
+validation identifiers must be unique and disjoint, and are excluded from all
+learning. The declaration asserts independent noninterfering units, truthful IDs,
+pretreatment covariates and no validation-driven tuning or reuse. Merely renaming
+the same units does not satisfy it. No validation row fits a model or preprocessing.
+
+The initial gate supports binary treatment/outcome only. Each intervention supplies
+`validation_probability`, the known assignment probability of its requested value
+in the validation experiment, strictly between .01 and .99. It is not the learned
+context propensity. For a fixed top-20% targeting policy, fractional boundary ties
+preserve exactly 20% selected mass. Hoeffding bounds target the finite validation
+cohort, conditional on frozen models/features and binary potential outcomes.
+Every bound that may be reported receives Bonferroni correction, counted from the
+request before any validation outcome is read: five per `auto` contrast (three
+candidates against random and two paired differences against the default), one per
+validated explicit-method contrast.
+
+Auto evaluates `plugin`, `s` and `dr` and keeps `plugin` unless another candidate's
+paired gain over `plugin` and its own gain over random both have strictly positive
+lower bounds; among such candidates the largest paired lower bound wins. Otherwise
+it reports `plugin`'s own evidence. Because `auto` chooses the ranking method
+from validation outcomes, that validation cohort is spent: the selected method's
+reported evidence holds within the simultaneous family, but reusing the cohort to
+judge the chosen ranking again falls outside the guarantee.
+`ranking_validation.status` is `supported`, `evidence_against`, `inconclusive`, or
+`not_assessed`. No failed gate silently zeroes estimates. Supported targeting means
+an advantage over random selection of the same fraction, not benefit versus treating
+nobody, accurate individual causal effects, a correct discovered graph, or future
+population performance. Repeated selection using the same validation cohort is
+outside the guarantee. Other assignment designs are not silently approximated.

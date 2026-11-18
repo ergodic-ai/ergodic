@@ -20,6 +20,10 @@ from ._categorical import ArmDR
 
 PROTOCOL = "decision-contrasts_v1"
 """Version of intervention defaults, class semantics and ranking policy."""
+PROTOCOLS = (PROTOCOL, "decision-contrasts_v2")
+"""Protocols ``decide`` accepts; the first, PROTOCOL, is the default."""
+RANKING_METHODS = ("plugin", "s", "dr")
+"""Query-row ranking methods for discrete treatments under decision-contrasts_v2."""
 
 
 def _label(value: Any) -> Any:
@@ -52,6 +56,7 @@ class Intervention:
     values: tuple[Any, ...] | None = None
     kind: str | None = None
     bandwidth: float | None = None
+    validation_probability: float | None = None
 
 
 class _Design:
@@ -93,7 +98,12 @@ class _Design:
         return result
 
 
-def _resolved(series: pd.Series[Any], spec: Intervention) -> tuple[str, Any, list[Any], str]:
+def _resolved(
+    series: pd.Series[Any],
+    spec: Intervention,
+    protocol: str = PROTOCOL,
+    target_kind: str | None = None,
+) -> tuple[str, Any, list[Any], str]:
     kind = spec.kind or _kind(series)
     if kind not in ("continuous", "binary", "categorical"):
         raise ValueError("variable kind must be continuous, binary or categorical")
@@ -125,9 +135,14 @@ def _resolved(series: pd.Series[Any], spec: Intervention) -> tuple[str, Any, lis
             if spec.values is None
             else list(spec.values)
         )
-        method = spec.method or "dr"
-        if method != "dr":
-            raise ValueError("categorical treatment currently supports method='dr'")
+        method = spec.method or (
+            "plugin"
+            if kind == "binary" and target_kind == "binary" and protocol == "decision-contrasts_v2"
+            else "dr"
+        )
+        allowed = (*RANKING_METHODS, "auto") if protocol == "decision-contrasts_v2" else ("dr",)
+        if method not in allowed or (method == "auto" and kind != "binary"):
+            raise ValueError("unsupported discrete treatment ranking method for this protocol")
         if baseline not in labels or any(value not in labels for value in values):
             raise ValueError("requested treatment level was not observed in context")
     if not values or len(values) != len(set(values)) or baseline in values:
@@ -151,6 +166,11 @@ def decide(
     seed: int = 0,
     min_propensity: float = 0.01,
     checkpoint: Callable[[], None] | None = None,
+    protocol: str = PROTOCOL,
+    learners_by_variable: Mapping[str, Mapping[str, Any]] | None = None,
+    validation: pd.DataFrame | None = None,
+    validation_design: str | None = None,
+    unit_id: str | None = None,
 ) -> dict[str, Any]:
     """Identify, estimate and rank single-variable contrasts in one target's units.
 
@@ -162,6 +182,41 @@ def decide(
     unsupported candidates are returned in ``skipped`` with explicit reasons.
     Graph discovery/selection uncertainty is not included in intervals.
     """
+    if protocol not in PROTOCOLS:
+        raise ValueError("unsupported decision protocol")
+    v2 = protocol == "decision-contrasts_v2"
+    if not v2 and (validation is not None or learners_by_variable or unit_id):
+        raise ValueError("validation and per-variable learners require v2")
+    if validation is not None and (
+        unit_id is None
+        or unit_id not in context
+        or unit_id not in validation
+        or context[unit_id].isna().any()
+        or validation[unit_id].isna().any()
+        or not context[unit_id].is_unique
+        or not validation[unit_id].is_unique
+        or set(context[unit_id]) & set(validation[unit_id])
+    ):
+        raise ValueError("validation requires unique disjoint unit IDs in context and validation")
+    if unit_id is not None:
+        if unit_id == target or unit_id in interventions or unit_id not in context:
+            raise ValueError("unit_id must be an excluded identifier, not a treatment or target")
+        context = context.drop(columns=[unit_id])
+        if validation is not None:
+            validation = validation.drop(columns=[unit_id])
+    if validation is not None:
+        validation = validation.copy(deep=True)
+        if (
+            not validation.columns.is_unique
+            or set(validation.columns) != set(context.columns)
+            or validation.isna().any().any()
+            or len(validation) < 20
+            or validation_design != "independent_bernoulli"
+        ):
+            raise ValueError(
+                "validation requires separate complete context-schema rows "
+                "and independent_bernoulli design"
+            )
     if isinstance(n_folds, bool) or not isinstance(n_folds, int) or n_folds < 2:
         raise ValueError("n_folds must be an integer >= 2")
     if not all(isinstance(name, str) and name for name in context.columns):
@@ -209,7 +264,25 @@ def decide(
             raise ValueError("target_class must name an observed event to optimize")
     elif target_class is not None:
         raise ValueError("continuous targets do not have target_class")
-    outcomes = classes or [None]
+    binary_event = v2 and target_kind == "binary"
+    outcomes = [target_class] if binary_event else (classes or [None])
+
+    # Freeze multiplicity before reading validation outcomes, from the request alone: every
+    # bound that may be reported for any attempted contrast. An auto contrast reports three
+    # candidate gains (plugin, s, dr) and two paired differences against the default; a
+    # validated explicit method reports its own gain; anything else reports none.
+    def _bounds(name: str, raw: Intervention | Mapping[str, Any]) -> int:
+        spec = raw if isinstance(raw, Intervention) else Intervention(**raw)
+        kind, _, values, method = _resolved(
+            context[name], replace(spec, kind=spec.kind or types.get(name)), protocol, target_kind
+        )
+        if not v2 or target_kind != "binary" or kind != "binary":
+            return 0
+        if method == "auto":
+            return 5 * len(values)
+        return len(values) if spec.validation_probability is not None else 0
+
+    family_size = sum(_bounds(name, raw) for name, raw in interventions.items())
     candidates: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     query_candidates: list[list[dict[str, Any]]] = [
@@ -223,7 +296,40 @@ def decide(
         if spec.kind is not None and treatment in types and spec.kind != types[treatment]:
             raise ValueError("intervention kind conflicts with declared variable type")
         spec = replace(spec, kind=spec.kind or types.get(treatment))
-        kind, baseline, values, method = _resolved(context[treatment], spec)
+        kind, baseline, values, method = _resolved(context[treatment], spec, protocol, target_kind)
+        binary_event = v2 and target_kind == "binary" and kind != "continuous"
+        outcomes = [target_class] if binary_event else (classes or [None])
+        if validation is not None:
+            if (
+                not validation[treatment].isin(_levels(context[treatment])).all()
+                and kind != "continuous"
+            ):
+                raise ValueError("validation treatment contains unknown labels")
+            if classes and not validation[target].isin(classes).all():
+                raise ValueError("validation outcome contains unknown labels")
+        slots_for_variable = dict(learners)
+        slots_for_variable.update((learners_by_variable or {}).get(treatment, {}))
+        if v2 and target_kind == "binary" and kind != "continuous":
+            from ._ranking import ProbabilityMean
+
+            supplied = slots_for_variable.get("outcome")
+            if supplied is None or hasattr(supplied, "predict_proba"):
+                slots_for_variable["outcome"] = ProbabilityMean(supplied)
+        if method == "auto" and (
+            not binary_event or validation is None or spec.validation_probability is None
+        ):
+            raise ValueError(
+                "auto requires binary outcome, separate randomized validation and known probability"
+            )
+        if spec.validation_probability is not None and (
+            not v2
+            or kind != "binary"
+            or not np.isfinite(spec.validation_probability)
+            or not 0.01 < spec.validation_probability < 0.99
+        ):
+            raise ValueError(
+                "validation probability requires v2 binary treatment and p in (.01,.99)"
+            )
         identified = identify_effect(graph, treatment, target)
         if not identified.identifiable or identified.strategy not in ("adjustment", "null"):
             skipped.append(
@@ -250,6 +356,11 @@ def decide(
         design = _Design(context, covariates, types)
         x = design.matrix(context)
         q = None if rows is None else design.matrix(rows)
+        validation_q = None if validation is None else design.matrix(validation)
+        n_query = 0 if q is None else len(q)
+        evaluation_q = q
+        if validation_q is not None:
+            evaluation_q = validation_q if q is None else np.concatenate([q, validation_q])
         fitted: list[Any] = []
         pending: list[dict[str, Any]] = []
         pending_queries: list[list[dict[str, Any]]] = [[] for _ in query_candidates]
@@ -271,12 +382,13 @@ def decide(
                     a = np.asarray([labels.index(_label(v)) for v in context[treatment]], float)
                     fitted.append(
                         ArmDR(
-                            outcome=learners.get("outcome"),
-                            propensity=learners.get("propensity"),
-                            final=learners.get("final"),
+                            outcome=slots_for_variable.get("outcome"),
+                            propensity=slots_for_variable.get("propensity"),
+                            final=slots_for_variable.get("final"),
                             n_folds=n_folds,
                             seed=seed,
                             min_propensity=min_propensity,
+                            keep_outcome_models=v2 and method in ("plugin", "auto"),
                         ).fit(x, a, y)
                     )
                 else:
@@ -295,7 +407,7 @@ def decide(
                     data = tabular(frame, types=declared)
                     slots = {
                         key: model
-                        for key, model in learners.items()
+                        for key, model in slots_for_variable.items()
                         if key
                         in (
                             ("outcome", "treatment")
@@ -326,11 +438,96 @@ def decide(
                             None if rows is None else np.zeros(len(rows)),
                         )
                         diagnostic: dict[str, Any] = {"identification": "null"}
+                        if v2:
+                            diagnostic.update(
+                                ranking_method="plugin" if method == "auto" else method,
+                                population_method="identified_null",
+                                ranking_validation={
+                                    "status": "not_assessed",
+                                    "reason": "graph_identifies_zero_effect",
+                                },
+                            )
                     elif kind != "continuous":
-                        point, se, individual = estimator.contrast(
-                            labels.index(baseline), labels.index(value), q
+                        ranking_method = "plugin" if method == "auto" else method
+                        point, se, predictions = estimator.contrast(
+                            labels.index(baseline),
+                            labels.index(value),
+                            evaluation_q,
+                            method=ranking_method,
                         )
                         diagnostic = {"minimum_propensity": estimator.minimum_propensity_}
+                        if v2:
+                            quality = {
+                                "status": "not_assessed",
+                                "reason": "independent_randomized_validation_required",
+                            }
+                            if (
+                                validation is not None
+                                and binary_event
+                                and kind == "binary"
+                                and spec.validation_probability is not None
+                            ):
+                                from ._ranking import assess_targeting
+
+                                predictions_by_method = {ranking_method: predictions}
+                                if method == "auto":
+                                    for alternative in ("s", "dr"):
+                                        predictions_by_method[alternative] = estimator.contrast(
+                                            labels.index(baseline),
+                                            labels.index(value),
+                                            evaluation_q,
+                                            method=alternative,
+                                        )[2]
+                                evaluation = assess_targeting(
+                                    {k: v[n_query:] for k, v in predictions_by_method.items()},
+                                    (validation[treatment] == value).to_numpy(float),
+                                    (validation[target] == target_class).to_numpy(float),
+                                    probability=spec.validation_probability,
+                                    family_size=family_size,
+                                    direction=1 if objective == "maximize" else -1,
+                                    default=ranking_method,
+                                )
+                                if method == "auto":
+                                    ranking_method = evaluation["selected"]
+                                    predictions = predictions_by_method[ranking_method]
+                                quality = dict(
+                                    status=evaluation["candidates"][ranking_method]["status"],
+                                    **evaluation,
+                                )
+                            scores_for_contrast = (
+                                estimator._scores[:, labels.index(value)]
+                                - estimator._scores[:, labels.index(baseline)]
+                            )
+                            diagnostic.update(
+                                population_method="dr",
+                                ranking_method=ranking_method,
+                                ranking_validation=quality,
+                                target_event=target_class,
+                                direction={"baseline": baseline, "value": value},
+                                stages={
+                                    "design": {
+                                        "n_context": len(x),
+                                        "columns": x.shape[1],
+                                        "covariates": covariates,
+                                    },
+                                    "cross_fitted_outcome_means": estimator.outcome_summary_,
+                                    "corrected_scores": {
+                                        "mean": float(scores_for_contrast.mean()),
+                                        "std": float(scores_for_contrast.std()),
+                                    },
+                                    "query_scores": None
+                                    if predictions is None
+                                    else {
+                                        "std": float(np.std(predictions[:n_query]))
+                                        if n_query
+                                        else None
+                                    },
+                                },
+                                n_query=n_query,
+                                n_validation=0 if validation is None else len(validation),
+                                ranking_estimand="conditional_effect_model_not_structural_ite",
+                            )
+                        individual = None if q is None else predictions[:n_query]
                     else:
                         contrast = estimator.contrast(baseline=baseline, value=value)
                         point, se = float(contrast.value), float(contrast.std_error)
@@ -372,7 +569,22 @@ def decide(
                     ses.append(se)
                     per_row.append(np.empty(0) if individual is None else np.asarray(individual))
                     diagnostics.append(diagnostic)
-                if classes:
+                if binary_event:
+                    chosen = classes.index(target_class)
+                    other = 1 - chosen
+                    point, se, prediction, diagnostic = (
+                        effects[0],
+                        ses[0],
+                        per_row[0],
+                        diagnostics[0],
+                    )
+                    effects, ses, per_row = [0.0, 0.0], [se, se], [prediction, prediction]
+                    effects[chosen], effects[other] = point, -point
+                    per_row[chosen], per_row[other] = prediction, -prediction
+                    diagnostics = [dict(diagnostic), dict(diagnostic)]
+                    for diagnostic in diagnostics:
+                        diagnostic["binary_complement_derived"] = True
+                elif classes:
                     # Known identity: class-probability contrasts sum to zero. Project the
                     # joint scores, not just displayed means; preserve cross-class covariance.
                     joint = np.column_stack(score_columns)
@@ -385,12 +597,12 @@ def decide(
                         per_row = [query_joint[:, j] for j in range(len(classes))]
                     for diagnostic in diagnostics:
                         diagnostic["class_contrast_zero_sum_projection"] = 1.0
-                selected = outcomes.index(target_class) if classes else 0
+                selected = classes.index(target_class) if classes else 0
                 item = {
                     "variable": treatment,
                     "baseline": baseline,
                     "value": value,
-                    "method": method,
+                    "method": "dr" if v2 and kind != "continuous" else method,
                     "effect": effects[selected],
                     "standard_error": ses[selected],
                     "interval": [
@@ -410,7 +622,7 @@ def decide(
                             "variable": treatment,
                             "baseline": baseline,
                             "value": value,
-                            "method": method,
+                            "method": diagnostics[selected].get("ranking_method", method),
                             "effect": float(per_row[selected][index]),
                             "class_effects": [
                                 {"label": c, "effect": float(v[index])}
@@ -436,7 +648,7 @@ def decide(
         ]
 
     return {
-        "protocol": PROTOCOL,
+        "protocol": protocol,
         "target": target,
         "target_kind": target_kind,
         "target_class": _label(target_class),
@@ -457,8 +669,23 @@ def decide(
             "n_folds": n_folds,
             "seed": seed,
             "min_propensity": min_propensity,
+            **(
+                {
+                    "validation_design": validation_design,
+                    "validation_family_size": family_size,
+                    "unit_id": unit_id,
+                }
+                if v2
+                else {}
+            ),
             "interventions": {
-                k: asdict(v) if isinstance(v, Intervention) else dict(v)
+                k: {
+                    key: value
+                    for key, value in (
+                        asdict(v) if isinstance(v, Intervention) else dict(v)
+                    ).items()
+                    if v2 or key != "validation_probability"
+                }
                 for k, v in interventions.items()
             },
         },

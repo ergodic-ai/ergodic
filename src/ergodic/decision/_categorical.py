@@ -2,7 +2,9 @@
 """Cross-fitted multi-arm DR scores over the complete context population.
 
 For arm a: m_a(X) + I(A=a)/p_a(X) * (Y-m_a(X)). Contrasts difference
-paired scores before averaging. Query predictions regress the paired scores.
+paired scores before averaging. Query predictions regress the paired scores
+(``dr``), toggle the arm in one outcome model (``s``) or difference the
+fold-averaged cross-fit arm outcome models (``plugin``).
 See Linden et al. (2016), https://doi.org/10.1002/sim.6768.
 """
 
@@ -54,6 +56,9 @@ class ArmDR:
     Positivity failures raise instead of clipping weights. Population intervals
     are asymptotic and do not include graph selection or multiple-comparison error.
     Query predictions are conditional expectations with no individual intervals.
+    With ``keep_outcome_models`` (the default) every fold's arm outcome models are
+    kept after ``fit`` for ``method="plugin"`` (n_folds x arms models), so memory
+    grows with heavy learners; ``decide`` keeps them only when plugin ranking can be used.
     """
 
     def __init__(
@@ -65,6 +70,7 @@ class ArmDR:
         n_folds: int = 5,
         seed: int = 0,
         min_propensity: float = 0.01,
+        keep_outcome_models: bool = True,
     ) -> None:
         if isinstance(n_folds, bool) or not isinstance(n_folds, int) or n_folds < 2:
             raise ValueError("n_folds must be an integer >= 2")
@@ -76,15 +82,18 @@ class ArmDR:
         if hasattr(self.outcome, "predict_proba") or hasattr(self.final, "predict_proba"):
             raise ValueError("outcome and final slots require regression means, not classifiers")
         self.n_folds, self.seed, self.min_propensity = n_folds, seed, min_propensity
+        self.keep_outcome_models = keep_outcome_models
         self._scores: FloatArray | None = None
         self._finals: dict[tuple[int, int], Any] = {}
         self._propensities: list[Any] = []
+        self._outcomes: list[list[Any]] = []
 
     def fit(self, x: FloatArray, a: FloatArray, y: FloatArray) -> ArmDR:
         """Fit fresh fold-specific nuisances; retain scores over every context row."""
         self._scores = None
         self._finals = {}
         self._propensities = []
+        self._outcomes = []
         x, a, y = np.asarray(x, float), np.asarray(a, float), np.asarray(y, float)
         if (
             x.ndim != 2
@@ -99,6 +108,7 @@ class ArmDR:
         if np.min(counts) < self.n_folds or len(x) < 2 * self.n_folds:
             raise ValueError("each treatment arm needs at least n_folds rows")
         scores = np.empty((len(x), len(arms)))
+        outcome_means = np.empty_like(scores)
         minimum = 1.0
         for held in _folds(len(x), self.n_folds, np.random.default_rng(self.seed), stratify=a):
             train = _train_mask(len(x), held)
@@ -120,22 +130,44 @@ class ArmDR:
             minimum = min(minimum, float(p.min()))
             if minimum < self.min_propensity:
                 raise ValueError("insufficient treatment overlap: propensity below min_propensity")
+            fold_outcomes = []
             for j, arm in enumerate(arms):
                 selected = train & (a == arm)
                 outcome = _fresh(self.outcome).fit(x[selected], y[selected])
+                fold_outcomes.append(outcome)
                 m = _prediction(outcome, x[held])
+                outcome_means[held, j] = m
                 scores[held, j] = m + (a[held] == arm) / p[:, j] * (y[held] - m)
+            if self.keep_outcome_models:
+                self._outcomes.append(fold_outcomes)
         if not np.isfinite(scores).all():
             raise ValueError("nonfinite doubly robust scores")
         self._x = x.copy()
+        self._a, self._y = a.copy(), y.copy()
+        self._s_model = None
         self._scores = scores
         self.minimum_propensity_ = minimum
+        self.outcome_summary_ = [
+            {
+                "arm": int(j),
+                "mean": float(column.mean()),
+                "minimum": float(column.min()),
+                "maximum": float(column.max()),
+            }
+            for j, column in enumerate(outcome_means.T)
+        ]
         return self
 
     def contrast(
-        self, baseline: int, value: int, query: FloatArray | None = None
+        self, baseline: int, value: int, query: FloatArray | None = None, *, method: str = "dr"
     ) -> tuple[float, float, FloatArray | None]:
-        """Return population mean, paired-score standard error and optional query effects."""
+        """Return population mean, paired-score standard error and optional query effects.
+
+        The population mean and standard error always come from the paired DR scores;
+        ``method`` (``plugin``, ``s`` or ``dr``) only selects how query effects are predicted.
+        """
+        if method not in ("dr", "s", "plugin"):
+            raise ValueError("ranking method must be plugin, s or dr")
         if self._scores is None:
             raise RuntimeError("ArmDR is not fitted")
         k = self._scores.shape[1]
@@ -165,8 +197,33 @@ class ArmDR:
                     or not np.allclose(probabilities.sum(axis=1), 1, atol=1e-7)
                 ):
                     raise ValueError("insufficient treatment overlap on query rows")
-            key = baseline, value
-            if key not in self._finals:
-                self._finals[key] = _fresh(self.final).fit(self._x, score)
-            predicted = _prediction(self._finals[key], query)
+            if method == "s":
+
+                def design(x: FloatArray, a: FloatArray) -> FloatArray:
+                    return np.column_stack([x] + [(a == j).astype(float) for j in range(1, k)])
+
+                if self._s_model is None:
+                    self._s_model = _fresh(self.outcome).fit(design(self._x, self._a), self._y)
+                predicted = _prediction(
+                    self._s_model, design(query, np.full(len(query), value))
+                ) - _prediction(self._s_model, design(query, np.full(len(query), baseline)))
+            elif method == "plugin":
+                if not self._outcomes:
+                    raise ValueError("plugin ranking needs keep_outcome_models=True at fit")
+                # Arm j's model is fold_outcomes[j]; the same arm-specific nuisances
+                # that built the DR scores, averaged over folds.
+                predicted = np.asarray(
+                    np.mean(
+                        [
+                            _prediction(models[value], query) - _prediction(models[baseline], query)
+                            for models in self._outcomes
+                        ],
+                        axis=0,
+                    )
+                )
+            else:
+                key = baseline, value
+                if key not in self._finals:
+                    self._finals[key] = _fresh(self.final).fit(self._x, score)
+                predicted = _prediction(self._finals[key], query)
         return float(score.mean()), float(score.std(ddof=1) / np.sqrt(len(score))), predicted
