@@ -5,7 +5,7 @@ partially linear model for a constant effect per unit, or continuous DR for a
 nonlinear dose response. Both methods identify the adjustment set from your graph.
 
 !!! need "You'll need"
-    - A checkout containing this unreleased feature; it isn't in ergodic 0.3.2.
+    - ergodic 0.4.0 or later.
     - Independent rows with a numerical treatment, a numerical or binary outcome,
       and an adjustment-identifiable graph.
     - Enough observations near both treatment values, across the relevant covariates.
