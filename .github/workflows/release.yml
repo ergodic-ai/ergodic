@@ -1,4 +1,4 @@
-# Builds, verifies and publishes ergodic to PyPI with Trusted Publishing.
+# Builds, verifies and publishes ergodic to PyPI.
 #
 # - A pushed tag `vX.Y.Z` runs the full CI matrix, builds the sdist and wheel,
 #   checks that the tag equals `ergodic.__version__` and the built metadata,
@@ -8,8 +8,8 @@
 #   `testpypi` input is ticked, publishes to TestPyPI from the `testpypi`
 #   environment. A manual run never publishes to PyPI.
 #
-# No token secrets: both indexes trust this workflow file through OIDC
-# (`id-token: write`). See RELEASING.md for the one-time publisher setup.
+# PyPI uses the protected pypi environment's PYPI_TOKEN when configured, otherwise
+# Trusted Publishing. TestPyPI uses Trusted Publishing. See RELEASING.md.
 name: Release
 
 on:
@@ -116,6 +116,9 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+          attestations: ${{ secrets.PYPI_TOKEN == '' }}
 
   publish-testpypi:
     name: Publish to TestPyPI (dry run)

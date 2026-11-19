@@ -10,8 +10,15 @@ deployments.
 
 ## How publishing works
 
-`.github/workflows/release.yml` publishes with PyPI Trusted Publishing; there are no
-API tokens anywhere.
+`.github/workflows/release.yml` publishes to PyPI using `PYPI_TOKEN` from the
+protected `pypi` GitHub environment when that secret is configured. The token must
+include its `pypi-` prefix. Without the secret, the workflow uses Trusted
+Publishing. TestPyPI continues to use Trusted Publishing.
+
+Token uploads do not generate Trusted Publishing attestations. To return PyPI to
+Trusted Publishing, configure the publisher in step 3 and remove `PYPI_TOKEN`
+from the environment. The existing reviewer and tag restrictions apply to both
+authentication methods.
 
 - Pushing a tag `vX.Y.Z` runs the full CI matrix (`make check` on Python 3.11 to 3.14),
   builds the sdist and wheel with uv, runs `twine check --strict`, checks that the tag
